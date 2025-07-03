@@ -46,8 +46,8 @@ class Indexer(commands.Cog):
                     before = archived_threads[-1].archive_timestamp
                     page_count += 1
                     
-                    # 每处理5页更新一次进度
-                    if page_count % 5 == 0:
+                    # 每处理1页更新一次进度
+                    if page_count % 1 == 0:
                         await interaction.edit_original_response(content=f"正在索引归档线程...已处理 {page_count} 页，共索引 {count} 个帖子")
                 else:
                     break
