@@ -569,19 +569,26 @@ class TagSelectionView(discord.ui.View):
             button.row = i // 5  # 每行5个按钮，分配到第0-1行
             self.add_item(button)
         
-        # 添加标签翻页按钮 (第2行)
+        # 添加第2行按钮：上一页 + 控制按钮 + 下一页
         if len(self.all_tags) > self.tags_per_page:
             self.add_item(TagPageButton("◀️ 上一页", "prev"))
+        
+        # 控制按钮放在中间 (第2行)
+        mode_button = ModeToggleButton(self.exclude_mode)
+        mode_button.row = 2
+        self.add_item(mode_button)
+        
+        keyword_button = KeywordButton()
+        keyword_button.row = 2
+        self.add_item(keyword_button)
+        
+        if len(self.all_tags) > self.tags_per_page:
             self.add_item(TagPageButton("▶️ 下一页", "next"))
         
-        # 添加排序选择器 (第2行)
+        # 添加排序选择器 (第3行)
         sort_select = SortMethodSelect(self.sort_method)
-        sort_select.row = 2
+        sort_select.row = 3
         self.add_item(sort_select)
-        
-        # 添加控制按钮 (第3行)
-        self.add_item(ModeToggleButton(self.exclude_mode))
-        self.add_item(KeywordButton())
 
     async def update_search_results(self, interaction: discord.Interaction, *, edit_original: bool = True):
         """更新搜索结果"""
@@ -736,7 +743,7 @@ class ModeToggleButton(discord.ui.Button):
     def __init__(self, exclude_mode: bool):
         label = "🔄 切换到正选" if exclude_mode else "🔄 切换到反选"
         style = discord.ButtonStyle.danger if exclude_mode else discord.ButtonStyle.primary
-        super().__init__(label=label, style=style, row=3)
+        super().__init__(label=label, style=style)
 
     async def callback(self, interaction: discord.Interaction):
         # 检查当前view是CombinedSearchView还是TagSelectionView
@@ -812,7 +819,7 @@ class SortMethodSelect(discord.ui.Select):
 
 class KeywordButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="📝 关键词", style=discord.ButtonStyle.secondary, row=3)
+        super().__init__(label="📝 关键词", style=discord.ButtonStyle.secondary)
 
     async def callback(self, interaction: discord.Interaction):
         # 检查当前view是CombinedSearchView还是TagSelectionView
@@ -1015,23 +1022,17 @@ class CombinedSearchView(discord.ui.View):
             # 保持原有的row设置（在setup中已经设置为0-1行）
             self.add_item(button)
         
-        # 添加标签翻页按钮 (第2行)
-        tag_page_buttons = [item for item in tag_view.children if isinstance(item, TagPageButton)]
-        for button in tag_page_buttons:
+        # 添加第2行所有按钮：标签翻页 + 控制按钮 (按添加顺序：上一页 + 控制按钮 + 下一页)
+        second_row_buttons = [item for item in tag_view.children if isinstance(item, (TagPageButton, ModeToggleButton, KeywordButton))]
+        for button in second_row_buttons:
             self.add_item(button)
         
-        # 添加排序选择器 (第2行)
+        # 添加排序选择器 (第3行)
         sort_select = [item for item in tag_view.children if isinstance(item, SortMethodSelect)]
         for select in sort_select:
             self.add_item(select)
         
-        # 添加控制按钮 (第3行)
-        control_buttons = [item for item in tag_view.children if isinstance(item, (ModeToggleButton, KeywordButton))]
-        for button in control_buttons:
-            button.row = 3
-            self.add_item(button)
-        
-        # 添加分页按钮 (第4行，最多5个)
+        # 添加搜索结果分页按钮 (第4行，最多5个)
         page_buttons = [item for item in results_view.children if isinstance(item, (PageButton, CurrentPageButton))]
         for button in page_buttons[:5]:  # 最多5个按钮
             button.row = 4
