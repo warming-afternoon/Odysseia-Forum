@@ -143,7 +143,6 @@ class TagSystem(commands.Cog):
         # 获取首楼消息的最高反应数
         try:
             first_msg = await thread.fetch_message(thread.id)
-            print(first_msg.reactions)
             reaction_count = max([r.count for r in first_msg.reactions]) if first_msg.reactions else 0
         except Exception as e:
             print(f"获取首楼消息的最高反应数失败: {e}")
