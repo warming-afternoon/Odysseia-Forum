@@ -532,7 +532,7 @@ class TagSelectionView(discord.ui.View):
         self.user_id = None  # 将在setup中设置
         self.sort_method = "comprehensive"  # 默认使用综合排序
         self.tag_page = 0  # 当前标签页
-        self.tags_per_page = 15  # 每页显示的标签数
+        self.tags_per_page = 10  # 每页显示的标签数
         self.all_tags = []  # 所有标签列表
         
     async def setup(self, guild: discord.Guild, user_id: int = None):
@@ -542,6 +542,7 @@ class TagSelectionView(discord.ui.View):
         # 直接从Discord频道获取标签
         channel = guild.get_channel(self.channel_id)
         if isinstance(channel, discord.ForumChannel):
+            # 获取频道的所有可用标签
             self.all_tags = [(tag.id, tag.name) for tag in channel.available_tags]
         else:
             self.all_tags = []
@@ -554,7 +555,7 @@ class TagSelectionView(discord.ui.View):
         end_idx = start_idx + self.tags_per_page
         current_page_tags = self.all_tags[start_idx:end_idx]
         
-        # 添加标签按钮
+        # 添加标签按钮 (第0-1行，每行5个)
         for i, (tag_id, tag_name) in enumerate(current_page_tags):
             style = discord.ButtonStyle.secondary
             
@@ -565,31 +566,22 @@ class TagSelectionView(discord.ui.View):
                 style = discord.ButtonStyle.red    # 反选标签始终显示红色
                 
             button = TagButton(tag_name, style)
-            button.row = i // 5  # 每行5个按钮
+            button.row = i // 5  # 每行5个按钮，分配到第0-1行
             self.add_item(button)
         
-        # 添加标签翻页按钮（如果需要）
-        max_tag_page = (len(self.all_tags) - 1) // self.tags_per_page
-        if max_tag_page > 0:
-            prev_button = TagPageButton("◀️ 标签上一页", "prev", enabled=(self.tag_page > 0))
-            next_button = TagPageButton("标签下一页 ▶️", "next", enabled=(self.tag_page < max_tag_page))
-            prev_button.row = 3
-            next_button.row = 3
-            self.add_item(prev_button)
-            self.add_item(next_button)
+        # 添加标签翻页按钮 (第2行)
+        if len(self.all_tags) > self.tags_per_page:
+            self.add_item(TagPageButton("◀️ 上一页", "prev"))
+            self.add_item(TagPageButton("▶️ 下一页", "next"))
         
-        # 添加排序选择器
+        # 添加排序选择器 (第2行)
         sort_select = SortMethodSelect(self.sort_method)
-        sort_select.row = 4
+        sort_select.row = 2
         self.add_item(sort_select)
         
-        # 添加控制按钮
-        mode_button = ModeToggleButton(self.exclude_mode)
-        keyword_button = KeywordButton()
-        mode_button.row = 5
-        keyword_button.row = 5
-        self.add_item(mode_button)
-        self.add_item(keyword_button)
+        # 添加控制按钮 (第3行)
+        self.add_item(ModeToggleButton(self.exclude_mode))
+        self.add_item(KeywordButton())
 
     async def update_search_results(self, interaction: discord.Interaction, *, edit_original: bool = True):
         """更新搜索结果"""
@@ -667,6 +659,37 @@ class TagSelectionView(discord.ui.View):
             else:
                 await interaction.followup.send(f"搜索出错: {e}", ephemeral=True)
 
+class TagPageButton(discord.ui.Button):
+    def __init__(self, label: str, action: str):
+        super().__init__(label=label, style=discord.ButtonStyle.secondary, row=2)
+        self.action = action
+
+    async def callback(self, interaction: discord.Interaction):
+        # 检查当前view是CombinedSearchView还是TagSelectionView
+        if hasattr(self.view, 'tag_view'):
+            # 在CombinedSearchView中
+            tag_view = self.view.tag_view  # type: ignore
+        else:
+            # 在TagSelectionView中
+            tag_view = self.view  # type: ignore
+        
+        max_page = (len(tag_view.all_tags) - 1) // tag_view.tags_per_page
+        
+        if self.action == "prev":
+            tag_view.tag_page = max(0, tag_view.tag_page - 1)
+        elif self.action == "next":
+            tag_view.tag_page = min(max_page, tag_view.tag_page + 1)
+        
+        # 重新设置UI，保持当前状态
+        await tag_view.setup(interaction.guild, tag_view.user_id)
+        
+        # 如果在CombinedSearchView中，需要重新执行搜索以保持搜索结果
+        if hasattr(self.view, 'tag_view'):
+            await tag_view.update_search_results(interaction, edit_original=True)
+        else:
+            mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
+            await interaction.response.edit_message(content=f"选择要搜索的标签 - {mode_text}：", view=tag_view)
+
 class TagButton(discord.ui.Button):
     def __init__(self, tag_name: str, style: discord.ButtonStyle):
         super().__init__(label=tag_name, style=style)
@@ -709,62 +732,11 @@ class TagButton(discord.ui.Button):
         # 立即更新搜索结果
         await tag_view.update_search_results(interaction, edit_original=True)
 
-class TagPageButton(discord.ui.Button):
-    def __init__(self, label: str, action: str, enabled: bool = True):
-        style = discord.ButtonStyle.secondary if enabled else discord.ButtonStyle.gray
-        super().__init__(label=label, style=style, disabled=not enabled)
-        self.action = action
-
-    async def callback(self, interaction: discord.Interaction):
-        # 检查当前view是CombinedSearchView还是TagSelectionView
-        if hasattr(self.view, 'tag_view'):
-            # 在CombinedSearchView中
-            tag_view = self.view.tag_view  # type: ignore
-        else:
-            # 在TagSelectionView中
-            tag_view = self.view  # type: ignore
-        
-        max_tag_page = (len(tag_view.all_tags) - 1) // tag_view.tags_per_page
-        
-        if self.action == "prev" and tag_view.tag_page > 0:
-            tag_view.tag_page -= 1
-        elif self.action == "next" and tag_view.tag_page < max_tag_page:
-            tag_view.tag_page += 1
-        else:
-            await interaction.response.send_message("无法翻页", ephemeral=True)
-            return
-        
-        # 重新设置UI
-        await tag_view.setup(interaction.guild, tag_view.user_id)
-        
-        # 如果在CombinedSearchView中，需要重新组合视图
-        if hasattr(self.view, 'tag_view'):
-            # 重新创建CombinedSearchView
-            combined_view = CombinedSearchView(tag_view, self.view.results_view)  # type: ignore
-            mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
-            content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {self.view.results_view.total} 个帖子 (第{self.view.results_view.current_page}/{self.view.results_view.max_page}页)"  # type: ignore
-            
-            # 重新执行搜索以获取embeds
-            await interaction.response.defer()
-            offset = (self.view.results_view.current_page - 1) * self.view.results_view.per_page  # type: ignore
-            threads = await database.search_threads(
-                list(tag_view.include_tags), list(tag_view.exclude_tags), " ".join(tag_view.include_keywords),
-                [tag_view.channel_id], self.view.results_view.include_authors, self.view.results_view.exclude_authors,  # type: ignore
-                self.view.results_view.after_ts, self.view.results_view.before_ts,  # type: ignore
-                offset, self.view.results_view.per_page, tag_view.sort_method  # type: ignore
-            )
-            embeds = [self.view.results_view.cog._build_thread_embed(t, interaction.guild) for t in threads]  # type: ignore
-            await interaction.edit_original_response(content=content, view=combined_view, embeds=embeds)
-        else:
-            # 在独立的TagSelectionView中
-            mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
-            await interaction.response.edit_message(content=f"选择要搜索的标签 - {mode_text}：", view=tag_view)
-
 class ModeToggleButton(discord.ui.Button):
     def __init__(self, exclude_mode: bool):
         label = "🔄 切换到正选" if exclude_mode else "🔄 切换到反选"
         style = discord.ButtonStyle.danger if exclude_mode else discord.ButtonStyle.primary
-        super().__init__(label=label, style=style)
+        super().__init__(label=label, style=style, row=3)
 
     async def callback(self, interaction: discord.Interaction):
         # 检查当前view是CombinedSearchView还是TagSelectionView
@@ -818,7 +790,7 @@ class SortMethodSelect(discord.ui.Select):
                 default=(current_sort == "reaction_count")
             )
         ]
-        super().__init__(placeholder="选择排序方式...", options=options)
+        super().__init__(placeholder="选择排序方式...", options=options, row=2)
 
     async def callback(self, interaction: discord.Interaction):
         # 检查当前view是CombinedSearchView还是TagSelectionView
@@ -840,7 +812,7 @@ class SortMethodSelect(discord.ui.Select):
 
 class KeywordButton(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="📝 关键词", style=discord.ButtonStyle.secondary)
+        super().__init__(label="📝 关键词", style=discord.ButtonStyle.secondary, row=3)
 
     async def callback(self, interaction: discord.Interaction):
         # 检查当前view是CombinedSearchView还是TagSelectionView
@@ -1037,22 +1009,30 @@ class CombinedSearchView(discord.ui.View):
         self.tag_view = tag_view
         self.results_view = results_view
         
-        # 添加标签按钮 (第0-2行)
+        # 添加标签按钮 (第0-1行，每页最多10个)
         tag_buttons = [item for item in tag_view.children if isinstance(item, TagButton)]
         for button in tag_buttons:
+            # 保持原有的row设置（在setup中已经设置为0-1行）
             self.add_item(button)
         
-        # 添加标签翻页按钮 (第3行)
+        # 添加标签翻页按钮 (第2行)
         tag_page_buttons = [item for item in tag_view.children if isinstance(item, TagPageButton)]
         for button in tag_page_buttons:
             self.add_item(button)
         
-        # 添加排序选择器和控制按钮 (第4行)
-        control_items = [item for item in tag_view.children if isinstance(item, (SortMethodSelect, ModeToggleButton, KeywordButton))]
-        for item in control_items:
-            self.add_item(item)
+        # 添加排序选择器 (第2行)
+        sort_select = [item for item in tag_view.children if isinstance(item, SortMethodSelect)]
+        for select in sort_select:
+            self.add_item(select)
         
-        # 添加搜索结果分页按钮 (第5行)
+        # 添加控制按钮 (第3行)
+        control_buttons = [item for item in tag_view.children if isinstance(item, (ModeToggleButton, KeywordButton))]
+        for button in control_buttons:
+            button.row = 3
+            self.add_item(button)
+        
+        # 添加分页按钮 (第4行，最多5个)
         page_buttons = [item for item in results_view.children if isinstance(item, (PageButton, CurrentPageButton))]
-        for button in page_buttons:
+        for button in page_buttons[:5]:  # 最多5个按钮
+            button.row = 4
             self.add_item(button) 
