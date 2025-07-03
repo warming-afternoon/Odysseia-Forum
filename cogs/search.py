@@ -250,7 +250,6 @@ class Search(commands.Cog):
             value="点击下方按钮开始搜索，可以按标签、关键词等条件筛选帖子",
             inline=False
         )
-        embed.set_footer(text="此搜索按钮是永久的，bot重启后仍可使用")
         
         await interaction.channel.send(embed=embed, view=view)
         await interaction.response.send_message("✅ 已创建频道搜索按钮。", ephemeral=True)
@@ -270,12 +269,6 @@ class Search(commands.Cog):
             value="1. 点击下方按钮选择要搜索的论坛频道\n2. 设置搜索条件（标签、关键词等）\n3. 查看搜索结果",
             inline=False
         )
-        embed.add_field(
-            name="搜索功能",
-            value="• 按标签筛选帖子\n• 关键词搜索\n• 作者过滤\n• 时间范围限制\n• 智能排序算法",
-            inline=False
-        )
-        embed.set_footer(text="此搜索按钮是永久的，bot重启后仍可使用")
         
         await interaction.channel.send(embed=embed, view=view)
         await interaction.response.send_message("✅ 已创建全局搜索按钮。", ephemeral=True)
