@@ -174,36 +174,14 @@ async def search_threads(
         conditions.append("(title LIKE ? OR first_message_excerpt LIKE ?)")
         params.extend([kw_like, kw_like])
 
-    join_clause = " LEFT JOIN thread_tags tt ON tt.thread_id = threads.thread_id "\
-                  "LEFT JOIN tags tg ON tg.tag_id = tt.tag_id "\
-                  "LEFT JOIN tag_votes tv ON tv.tag_id = tg.tag_id "
-
-    # 处理包含标签 (AND逻辑 - 必须同时拥有所有选中的标签)
-    if include_tags:
-        placeholders = ",".join(["?"] * len(include_tags))
-        conditions.append(
-            f"""threads.thread_id IN (
-                SELECT thread_id FROM thread_tags it
-                JOIN tags t2 ON t2.tag_id = it.tag_id
-                WHERE t2.name IN ({placeholders})
-                GROUP BY thread_id
-                HAVING COUNT(DISTINCT t2.name) = ?
-            )"""
-        )
-        params.extend(include_tags)
-        params.append(len(include_tags))
-    
-    # 处理排除标签 (OR逻辑 - 包含任何一个排除标签就不显示)
-    if exclude_tags:
-        placeholders = ",".join(["?"] * len(exclude_tags))
-        conditions.append(
-            f"""threads.thread_id NOT IN (
-                SELECT thread_id FROM thread_tags et
-                JOIN tags t3 ON t3.tag_id = et.tag_id
-                WHERE t3.name IN ({placeholders})
-            )"""
-        )
-        params.extend(exclude_tags)
+    # 标签过滤将在Python中处理，所以这里不需要复杂的JOIN
+    # 但综合排序仍需要标签评分，所以保留JOIN（仅当需要时）
+    if sort_method == "comprehensive" and include_tags:
+        join_clause = " LEFT JOIN thread_tags tt ON tt.thread_id = threads.thread_id "\
+                      "LEFT JOIN tags tg ON tg.tag_id = tt.tag_id "\
+                      "LEFT JOIN tag_votes tv ON tv.tag_id = tg.tag_id "
+    else:
+        join_clause = ""
 
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
@@ -310,15 +288,18 @@ async def search_threads(
                 # 按最终评分降序排序
                 scored_rows.sort(key=lambda x: x['final_score'], reverse=True)
                 
+                # 在Python中应用标签过滤
+                filtered_rows = _filter_threads_by_tags(scored_rows, include_tags, exclude_tags)
+                
                 # 应用分页
                 start_idx = offset
                 end_idx = offset + limit
                 
-                return scored_rows[start_idx:end_idx]
+                return filtered_rows[start_idx:end_idx]
     
     else:
-        # 简单排序方式 - 直接在SQL中排序
-        select_clause = f"SELECT threads.* FROM threads{join_clause}{where_clause} GROUP BY threads.thread_id"
+        # 简单排序方式 - 直接在SQL中排序，不需要JOIN
+        select_clause = f"SELECT threads.* FROM threads{where_clause}"
         
         # 根据排序方式添加ORDER BY子句
         if sort_method == "created_time":
@@ -331,17 +312,23 @@ async def search_threads(
             # 默认按活跃时间排序
             order_clause = " ORDER BY datetime(last_active_at) DESC"
         
-        # 添加分页
-        order_clause += " LIMIT ? OFFSET ?"
-        
+        # 先获取所有符合条件的数据，然后在Python中过滤标签和分页
         final_query = select_clause + order_clause
-        all_params = params + [limit, offset]
-
+        
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
-            async with db.execute(final_query, all_params) as cursor:
+            async with db.execute(final_query, params) as cursor:
                 rows = await cursor.fetchall()
-                return [dict(row) for row in rows]
+                dict_rows = [dict(row) for row in rows]
+                
+                # 在Python中应用标签过滤
+                filtered_rows = _filter_threads_by_tags(dict_rows, include_tags, exclude_tags)
+                
+                # 应用分页
+                start_idx = offset
+                end_idx = offset + limit
+                
+                return filtered_rows[start_idx:end_idx]
 
 async def count_threads_for_search(
     include_tags: list[str],
@@ -383,41 +370,29 @@ async def count_threads_for_search(
         conditions.append("(title LIKE ? OR first_message_excerpt LIKE ?)")
         params.extend([kw_like, kw_like])
 
-    # 处理包含标签 (AND逻辑 - 必须同时拥有所有选中的标签)
-    if include_tags:
-        placeholders = ",".join(["?"] * len(include_tags))
-        conditions.append(
-            f"""threads.thread_id IN (
-                SELECT thread_id FROM thread_tags it
-                JOIN tags t2 ON t2.tag_id = it.tag_id
-                WHERE t2.name IN ({placeholders})
-                GROUP BY thread_id
-                HAVING COUNT(DISTINCT t2.name) = ?
-            )"""
-        )
-        params.extend(include_tags)
-        params.append(len(include_tags))
-    
-    # 处理排除标签 (OR逻辑 - 包含任何一个排除标签就不显示)
-    if exclude_tags:
-        placeholders = ",".join(["?"] * len(exclude_tags))
-        conditions.append(
-            f"""threads.thread_id NOT IN (
-                SELECT thread_id FROM thread_tags et
-                JOIN tags t3 ON t3.tag_id = et.tag_id
-                WHERE t3.name IN ({placeholders})
-            )"""
-        )
-        params.extend(exclude_tags)
-
+    # 标签过滤将在Python中处理，不在SQL中处理
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    query = f"SELECT COUNT(*) FROM threads{where_clause}"
-
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(query, params) as cursor:
-            (cnt,) = await cursor.fetchone()
-            return cnt
+    # 如果有标签过滤条件，需要获取所有符合其他条件的帖子，然后在Python中过滤
+    if include_tags or exclude_tags:
+        query = f"SELECT thread_id, tags FROM threads{where_clause}"
+        async with aiosqlite.connect(DB_PATH) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute(query, params) as cursor:
+                rows = await cursor.fetchall()
+                dict_rows = [dict(row) for row in rows]
+                
+                # 在Python中应用标签过滤
+                filtered_rows = _filter_threads_by_tags(dict_rows, include_tags, exclude_tags)
+                
+                return len(filtered_rows)
+    else:
+        # 没有标签过滤条件，直接统计
+        query = f"SELECT COUNT(*) FROM threads{where_clause}"
+        async with aiosqlite.connect(DB_PATH) as db:
+            async with db.execute(query, params) as cursor:
+                (cnt,) = await cursor.fetchone()
+                return cnt
 
 async def get_tag_vote_stats(thread_id: int):
     """返回该线程各标签的投票统计 (tag_name, up, down, total)"""
@@ -503,3 +478,42 @@ async def get_indexed_channel_ids():
         async with db.execute("SELECT DISTINCT channel_id FROM threads") as cursor:
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
+
+def _filter_threads_by_tags(threads: list[dict], include_tags: list[str], exclude_tags: list[str]) -> list[dict]:
+    """在Python中过滤帖子的标签
+    
+    Args:
+        threads: 帖子列表，每个帖子必须包含tags字段
+        include_tags: 必须包含的标签列表（AND逻辑）
+        exclude_tags: 必须排除的标签列表（OR逻辑）
+    
+    Returns:
+        过滤后的帖子列表
+    """
+    if not include_tags and not exclude_tags:
+        return threads
+    
+    filtered_threads = []
+    
+    for thread in threads:
+        tags_str = thread.get('tags', '') or ''
+        # 将标签字符串分割为标签列表，并去除空白
+        thread_tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
+        thread_tag_set = set(thread_tags)
+        
+        # 检查包含标签（AND逻辑：必须包含所有指定标签）
+        if include_tags:
+            include_tag_set = set(include_tags)
+            if not include_tag_set.issubset(thread_tag_set):
+                continue  # 不包含所有必需标签，跳过
+        
+        # 检查排除标签（OR逻辑：不能包含任何排除标签）
+        if exclude_tags:
+            exclude_tag_set = set(exclude_tags)
+            if exclude_tag_set.intersection(thread_tag_set):
+                continue  # 包含排除标签，跳过
+        
+        # 通过所有过滤条件
+        filtered_threads.append(thread)
+    
+    return filtered_threads
