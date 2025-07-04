@@ -169,10 +169,7 @@ async def search_threads(
         conditions.append("last_active_at <= ?")
         params.append(before_ts)
 
-    if keywords:
-        kw_like = f"%{keywords}%"
-        conditions.append("(title LIKE ? OR first_message_excerpt LIKE ?)")
-        params.extend([kw_like, kw_like])
+    # 关键词过滤将在Python中处理，不在SQL中处理
 
     # 标签过滤将在Python中处理，所以这里不需要复杂的JOIN
     # 但综合排序仍需要标签评分，所以保留JOIN（仅当需要时）
@@ -288,8 +285,8 @@ async def search_threads(
                 # 按最终评分降序排序
                 scored_rows.sort(key=lambda x: x['final_score'], reverse=True)
                 
-                # 在Python中应用标签过滤
-                filtered_rows = _filter_threads_by_tags(scored_rows, include_tags, exclude_tags)
+                # 在Python中应用标签和关键词过滤
+                filtered_rows = _filter_threads(scored_rows, include_tags, exclude_tags, keywords)
                 
                 # 应用分页
                 start_idx = offset
@@ -321,8 +318,8 @@ async def search_threads(
                 rows = await cursor.fetchall()
                 dict_rows = [dict(row) for row in rows]
                 
-                # 在Python中应用标签过滤
-                filtered_rows = _filter_threads_by_tags(dict_rows, include_tags, exclude_tags)
+                # 在Python中应用标签和关键词过滤
+                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords)
                 
                 # 应用分页
                 start_idx = offset
@@ -365,29 +362,26 @@ async def count_threads_for_search(
         conditions.append("last_active_at <= ?")
         params.append(before_ts)
 
-    if keywords:
-        kw_like = f"%{keywords}%"
-        conditions.append("(title LIKE ? OR first_message_excerpt LIKE ?)")
-        params.extend([kw_like, kw_like])
+    # 关键词过滤将在Python中处理，不在SQL中处理
 
-    # 标签过滤将在Python中处理，不在SQL中处理
+    # 标签和关键词过滤将在Python中处理，不在SQL中处理
     where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
 
-    # 如果有标签过滤条件，需要获取所有符合其他条件的帖子，然后在Python中过滤
-    if include_tags or exclude_tags:
-        query = f"SELECT thread_id, tags FROM threads{where_clause}"
+    # 如果有标签或关键词过滤条件，需要获取所有符合其他条件的帖子，然后在Python中过滤
+    if include_tags or exclude_tags or keywords:
+        query = f"SELECT thread_id, tags, title, first_message_excerpt FROM threads{where_clause}"
         async with aiosqlite.connect(DB_PATH) as db:
             db.row_factory = aiosqlite.Row
             async with db.execute(query, params) as cursor:
                 rows = await cursor.fetchall()
                 dict_rows = [dict(row) for row in rows]
                 
-                # 在Python中应用标签过滤
-                filtered_rows = _filter_threads_by_tags(dict_rows, include_tags, exclude_tags)
+                # 在Python中应用标签和关键词过滤
+                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords)
                 
                 return len(filtered_rows)
     else:
-        # 没有标签过滤条件，直接统计
+        # 没有标签或关键词过滤条件，直接统计
         query = f"SELECT COUNT(*) FROM threads{where_clause}"
         async with aiosqlite.connect(DB_PATH) as db:
             async with db.execute(query, params) as cursor:
@@ -479,23 +473,25 @@ async def get_indexed_channel_ids():
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
-def _filter_threads_by_tags(threads: list[dict], include_tags: list[str], exclude_tags: list[str]) -> list[dict]:
-    """在Python中过滤帖子的标签
+def _filter_threads(threads: list[dict], include_tags: list[str], exclude_tags: list[str], keywords: str) -> list[dict]:
+    """在Python中过滤帖子的标签和关键词
     
     Args:
-        threads: 帖子列表，每个帖子必须包含tags字段
+        threads: 帖子列表，每个帖子必须包含tags字段，并可能包含title和first_message_excerpt字段
         include_tags: 必须包含的标签列表（AND逻辑）
         exclude_tags: 必须排除的标签列表（OR逻辑）
+        keywords: 关键词字符串，在标题或首楼摘要中搜索
     
     Returns:
         过滤后的帖子列表
     """
-    if not include_tags and not exclude_tags:
+    if not include_tags and not exclude_tags and not keywords:
         return threads
     
     filtered_threads = []
     
     for thread in threads:
+        # 检查标签过滤
         tags_str = thread.get('tags', '') or ''
         # 将标签字符串分割为标签列表，并去除空白
         thread_tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
@@ -512,6 +508,16 @@ def _filter_threads_by_tags(threads: list[dict], include_tags: list[str], exclud
             exclude_tag_set = set(exclude_tags)
             if exclude_tag_set.intersection(thread_tag_set):
                 continue  # 包含排除标签，跳过
+        
+        # 检查关键词过滤
+        if keywords:
+            keywords_lower = keywords.lower()
+            title = (thread.get('title', '') or '').lower()
+            excerpt = (thread.get('first_message_excerpt', '') or '').lower()
+            
+            # 关键词必须在标题或首楼摘要中出现
+            if keywords_lower not in title and keywords_lower not in excerpt:
+                continue  # 不包含关键词，跳过
         
         # 通过所有过滤条件
         filtered_threads.append(thread)

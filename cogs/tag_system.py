@@ -179,9 +179,7 @@ class TagSystem(commands.Cog):
         try:
             first_msg = await thread.fetch_message(thread.id)
             if first_msg:
-                excerpt = first_msg.content[:200]
-                if len(first_msg.content) > 200:
-                    excerpt += "..."
+                excerpt = first_msg.content  # 存储完整内容，不截取
                 if first_msg.attachments:
                     attach_url = first_msg.attachments[0].url
                 # 统计首楼消息的最高反应数
