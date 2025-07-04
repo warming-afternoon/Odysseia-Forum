@@ -172,19 +172,20 @@ class Search(commands.Cog):
                     parsed_after, parsed_before
                 )
                 
-                time_info = []
-                if parsed_after:
-                    time_info.append(f"开始时间：{after_date}")
-                if parsed_before:
-                    time_info.append(f"结束时间：{before_date}")
-                
-                if time_info:
+                # 根据参数情况给出不同的反馈
+                if not after_date and not before_date:
+                    # 没有填任何参数，清空时间范围设置
+                    await interaction.response.send_message("✅ 已清空时间范围设置。", ephemeral=True)
+                else:
+                    # 设置了时间参数
+                    time_info = []
+                    if parsed_after:
+                        time_info.append(f"开始时间：{after_date}")
+                    if parsed_before:
+                        time_info.append(f"结束时间：{before_date}")
+                    
                     await interaction.response.send_message(
                         f"✅ 已设置时间范围：\n" + "\n".join(time_info), ephemeral=True
-                    )
-                else:
-                    await interaction.response.send_message(
-                        "ℹ️ 请至少指定一个时间参数（after_date 或 before_date）。", ephemeral=True
                     )
             
             elif action.value == "view_settings":
