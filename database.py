@@ -135,15 +135,20 @@ async def search_threads(
     before_ts: str | None,
     offset: int,
     limit: int,
-    sort_method: str = "comprehensive"  # 新增参数：comprehensive, created_time, active_time, reaction_count
+    sort_method: str = "comprehensive",  # 新增参数：comprehensive, created_time, active_time, reaction_count
+    sort_order: str = "desc"  # 新增参数：desc, asc
 ):
     """搜索帖子并按指定方式排序。
 
     排序方式：
     • comprehensive: 智能混合权重排序（时间+标签+反应）
-    • created_time: 按发帖时间倒序
-    • active_time: 按最近活跃时间倒序  
-    • reaction_count: 按反应数倒序
+    • created_time: 按发帖时间排序
+    • active_time: 按最近活跃时间排序  
+    • reaction_count: 按反应数排序
+    
+    排序方向：
+    • desc: 降序（默认）
+    • asc: 升序
     """
     conditions: list[str] = []
     params: list = []
@@ -283,7 +288,7 @@ async def search_threads(
                     scored_rows.append(row_dict)
                 
                 # 按最终评分降序排序
-                scored_rows.sort(key=lambda x: x['final_score'], reverse=True)
+                scored_rows.sort(key=lambda x: x['final_score'], reverse=(sort_order == "desc"))
                 
                 # 在Python中应用标签和关键词过滤
                 filtered_rows = _filter_threads(scored_rows, include_tags, exclude_tags, keywords)
@@ -299,15 +304,16 @@ async def search_threads(
         select_clause = f"SELECT threads.* FROM threads{where_clause}"
         
         # 根据排序方式添加ORDER BY子句
+        sort_direction = "DESC" if sort_order == "desc" else "ASC"
         if sort_method == "created_time":
-            order_clause = " ORDER BY datetime(created_at) DESC"
+            order_clause = f" ORDER BY datetime(created_at) {sort_direction}"
         elif sort_method == "active_time":
-            order_clause = " ORDER BY datetime(last_active_at) DESC"
+            order_clause = f" ORDER BY datetime(last_active_at) {sort_direction}"
         elif sort_method == "reaction_count":
-            order_clause = " ORDER BY reaction_count DESC, datetime(last_active_at) DESC"
+            order_clause = f" ORDER BY reaction_count {sort_direction}, datetime(last_active_at) DESC"
         else:
             # 默认按活跃时间排序
-            order_clause = " ORDER BY datetime(last_active_at) DESC"
+            order_clause = f" ORDER BY datetime(last_active_at) {sort_direction}"
         
         # 先获取所有符合条件的数据，然后在Python中过滤标签和分页
         final_query = select_clause + order_clause

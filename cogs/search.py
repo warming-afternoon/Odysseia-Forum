@@ -531,6 +531,7 @@ class TagSelectionView(discord.ui.View):
         self.search_cog = None  # 将在setup中设置
         self.user_id = None  # 将在setup中设置
         self.sort_method = "comprehensive"  # 默认使用综合排序
+        self.sort_order = "desc"  # 默认降序排序
         self.tag_page = 0  # 当前标签页
         self.tags_per_page = 10  # 每页显示的标签数
         self.all_tags = []  # 所有标签列表
@@ -581,6 +582,11 @@ class TagSelectionView(discord.ui.View):
         keyword_button = KeywordButton()
         keyword_button.row = 2
         self.add_item(keyword_button)
+        
+        # 添加升序/降序按钮
+        sort_order_button = SortOrderButton(self.sort_order)
+        sort_order_button.row = 2
+        self.add_item(sort_order_button)
         
         if len(self.all_tags) > self.tags_per_page:
             self.add_item(TagPageButton("▶️ 下一页", "next"))
@@ -633,7 +639,7 @@ class TagSelectionView(discord.ui.View):
             threads = await database.search_threads(
                 include_tags, exclude_tags, include_keywords,
                 [self.channel_id], include_authors, exclude_authors, after_ts, before_ts,
-                0, per_page, self.sort_method
+                0, per_page, self.sort_method, self.sort_order
             )
             
             # 获取搜索cog来构建embed
@@ -647,7 +653,7 @@ class TagSelectionView(discord.ui.View):
                 self.search_cog, self.user_id,
                 include_tags, exclude_tags, include_keywords,
                 [self.channel_id], include_authors, exclude_authors, after_ts, before_ts,
-                1, per_page, total, self.sort_method
+                1, per_page, total, self.sort_method, self.sort_order
             )
             
             # 合并两个view的按钮
@@ -797,7 +803,7 @@ class SortMethodSelect(discord.ui.Select):
                 default=(current_sort == "reaction_count")
             )
         ]
-        super().__init__(placeholder="选择排序方式...", options=options, row=2)
+        super().__init__(placeholder="选择排序方式...", options=options, row=3)
 
     async def callback(self, interaction: discord.Interaction):
         # 检查当前view是CombinedSearchView还是TagSelectionView
@@ -813,6 +819,29 @@ class SortMethodSelect(discord.ui.Select):
         # 更新选择器的选中状态
         for option in self.options:
             option.default = (option.value == self.values[0])
+        
+        # 立即更新搜索结果
+        await tag_view.update_search_results(interaction, edit_original=True)
+
+class SortOrderButton(discord.ui.Button):
+    def __init__(self, sort_order: str):
+        label = "📉 降序" if sort_order == "desc" else "📈 升序"
+        super().__init__(label=label, style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        # 检查当前view是CombinedSearchView还是TagSelectionView
+        if hasattr(self.view, 'tag_view'):
+            # 在CombinedSearchView中
+            tag_view = self.view.tag_view  # type: ignore
+        else:
+            # 在TagSelectionView中
+            tag_view = self.view  # type: ignore
+        
+        # 切换排序方向
+        tag_view.sort_order = "asc" if tag_view.sort_order == "desc" else "desc"
+        
+        # 更新按钮标签
+        self.label = "📉 降序" if tag_view.sort_order == "desc" else "📈 升序"
         
         # 立即更新搜索结果
         await tag_view.update_search_results(interaction, edit_original=True)
@@ -861,7 +890,7 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
 
 # ----- 搜索结果分页 -----
 class SearchResultsView(discord.ui.View):
-    def __init__(self, cog: Search, user_id: int, include_tags, exclude_tags, keywords, channel_ids, include_authors, exclude_authors, after_ts, before_ts, current_page, per_page, total, sort_method: str = "comprehensive"):
+    def __init__(self, cog: Search, user_id: int, include_tags, exclude_tags, keywords, channel_ids, include_authors, exclude_authors, after_ts, before_ts, current_page, per_page, total, sort_method: str = "comprehensive", sort_order: str = "desc"):
         super().__init__(timeout=600)
         self.cog = cog
         self.user_id = user_id
@@ -878,6 +907,7 @@ class SearchResultsView(discord.ui.View):
         self.max_page = max(1, math.ceil(total / per_page))
         self.current_page = current_page
         self.sort_method = sort_method
+        self.sort_order = sort_order
         
         # 添加分页按钮
         self.add_item(PageButton("⏮️", "first"))
@@ -897,7 +927,7 @@ class SearchResultsView(discord.ui.View):
         threads = await database.search_threads(
             self.include_tags, self.exclude_tags, self.keywords,
             self.channel_ids, self.include_authors, self.exclude_authors, self.after_ts, self.before_ts,
-            offset, self.per_page, self.sort_method
+            offset, self.per_page, self.sort_method, self.sort_order
         )
         
         embeds = [self.cog._build_thread_embed(t, interaction.guild) for t in threads]
@@ -949,7 +979,7 @@ class PageButton(discord.ui.Button):
             results_view.include_tags, results_view.exclude_tags, results_view.keywords,
             results_view.channel_ids, results_view.include_authors, results_view.exclude_authors, 
             results_view.after_ts, results_view.before_ts,
-            offset, results_view.per_page, results_view.sort_method
+            offset, results_view.per_page, results_view.sort_method, results_view.sort_order
         )
         
         embeds = [results_view.cog._build_thread_embed(t, interaction.guild) for t in threads]
@@ -1023,7 +1053,7 @@ class CombinedSearchView(discord.ui.View):
             self.add_item(button)
         
         # 添加第2行所有按钮：标签翻页 + 控制按钮 (按添加顺序：上一页 + 控制按钮 + 下一页)
-        second_row_buttons = [item for item in tag_view.children if isinstance(item, (TagPageButton, ModeToggleButton, KeywordButton))]
+        second_row_buttons = [item for item in tag_view.children if isinstance(item, (TagPageButton, ModeToggleButton, KeywordButton, SortOrderButton))]
         for button in second_row_buttons:
             self.add_item(button)
         
