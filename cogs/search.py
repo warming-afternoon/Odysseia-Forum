@@ -514,7 +514,7 @@ class Search(commands.Cog):
         if attachment_url:
             embed.set_thumbnail(url=attachment_url)
         
-        embed.url = f"https://discord.com/channels/{guild.id}/{thread_row['channel_id']}/threads/{thread_id}"
+        embed.url = f"https://discord.com/channels/{guild.id}/{thread_id}"
         return embed
 
 # ----- 持久化搜索按钮 -----
