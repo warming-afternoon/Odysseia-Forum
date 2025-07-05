@@ -1406,12 +1406,46 @@ class GotoPageModal(discord.ui.Modal, title="跳转页码"):
             self.search_view._last_interaction = interaction
             
             if self.combined_view:
-                # 在CombinedSearchView中，使用go_to_page_combined
+                # 在CombinedSearchView中，直接执行分页逻辑
                 if hasattr(self.combined_view, 'tag_view'):
                     self.combined_view.tag_view._last_interaction = interaction
-                page_button = PageButton("", "")  # 临时创建一个button
-                page_button.view = self.combined_view
-                await page_button.go_to_page_combined(interaction, page, self.search_view)
+                
+                # 直接执行分页逻辑，不使用临时button
+                if page < 1 or page > self.search_view.max_page:
+                    await interaction.response.send_message("页码超出范围。", ephemeral=True)
+                    return
+                
+                await interaction.response.defer()
+                
+                offset = (page - 1) * self.search_view.per_page
+                threads = await database.search_threads(
+                    self.search_view.include_tags, self.search_view.exclude_tags, self.search_view.keywords,
+                    self.search_view.channel_ids, self.search_view.include_authors, self.search_view.exclude_authors, 
+                    self.search_view.after_ts, self.search_view.before_ts,
+                    offset, self.search_view.per_page, self.search_view.sort_method, self.search_view.sort_order,
+                    self.search_view.tag_logic
+                )
+                
+                # 获取用户预览图偏好设置
+                prefs = await database.get_user_search_preferences(self.search_view.user_id)
+                embeds = [self.search_view.cog._build_thread_embed(t, interaction.guild, prefs.get('preview_image_mode', 'thumbnail')) for t in threads]
+                self.search_view.current_page = page
+                
+                # 更新当前页按钮
+                for item in self.combined_view.children:
+                    if isinstance(item, CurrentPageButton):
+                        item.label = f"{self.search_view.current_page}/{self.search_view.max_page}"
+                
+                # 更新内容
+                tag_view = self.combined_view.tag_view
+                mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
+                content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {self.search_view.total} 个帖子 (第{self.search_view.current_page}/{self.search_view.max_page}页)"
+                
+                # 保存CombinedSearchView的状态
+                tag_view._last_content = content
+                tag_view._last_embeds = embeds
+                
+                await interaction.edit_original_response(content=content, embeds=embeds, view=self.combined_view)
             else:
                 # 在独立的SearchResultsView中
                 await self.search_view.go_to_page(interaction, page)
