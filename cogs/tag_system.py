@@ -113,10 +113,11 @@ class TagSystem(commands.Cog):
         if last_active_time is None:
             last_active_time = thread.created_at
         
-        # 获取现有的首楼摘要和缩略图（避免重复抓取）
+        # 获取现有的首楼摘要、缩略图和反应数（避免重复抓取和重置）
         existing_data = await database.get_thread_basic_info(thread.id)
         excerpt = existing_data.get('first_message_excerpt', '') if existing_data else ''
         thumbnail_url = existing_data.get('thumbnail_url', '') if existing_data else ''
+        reaction_count = existing_data.get('reaction_count', 0) if existing_data else 0
         
         await database.add_or_update_thread({
             "thread_id": thread.id,
@@ -125,7 +126,7 @@ class TagSystem(commands.Cog):
             "author_id": thread.owner_id or 0,
             "created_at": str(thread.created_at),
             "last_active_at": str(last_active_time),
-            "reaction_count": 0,  # 这里暂时设为0，反应数会在reaction事件中更新
+            "reaction_count": reaction_count,  # 保留现有的反应数，不重置
             "reply_count": thread.message_count,
             "tags": ", ".join([t.name for t in thread.applied_tags or []]),
             "first_message_excerpt": excerpt,
