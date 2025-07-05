@@ -16,12 +16,50 @@ class Search(commands.Cog):
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
+        self.channel_tags_cache = {}  # 缓存频道tags
 
     async def cog_load(self):
         """在Cog加载时注册持久化View"""
         # 注册持久化view，使其在bot重启后仍能响应
         self.bot.add_view(PersistentChannelSearchView(None))  # None作为占位符
         self.bot.add_view(PersistentGlobalSearchView())
+        
+        # 缓存频道tags
+        await self.cache_channel_tags()
+
+    async def cache_channel_tags(self):
+        """缓存所有已索引频道的tags"""
+        try:
+            # 获取已索引的频道ID
+            indexed_channel_ids = await database.get_indexed_channel_ids()
+            
+            self.channel_tags_cache = {}
+            
+            for guild in self.bot.guilds:
+                for channel in guild.channels:
+                    if isinstance(channel, discord.ForumChannel) and channel.id in indexed_channel_ids:
+                        # 获取频道的所有可用标签
+                        tags = {}
+                        for tag in channel.available_tags:
+                            tags[tag.name] = tag.id
+                        self.channel_tags_cache[channel.id] = tags
+                        
+            print(f"已缓存 {len(self.channel_tags_cache)} 个频道的tags")
+            
+        except Exception as e:
+            print(f"缓存频道tags时出错: {e}")
+
+    def get_merged_tags(self, channel_ids: list[int]) -> list[tuple[int, str]]:
+        """获取多个频道的合并tags，重名tag会被合并显示"""
+        all_tags_names = set()
+        
+        for channel_id in channel_ids:
+            channel_tags = self.channel_tags_cache.get(channel_id, {})
+            all_tags_names.update(channel_tags.keys())
+        
+        # 返回合并后的tag列表，使用tag名称作为唯一标识
+        # tag_id设为0，因为我们主要用tag名称进行搜索
+        return [(0, tag_name) for tag_name in sorted(all_tags_names)]
 
     # ----- 用户偏好设置 -----
     @app_commands.command(name="每页结果数量", description="设置每页展示的搜索结果数量（3-10）")
@@ -564,6 +602,9 @@ class Search(commands.Cog):
             await interaction.response.send_message("请在帖子内使用此命令。", ephemeral=True)
             return
         
+        # 刷新缓存
+        await self.cache_channel_tags()
+        
         # 获取父频道ID用于搜索
         channel_id = interaction.channel.parent_id
         view = PersistentChannelSearchView(channel_id)
@@ -585,6 +626,9 @@ class Search(commands.Cog):
 
     @app_commands.command(name="创建全局搜索", description="在当前频道创建全局搜索按钮")
     async def create_global_search(self, interaction: discord.Interaction):
+        # 刷新缓存
+        await self.cache_channel_tags()
+        
         view = PersistentGlobalSearchView()
         
         # 创建美观的embed
@@ -705,10 +749,19 @@ class ChannelSelectionView(discord.ui.View):
         super().__init__(timeout=900)  # 15分钟
         self.channels = channels  # 保存频道列表
         self._last_interaction = None
+        self.selected_channels = []  # 保存选中的频道
         
         # 如果频道太多，分批处理
         options = []
-        for channel in channels[:25]:  # Discord限制25个选项
+        
+        # 添加"全部频道"选项在最上面
+        options.append(discord.SelectOption(
+            label="全部频道",
+            value="all_channels",
+            description="搜索所有已索引的论坛频道"
+        ))
+        
+        for channel in channels[:24]:  # Discord限制25个选项，所以只取24个
             options.append(discord.SelectOption(
                 label=channel.name,
                 value=str(channel.id),
@@ -716,20 +769,67 @@ class ChannelSelectionView(discord.ui.View):
             ))
         
         self.channel_select = discord.ui.Select(
-            placeholder="选择论坛频道...",
+            placeholder="选择论坛频道（可多选）...",
             options=options,
             min_values=1,
-            max_values=1
+            max_values=min(len(options), 25)  # 允许多选，最多25个
         )
         self.channel_select.callback = self.channel_selected
         self.add_item(self.channel_select)
+        
+        # 添加确定按钮
+        self.confirm_button = discord.ui.Button(
+            label="✅ 确定搜索",
+            style=discord.ButtonStyle.success,
+            disabled=True  # 初始状态为禁用
+        )
+        self.confirm_button.callback = self.confirm_selection
+        self.add_item(self.confirm_button)
 
     async def channel_selected(self, interaction: discord.Interaction):
         self._last_interaction = interaction
-        channel_id = int(self.channel_select.values[0])
-        view = TagSelectionView(channel_id)
+        
+        # 处理选择逻辑
+        if "all_channels" in self.channel_select.values:
+            # 如果选择了"全部频道"，使用所有频道
+            self.selected_channels = [ch.id for ch in self.channels]
+            selected_names = ["全部频道"]
+        else:
+            # 选择了具体频道
+            self.selected_channels = [int(ch_id) for ch_id in self.channel_select.values]
+            selected_names = [ch.name for ch in self.channels if ch.id in self.selected_channels]
+        
+        # 启用确定按钮
+        self.confirm_button.disabled = False
+        
+        # 更新消息显示当前选择
+        selected_text = ", ".join(selected_names)
+        content = f"选择要搜索的频道（可多选）：\n\n**已选择：** {selected_text}\n\n点击【确定搜索】按钮继续"
+        
+        await interaction.response.edit_message(content=content, view=self)
+
+    async def confirm_selection(self, interaction: discord.Interaction):
+        self._last_interaction = interaction
+        
+        if not self.selected_channels:
+            await interaction.response.send_message("请先选择要搜索的频道。", ephemeral=True)
+            return
+        
+        # 创建标签选择视图
+        view = TagSelectionView(self.selected_channels)
         await view.setup(interaction.guild, interaction.user.id)
-        await interaction.response.edit_message(content="选择要搜索的标签：", view=view)
+        
+        # 显示选择的频道信息
+        if len(self.selected_channels) == len(self.channels):
+            channel_info = "全部频道"
+        else:
+            selected_names = [ch.name for ch in self.channels if ch.id in self.selected_channels]
+            channel_info = ", ".join(selected_names)
+        
+        await interaction.response.edit_message(
+            content=f"选择要搜索的标签：\n\n**搜索范围：** {channel_info}",
+            view=view
+        )
     
     async def on_timeout(self):
         """超时处理"""
@@ -755,9 +855,19 @@ class ChannelSelectionView(discord.ui.View):
 
 # ----- 标签选择界面 -----
 class TagSelectionView(discord.ui.View):
-    def __init__(self, channel_id: int):
+    def __init__(self, channel_ids):
         super().__init__(timeout=900)  # 15分钟
-        self.channel_id = channel_id
+        # 支持单个频道ID或频道ID列表
+        if isinstance(channel_ids, int):
+            self.channel_ids = [channel_ids]
+        elif isinstance(channel_ids, list):
+            self.channel_ids = channel_ids
+        else:
+            raise ValueError("channel_ids must be int or list of int")
+        
+        # 为了向后兼容，保留channel_id属性
+        self.channel_id = self.channel_ids[0] if len(self.channel_ids) == 1 else None
+        
         self.include_tags = set()
         self.exclude_tags = set()
         self.include_keywords = []
@@ -779,13 +889,30 @@ class TagSelectionView(discord.ui.View):
         """获取标签并设置UI"""
         self.user_id = user_id
         
-        # 直接从Discord频道获取标签
-        channel = guild.get_channel(self.channel_id)
-        if isinstance(channel, discord.ForumChannel):
-            # 获取频道的所有可用标签
-            self.all_tags = [(tag.id, tag.name) for tag in channel.available_tags]
+        # 尝试获取Search cog来使用缓存的tags
+        search_cog = None
+        try:
+            # 通过guild.me获取bot实例
+            if hasattr(guild, 'me') and guild.me:
+                bot = guild.me._state._get_client()
+                search_cog = bot.get_cog("Search")
+        except:
+            pass
+        
+        if search_cog and hasattr(search_cog, 'get_merged_tags'):
+            # 使用缓存的tags
+            self.all_tags = search_cog.get_merged_tags(self.channel_ids)
         else:
-            self.all_tags = []
+            # fallback: 直接从Discord频道获取标签并合并重名tag
+            all_tags_names = set()
+            for channel_id in self.channel_ids:
+                channel = guild.get_channel(channel_id)
+                if isinstance(channel, discord.ForumChannel):
+                    for tag in channel.available_tags:
+                        all_tags_names.add(tag.name)
+            
+            # 合并重名tag，只保留tag名称
+            self.all_tags = [(0, tag_name) for tag_name in sorted(all_tags_names)]
         
         # 清空现有items
         self.clear_items()
@@ -864,7 +991,7 @@ class TagSelectionView(discord.ui.View):
             
             total = await database.count_threads_for_search(
                 include_tags, exclude_tags, include_keywords, 
-                [self.channel_id], include_authors, exclude_authors, after_ts, before_ts,
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
                 prefs['tag_logic']
             )
             
@@ -885,21 +1012,27 @@ class TagSelectionView(discord.ui.View):
             
             threads = await database.search_threads(
                 include_tags, exclude_tags, include_keywords,
-                [self.channel_id], include_authors, exclude_authors, after_ts, before_ts,
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
                 0, per_page, self.sort_method, self.sort_order, prefs['tag_logic']
             )
             
             # 获取搜索cog来构建embed
             if not self.search_cog:
                 self.search_cog = interaction.client.get_cog("Search")
-            
+                
+            # 如果缓存已失效，重新缓存标签
+            if self.search_cog and hasattr(self.search_cog, 'cache_channel_tags'):
+                # 检查是否需要更新缓存
+                if not self.search_cog.channel_tags_cache:
+                    await self.search_cog.cache_channel_tags()
+                
             embeds = [self.search_cog._build_thread_embed(t, interaction.guild, prefs.get('preview_image_mode', 'thumbnail')) for t in threads]
             
             # 创建搜索结果view
             results_view = SearchResultsView(
                 self.search_cog, self.user_id,
                 include_tags, exclude_tags, include_keywords,
-                [self.channel_id], include_authors, exclude_authors, after_ts, before_ts,
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
                 1, per_page, total, self.sort_method, self.sort_order, prefs['tag_logic']
             )
             
@@ -930,7 +1063,7 @@ class TagSelectionView(discord.ui.View):
             # 创建状态字典
             view_state = {
                 'view_type': 'TagSelectionView',
-                'channel_id': self.channel_id,
+                'channel_ids': self.channel_ids,
                 'include_tags': list(self.include_tags),
                 'exclude_tags': list(self.exclude_tags),
                 'include_keywords': self.include_keywords,
@@ -1488,7 +1621,7 @@ class CombinedSearchView(discord.ui.View):
             # 创建状态字典，包含TagSelectionView和SearchResultsView的状态
             view_state = {
                 'view_type': 'CombinedSearchView',
-                'channel_id': self.tag_view.channel_id,
+                'channel_ids': self.tag_view.channel_ids,
                 'include_tags': list(self.tag_view.include_tags),
                 'exclude_tags': list(self.tag_view.exclude_tags),
                 'include_keywords': self.tag_view.include_keywords,
@@ -1528,7 +1661,7 @@ class ContinueButton(discord.ui.Button):
         
         if view_type == 'TagSelectionView':
             # 恢复TagSelectionView状态
-            view = TagSelectionView(self.view_state['channel_id'])
+            view = TagSelectionView(self.view_state['channel_ids'])
             view.include_tags = set(self.view_state['include_tags'])
             view.exclude_tags = set(self.view_state['exclude_tags'])
             view.include_keywords = self.view_state['include_keywords']
@@ -1596,7 +1729,7 @@ class ContinueButton(discord.ui.Button):
         
         elif view_type == 'CombinedSearchView':
             # 恢复CombinedSearchView状态 - 先恢复TagSelectionView
-            tag_view = TagSelectionView(self.view_state['channel_id'])
+            tag_view = TagSelectionView(self.view_state['channel_ids'])
             tag_view.include_tags = set(self.view_state['include_tags'])
             tag_view.exclude_tags = set(self.view_state['exclude_tags'])
             tag_view.include_keywords = self.view_state['include_keywords']
