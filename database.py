@@ -54,7 +54,23 @@ CREATE TABLE IF NOT EXISTS user_search_preferences(
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.executescript(CREATE_TABLES_SQL)
+        
+        # 数据库迁移：检查并添加缺失的字段
+        await migrate_database(db)
+        
         await db.commit()
+
+async def migrate_database(db):
+    """数据库迁移函数：添加缺失的字段"""
+    # 检查 user_search_preferences 表是否有 tag_logic 字段
+    async with db.execute("PRAGMA table_info(user_search_preferences)") as cursor:
+        columns = await cursor.fetchall()
+        column_names = [col[1] for col in columns]
+        
+        if 'tag_logic' not in column_names:
+            print("正在添加 tag_logic 字段...")
+            await db.execute("ALTER TABLE user_search_preferences ADD COLUMN tag_logic TEXT DEFAULT 'and'")
+            print("已添加 tag_logic 字段")
 
 async def add_or_update_thread(info: dict):
     async with aiosqlite.connect(DB_PATH) as db:
