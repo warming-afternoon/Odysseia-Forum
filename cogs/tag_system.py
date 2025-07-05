@@ -236,16 +236,19 @@ class TagSystem(commands.Cog):
 class TagVoteView(discord.ui.View):
     def __init__(self, tags):
         super().__init__(timeout=60)
+        # 第一行：所有标签的点赞按钮
         for tag in tags:
-            self.add_item(TagVoteButton(tag, True))
-            self.add_item(TagVoteButton(tag, False))
+            self.add_item(TagVoteButton(tag, True, row=0))
+        # 第二行：所有标签的点踩按钮
+        for tag in tags:
+            self.add_item(TagVoteButton(tag, False, row=1))
 
 class TagVoteButton(discord.ui.Button):
-    def __init__(self, tag, up: bool):
+    def __init__(self, tag, up: bool, row: int = 0):
         self.tag = tag
         self.vote_value = 1 if up else -1
         label = f"{'👍' if up else '👎'} {tag.name}"
-        super().__init__(label=label, style=discord.ButtonStyle.green if up else discord.ButtonStyle.red)
+        super().__init__(label=label, style=discord.ButtonStyle.green if up else discord.ButtonStyle.red, row=row)
 
     async def callback(self, interaction: discord.Interaction):
         await database.record_tag_vote(interaction.user.id, self.tag.id, self.vote_value)

@@ -31,28 +31,24 @@ class Search(commands.Cog):
         await interaction.response.send_message(f"已将每页结果数量设置为 {num}。", ephemeral=True)
 
     # ----- 搜索偏好设置 -----
-    @app_commands.command(name="搜索偏好", description="管理搜索偏好设置")
+    search_prefs = app_commands.Group(name="搜索偏好", description="管理搜索偏好设置")
+    
+    @search_prefs.command(name="作者", description="管理作者偏好设置")
     @app_commands.describe(
         action="操作类型",
-        user="要设置的用户（@用户 或 用户ID）",
-        after_date="开始日期（格式：YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）",
-        before_date="结束日期（格式：YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）"
+        user="要设置的用户（@用户 或 用户ID）"
     )
     @app_commands.choices(action=[
         app_commands.Choice(name="只看作者", value="include_author"),
         app_commands.Choice(name="屏蔽作者", value="exclude_author"),
         app_commands.Choice(name="取消屏蔽", value="unblock_author"),
-        app_commands.Choice(name="清空作者偏好", value="clear_authors"),
-        app_commands.Choice(name="时间范围", value="time_range"),
-        app_commands.Choice(name="查看当前设置", value="view_settings")
+        app_commands.Choice(name="清空作者偏好", value="clear_authors")
     ])
-    async def search_preferences(
+    async def search_preferences_author(
         self, 
         interaction: discord.Interaction,
         action: app_commands.Choice[str],
-        user: discord.User = None,
-        after_date: str = None,
-        before_date: str = None
+        user: discord.User = None
     ):
         user_id = interaction.user.id
         
@@ -72,7 +68,7 @@ class Search(commands.Cog):
                 
                 await database.save_user_search_preferences(
                     user_id, list(include_authors), list(exclude_authors),
-                    prefs['after_date'], prefs['before_date']
+                    prefs['after_date'], prefs['before_date'], prefs['tag_logic']
                 )
                 
                 await interaction.response.send_message(
@@ -94,7 +90,7 @@ class Search(commands.Cog):
                 
                 await database.save_user_search_preferences(
                     user_id, list(include_authors), list(exclude_authors),
-                    prefs['after_date'], prefs['before_date']
+                    prefs['after_date'], prefs['before_date'], prefs['tag_logic']
                 )
                 
                 await interaction.response.send_message(
@@ -115,7 +111,7 @@ class Search(commands.Cog):
                     exclude_authors.remove(user.id)
                     await database.save_user_search_preferences(
                         user_id, list(include_authors), list(exclude_authors),
-                        prefs['after_date'], prefs['before_date']
+                        prefs['after_date'], prefs['before_date'], prefs['tag_logic']
                     )
                     await interaction.response.send_message(
                         f"✅ 已将 {user.mention} 从屏蔽列表中移除。", ephemeral=True
@@ -128,115 +124,197 @@ class Search(commands.Cog):
             elif action.value == "clear_authors":
                 prefs = await database.get_user_search_preferences(user_id)
                 await database.save_user_search_preferences(
-                    user_id, [], [], prefs['after_date'], prefs['before_date']
+                    user_id, [], [], prefs['after_date'], prefs['before_date'], prefs['tag_logic']
                 )
                 await interaction.response.send_message("✅ 已清空所有作者偏好设置。", ephemeral=True)
+        
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 操作失败：{e}", ephemeral=True)
+
+    @search_prefs.command(name="时间", description="设置搜索时间范围偏好")
+    @app_commands.describe(
+        after_date="开始日期（格式：YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）",
+        before_date="结束日期（格式：YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS）"
+    )
+    async def search_preferences_time(
+        self, 
+        interaction: discord.Interaction,
+        after_date: str = None,
+        before_date: str = None
+    ):
+        user_id = interaction.user.id
+        
+        try:
+            # 解析时间
+            parsed_after = None
+            parsed_before = None
             
-            elif action.value == "time_range":
-                # 解析时间
-                parsed_after = None
-                parsed_before = None
-                
-                if after_date:
-                    try:
-                        date_str = after_date.strip()
-                        if len(date_str) == 10:  # YYYY-MM-DD
-                            date_str += " 00:00:00"
-                        parsed_after = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").isoformat()
-                    except ValueError:
-                        await interaction.response.send_message(
-                            "❌ 开始日期格式错误，请使用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS 格式。", ephemeral=True
-                        )
-                        return
-                
-                if before_date:
-                    try:
-                        date_str = before_date.strip()
-                        if len(date_str) == 10:  # YYYY-MM-DD
-                            date_str += " 23:59:59"
-                        parsed_before = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").isoformat()
-                    except ValueError:
-                        await interaction.response.send_message(
-                            "❌ 结束日期格式错误，请使用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS 格式。", ephemeral=True
-                        )
-                        return
-                
-                # 检查日期逻辑
-                if parsed_after and parsed_before and parsed_after > parsed_before:
-                    await interaction.response.send_message("❌ 开始日期不能晚于结束日期。", ephemeral=True)
-                    return
-                
-                prefs = await database.get_user_search_preferences(user_id)
-                await database.save_user_search_preferences(
-                    user_id, prefs['include_authors'], prefs['exclude_authors'],
-                    parsed_after, parsed_before
-                )
-                
-                # 根据参数情况给出不同的反馈
-                if not after_date and not before_date:
-                    # 没有填任何参数，清空时间范围设置
-                    await interaction.response.send_message("✅ 已清空时间范围设置。", ephemeral=True)
-                else:
-                    # 设置了时间参数
-                    time_info = []
-                    if parsed_after:
-                        time_info.append(f"开始时间：{after_date}")
-                    if parsed_before:
-                        time_info.append(f"结束时间：{before_date}")
-                    
+            if after_date:
+                try:
+                    date_str = after_date.strip()
+                    if len(date_str) == 10:  # YYYY-MM-DD
+                        date_str += " 00:00:00"
+                    parsed_after = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").isoformat()
+                except ValueError:
                     await interaction.response.send_message(
-                        f"✅ 已设置时间范围：\n" + "\n".join(time_info), ephemeral=True
+                        "❌ 开始日期格式错误，请使用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS 格式。", ephemeral=True
                     )
+                    return
             
-            elif action.value == "view_settings":
-                prefs = await database.get_user_search_preferences(user_id)
-                
-                embed = discord.Embed(
-                    title="🔍 当前搜索偏好设置",
-                    color=0x3498db
-                )
-                
-                # 作者偏好
-                author_info = []
-                if prefs['include_authors']:
-                    authors = [f"<@{uid}>" for uid in prefs['include_authors']]
-                    author_info.append(f"**只看作者：** {', '.join(authors)}")
-                
-                if prefs['exclude_authors']:
-                    authors = [f"<@{uid}>" for uid in prefs['exclude_authors']]
-                    author_info.append(f"**屏蔽作者：** {', '.join(authors)}")
-                
-                if not author_info:
-                    author_info.append("**作者偏好：** 无限制")
-                
-                embed.add_field(
-                    name="作者设置",
-                    value="\n".join(author_info),
-                    inline=False
-                )
-                
-                # 时间偏好
+            if before_date:
+                try:
+                    date_str = before_date.strip()
+                    if len(date_str) == 10:  # YYYY-MM-DD
+                        date_str += " 23:59:59"
+                    parsed_before = datetime.datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S").isoformat()
+                except ValueError:
+                    await interaction.response.send_message(
+                        "❌ 结束日期格式错误，请使用 YYYY-MM-DD 或 YYYY-MM-DD HH:MM:SS 格式。", ephemeral=True
+                    )
+                    return
+            
+            # 检查日期逻辑
+            if parsed_after and parsed_before and parsed_after > parsed_before:
+                await interaction.response.send_message("❌ 开始日期不能晚于结束日期。", ephemeral=True)
+                return
+            
+            prefs = await database.get_user_search_preferences(user_id)
+            await database.save_user_search_preferences(
+                user_id, prefs['include_authors'], prefs['exclude_authors'],
+                parsed_after, parsed_before, prefs['tag_logic']
+            )
+            
+            # 根据参数情况给出不同的反馈
+            if not after_date and not before_date:
+                # 没有填任何参数，清空时间范围设置
+                await interaction.response.send_message("✅ 已清空时间范围设置。", ephemeral=True)
+            else:
+                # 设置了时间参数
                 time_info = []
-                if prefs['after_date']:
-                    after_dt = datetime.datetime.fromisoformat(prefs['after_date'])
-                    time_info.append(f"**开始时间：** {after_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+                if parsed_after:
+                    time_info.append(f"开始时间：{after_date}")
+                if parsed_before:
+                    time_info.append(f"结束时间：{before_date}")
                 
-                if prefs['before_date']:
-                    before_dt = datetime.datetime.fromisoformat(prefs['before_date'])
-                    time_info.append(f"**结束时间：** {before_dt.strftime('%Y-%m-%d %H:%M:%S')}")
-                
-                if not time_info:
-                    time_info.append("**时间范围：** 无限制")
-                
-                embed.add_field(
-                    name="时间设置",
-                    value="\n".join(time_info),
-                    inline=False
+                await interaction.response.send_message(
+                    f"✅ 已设置时间范围：\n" + "\n".join(time_info), ephemeral=True
                 )
-                
-                embed.set_footer(text="使用 /搜索偏好 命令来修改这些设置")
-                
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 操作失败：{e}", ephemeral=True)
+
+    @search_prefs.command(name="标签", description="设置多选标签逻辑偏好")
+    @app_commands.describe(
+        logic="标签逻辑类型"
+    )
+    @app_commands.choices(logic=[
+        app_commands.Choice(name="同时（必须包含所有选择的标签）", value="同时"),
+        app_commands.Choice(name="任一（只需包含任意一个选择的标签）", value="任一")
+    ])
+    async def search_preferences_tag(
+        self, 
+        interaction: discord.Interaction,
+        logic: app_commands.Choice[str]
+    ):
+        user_id = interaction.user.id
+        
+        try:
+            # 转换为内部格式
+            tag_logic_internal = "and" if logic.value == "同时" else "or"
+            
+            prefs = await database.get_user_search_preferences(user_id)
+            await database.save_user_search_preferences(
+                user_id, prefs['include_authors'], prefs['exclude_authors'],
+                prefs['after_date'], prefs['before_date'], tag_logic_internal
+            )
+            
+            await interaction.response.send_message(
+                f"✅ 已设置多选标签逻辑为：**{logic.value}**\n"
+                f"• 同时：必须包含所有选择的标签\n"
+                f"• 任一：只需包含任意一个选择的标签",
+                ephemeral=True
+            )
+        
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 操作失败：{e}", ephemeral=True)
+
+    @search_prefs.command(name="查看", description="查看当前搜索偏好设置")
+    async def search_preferences_view(self, interaction: discord.Interaction):
+        user_id = interaction.user.id
+        
+        try:
+            prefs = await database.get_user_search_preferences(user_id)
+            
+            embed = discord.Embed(
+                title="🔍 当前搜索偏好设置",
+                color=0x3498db
+            )
+            
+            # 作者偏好
+            author_info = []
+            if prefs['include_authors']:
+                authors = [f"<@{uid}>" for uid in prefs['include_authors']]
+                author_info.append(f"**只看作者：** {', '.join(authors)}")
+            
+            if prefs['exclude_authors']:
+                authors = [f"<@{uid}>" for uid in prefs['exclude_authors']]
+                author_info.append(f"**屏蔽作者：** {', '.join(authors)}")
+            
+            if not author_info:
+                author_info.append("**作者偏好：** 无限制")
+            
+            embed.add_field(
+                name="作者设置",
+                value="\n".join(author_info),
+                inline=False
+            )
+            
+            # 时间偏好
+            time_info = []
+            if prefs['after_date']:
+                after_dt = datetime.datetime.fromisoformat(prefs['after_date'])
+                time_info.append(f"**开始时间：** {after_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            if prefs['before_date']:
+                before_dt = datetime.datetime.fromisoformat(prefs['before_date'])
+                time_info.append(f"**结束时间：** {before_dt.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            if not time_info:
+                time_info.append("**时间范围：** 无限制")
+            
+            embed.add_field(
+                name="时间设置",
+                value="\n".join(time_info),
+                inline=False
+            )
+            
+            # 标签逻辑设置
+            tag_logic_display = "同时" if prefs['tag_logic'] == "and" else "任一"
+            embed.add_field(
+                name="标签逻辑",
+                value=f"**多选标签逻辑：** {tag_logic_display}\n"
+                      f"• 同时：必须包含所有选择的标签\n"
+                      f"• 任一：只需包含任意一个选择的标签",
+                inline=False
+            )
+            
+            embed.set_footer(text="使用 /搜索偏好 子命令来修改这些设置")
+            
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 操作失败：{e}", ephemeral=True)
+
+    @search_prefs.command(name="清空", description="清空所有搜索偏好设置")
+    async def search_preferences_clear(self, interaction: discord.Interaction):
+        user_id = interaction.user.id
+        
+        try:
+            await database.save_user_search_preferences(
+                user_id, [], [], None, None, "and"
+            )
+            
+            await interaction.response.send_message("✅ 已清空所有搜索偏好设置。", ephemeral=True)
         
         except Exception as e:
             await interaction.response.send_message(f"❌ 操作失败：{e}", ephemeral=True)
@@ -704,7 +782,8 @@ class TagSelectionView(discord.ui.View):
             
             total = await database.count_threads_for_search(
                 include_tags, exclude_tags, include_keywords, 
-                [self.channel_id], include_authors, exclude_authors, after_ts, before_ts
+                [self.channel_id], include_authors, exclude_authors, after_ts, before_ts,
+                prefs['tag_logic']
             )
             
             mode_text = "反选模式 (选择要排除的标签)" if self.exclude_mode else "正选模式 (选择要包含的标签)"
@@ -721,7 +800,7 @@ class TagSelectionView(discord.ui.View):
             threads = await database.search_threads(
                 include_tags, exclude_tags, include_keywords,
                 [self.channel_id], include_authors, exclude_authors, after_ts, before_ts,
-                0, per_page, self.sort_method, self.sort_order
+                0, per_page, self.sort_method, self.sort_order, prefs['tag_logic']
             )
             
             # 获取搜索cog来构建embed
@@ -735,7 +814,7 @@ class TagSelectionView(discord.ui.View):
                 self.search_cog, self.user_id,
                 include_tags, exclude_tags, include_keywords,
                 [self.channel_id], include_authors, exclude_authors, after_ts, before_ts,
-                1, per_page, total, self.sort_method, self.sort_order
+                1, per_page, total, self.sort_method, self.sort_order, prefs['tag_logic']
             )
             
             # 合并两个view的按钮
@@ -972,7 +1051,7 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
 
 # ----- 搜索结果分页 -----
 class SearchResultsView(discord.ui.View):
-    def __init__(self, cog: Search, user_id: int, include_tags, exclude_tags, keywords, channel_ids, include_authors, exclude_authors, after_ts, before_ts, current_page, per_page, total, sort_method: str = "comprehensive", sort_order: str = "desc"):
+    def __init__(self, cog: Search, user_id: int, include_tags, exclude_tags, keywords, channel_ids, include_authors, exclude_authors, after_ts, before_ts, current_page, per_page, total, sort_method: str = "comprehensive", sort_order: str = "desc", tag_logic: str = "and"):
         super().__init__(timeout=600)
         self.cog = cog
         self.user_id = user_id
@@ -990,6 +1069,7 @@ class SearchResultsView(discord.ui.View):
         self.current_page = current_page
         self.sort_method = sort_method
         self.sort_order = sort_order
+        self.tag_logic = tag_logic
         
         # 添加分页按钮
         self.add_item(PageButton("⏮️", "first"))
@@ -1009,7 +1089,7 @@ class SearchResultsView(discord.ui.View):
         threads = await database.search_threads(
             self.include_tags, self.exclude_tags, self.keywords,
             self.channel_ids, self.include_authors, self.exclude_authors, self.after_ts, self.before_ts,
-            offset, self.per_page, self.sort_method, self.sort_order
+            offset, self.per_page, self.sort_method, self.sort_order, self.tag_logic
         )
         
         embeds = [self.cog._build_thread_embed(t, interaction.guild) for t in threads]
@@ -1061,7 +1141,8 @@ class PageButton(discord.ui.Button):
             results_view.include_tags, results_view.exclude_tags, results_view.keywords,
             results_view.channel_ids, results_view.include_authors, results_view.exclude_authors, 
             results_view.after_ts, results_view.before_ts,
-            offset, results_view.per_page, results_view.sort_method, results_view.sort_order
+            offset, results_view.per_page, results_view.sort_method, results_view.sort_order,
+            results_view.tag_logic
         )
         
         embeds = [results_view.cog._build_thread_embed(t, interaction.guild) for t in threads]

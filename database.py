@@ -46,7 +46,8 @@ CREATE TABLE IF NOT EXISTS user_search_preferences(
     include_authors TEXT,
     exclude_authors TEXT,
     after_date TEXT,
-    before_date TEXT
+    before_date TEXT,
+    tag_logic TEXT DEFAULT 'and'
 );
 """
 
@@ -136,7 +137,8 @@ async def search_threads(
     offset: int,
     limit: int,
     sort_method: str = "comprehensive",  # 新增参数：comprehensive, created_time, active_time, reaction_count
-    sort_order: str = "desc"  # 新增参数：desc, asc
+    sort_order: str = "desc",  # 新增参数：desc, asc
+    tag_logic: str = "and"  # 新增参数：and, or
 ):
     """搜索帖子并按指定方式排序。
 
@@ -291,7 +293,7 @@ async def search_threads(
                 scored_rows.sort(key=lambda x: x['final_score'], reverse=(sort_order == "desc"))
                 
                 # 在Python中应用标签和关键词过滤
-                filtered_rows = _filter_threads(scored_rows, include_tags, exclude_tags, keywords)
+                filtered_rows = _filter_threads(scored_rows, include_tags, exclude_tags, keywords, tag_logic)
                 
                 # 应用分页
                 start_idx = offset
@@ -325,7 +327,7 @@ async def search_threads(
                 dict_rows = [dict(row) for row in rows]
                 
                 # 在Python中应用标签和关键词过滤
-                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords)
+                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords, tag_logic)
                 
                 # 应用分页
                 start_idx = offset
@@ -342,6 +344,7 @@ async def count_threads_for_search(
     exclude_authors: list[int] | None,
     after_ts: str | None,
     before_ts: str | None,
+    tag_logic: str = "and"
 ):
     """统计搜索结果总数"""
     conditions = []
@@ -383,7 +386,7 @@ async def count_threads_for_search(
                 dict_rows = [dict(row) for row in rows]
                 
                 # 在Python中应用标签和关键词过滤
-                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords)
+                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords, tag_logic)
                 
                 return len(filtered_rows)
     else:
@@ -415,7 +418,7 @@ async def get_user_search_preferences(user_id: int):
     """获取用户搜索偏好"""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT include_authors, exclude_authors, after_date, before_date FROM user_search_preferences WHERE user_id = ?",
+            "SELECT include_authors, exclude_authors, after_date, before_date, tag_logic FROM user_search_preferences WHERE user_id = ?",
             (user_id,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -424,30 +427,33 @@ async def get_user_search_preferences(user_id: int):
                     'include_authors': [int(x) for x in row[0].split(',') if x] if row[0] else [],
                     'exclude_authors': [int(x) for x in row[1].split(',') if x] if row[1] else [],
                     'after_date': row[2],
-                    'before_date': row[3]
+                    'before_date': row[3],
+                    'tag_logic': row[4]
                 }
             return {
                 'include_authors': [],
                 'exclude_authors': [],
                 'after_date': None,
-                'before_date': None
+                'before_date': None,
+                'tag_logic': 'and'
             }
 
-async def save_user_search_preferences(user_id: int, include_authors: list[int], exclude_authors: list[int], after_date: str | None, before_date: str | None):
+async def save_user_search_preferences(user_id: int, include_authors: list[int], exclude_authors: list[int], after_date: str | None, before_date: str | None, tag_logic: str):
     """保存用户搜索偏好"""
     async with aiosqlite.connect(DB_PATH) as db:
         include_str = ','.join(map(str, include_authors)) if include_authors else ''
         exclude_str = ','.join(map(str, exclude_authors)) if exclude_authors else ''
         
         await db.execute("""
-            INSERT INTO user_search_preferences(user_id, include_authors, exclude_authors, after_date, before_date)
-            VALUES(?, ?, ?, ?, ?)
+            INSERT INTO user_search_preferences(user_id, include_authors, exclude_authors, after_date, before_date, tag_logic)
+            VALUES(?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 include_authors = excluded.include_authors,
                 exclude_authors = excluded.exclude_authors,
                 after_date = excluded.after_date,
-                before_date = excluded.before_date
-        """, (user_id, include_str, exclude_str, after_date, before_date))
+                before_date = excluded.before_date,
+                tag_logic = excluded.tag_logic
+        """, (user_id, include_str, exclude_str, after_date, before_date, tag_logic))
         await db.commit()
 
 async def get_thread_basic_info(thread_id: int):
@@ -479,14 +485,15 @@ async def get_indexed_channel_ids():
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
-def _filter_threads(threads: list[dict], include_tags: list[str], exclude_tags: list[str], keywords: str) -> list[dict]:
+def _filter_threads(threads: list[dict], include_tags: list[str], exclude_tags: list[str], keywords: str, tag_logic: str = "and") -> list[dict]:
     """在Python中过滤帖子的标签和关键词
     
     Args:
         threads: 帖子列表，每个帖子必须包含tags字段，并可能包含title和first_message_excerpt字段
-        include_tags: 必须包含的标签列表（AND逻辑）
+        include_tags: 必须包含的标签列表
         exclude_tags: 必须排除的标签列表（OR逻辑）
         keywords: 关键词字符串，在标题或首楼摘要中搜索
+        tag_logic: 标签逻辑，"and"表示AND逻辑，"or"表示OR逻辑
     
     Returns:
         过滤后的帖子列表
@@ -503,11 +510,17 @@ def _filter_threads(threads: list[dict], include_tags: list[str], exclude_tags: 
         thread_tags = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
         thread_tag_set = set(thread_tags)
         
-        # 检查包含标签（AND逻辑：必须包含所有指定标签）
+        # 检查包含标签（根据tag_logic参数决定使用AND或OR逻辑）
         if include_tags:
             include_tag_set = set(include_tags)
-            if not include_tag_set.issubset(thread_tag_set):
-                continue  # 不包含所有必需标签，跳过
+            if tag_logic == "and":
+                # AND逻辑：必须包含所有指定标签
+                if not include_tag_set.issubset(thread_tag_set):
+                    continue  # 不包含所有必需标签，跳过
+            else:  # OR逻辑
+                # OR逻辑：只需包含任意一个指定标签
+                if not include_tag_set.intersection(thread_tag_set):
+                    continue  # 不包含任何必需标签，跳过
         
         # 检查排除标签（OR逻辑：不能包含任何排除标签）
         if exclude_tags:
