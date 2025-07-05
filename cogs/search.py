@@ -68,7 +68,7 @@ class Search(commands.Cog):
                 
                 await database.save_user_search_preferences(
                     user_id, list(include_authors), list(exclude_authors),
-                    prefs['after_date'], prefs['before_date'], prefs['tag_logic']
+                    prefs['after_date'], prefs['before_date'], prefs['tag_logic'], prefs['preview_image_mode']
                 )
                 
                 await interaction.response.send_message(
@@ -90,7 +90,7 @@ class Search(commands.Cog):
                 
                 await database.save_user_search_preferences(
                     user_id, list(include_authors), list(exclude_authors),
-                    prefs['after_date'], prefs['before_date'], prefs['tag_logic']
+                    prefs['after_date'], prefs['before_date'], prefs['tag_logic'], prefs['preview_image_mode']
                 )
                 
                 await interaction.response.send_message(
@@ -111,7 +111,7 @@ class Search(commands.Cog):
                     exclude_authors.remove(user.id)
                     await database.save_user_search_preferences(
                         user_id, list(include_authors), list(exclude_authors),
-                        prefs['after_date'], prefs['before_date'], prefs['tag_logic']
+                        prefs['after_date'], prefs['before_date'], prefs['tag_logic'], prefs['preview_image_mode']
                     )
                     await interaction.response.send_message(
                         f"✅ 已将 {user.mention} 从屏蔽列表中移除。", ephemeral=True
@@ -124,7 +124,7 @@ class Search(commands.Cog):
             elif action.value == "clear_authors":
                 prefs = await database.get_user_search_preferences(user_id)
                 await database.save_user_search_preferences(
-                    user_id, [], [], prefs['after_date'], prefs['before_date'], prefs['tag_logic']
+                    user_id, [], [], prefs['after_date'], prefs['before_date'], prefs['tag_logic'], prefs['preview_image_mode']
                 )
                 await interaction.response.send_message("✅ 已清空所有作者偏好设置。", ephemeral=True)
         
@@ -181,7 +181,7 @@ class Search(commands.Cog):
             prefs = await database.get_user_search_preferences(user_id)
             await database.save_user_search_preferences(
                 user_id, prefs['include_authors'], prefs['exclude_authors'],
-                parsed_after, parsed_before, prefs['tag_logic']
+                parsed_after, parsed_before, prefs['tag_logic'], prefs['preview_image_mode']
             )
             
             # 根据参数情况给出不同的反馈
@@ -225,13 +225,45 @@ class Search(commands.Cog):
             prefs = await database.get_user_search_preferences(user_id)
             await database.save_user_search_preferences(
                 user_id, prefs['include_authors'], prefs['exclude_authors'],
-                prefs['after_date'], prefs['before_date'], tag_logic_internal
+                prefs['after_date'], prefs['before_date'], tag_logic_internal, prefs['preview_image_mode']
             )
             
             await interaction.response.send_message(
                 f"✅ 已设置多选标签逻辑为：**{logic.value}**\n"
                 f"• 同时：必须包含所有选择的标签\n"
                 f"• 任一：只需包含任意一个选择的标签",
+                ephemeral=True
+            )
+        
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 操作失败：{e}", ephemeral=True)
+
+    @search_prefs.command(name="预览图", description="设置搜索结果预览图显示方式")
+    @app_commands.describe(
+        mode="预览图显示方式"
+    )
+    @app_commands.choices(mode=[
+        app_commands.Choice(name="缩略图（右侧小图）", value="thumbnail"),
+        app_commands.Choice(name="大图（下方大图）", value="image")
+    ])
+    async def search_preferences_preview(
+        self, 
+        interaction: discord.Interaction,
+        mode: app_commands.Choice[str]
+    ):
+        user_id = interaction.user.id
+        
+        try:
+            prefs = await database.get_user_search_preferences(user_id)
+            await database.save_user_search_preferences(
+                user_id, prefs['include_authors'], prefs['exclude_authors'],
+                prefs['after_date'], prefs['before_date'], prefs['tag_logic'], mode.value
+            )
+            
+            await interaction.response.send_message(
+                f"✅ 已设置预览图显示方式为：**{mode.name}**\n"
+                f"• 缩略图：在搜索结果右侧显示小图\n"
+                f"• 大图：在搜索结果下方显示大图",
                 ephemeral=True
             )
         
@@ -298,6 +330,17 @@ class Search(commands.Cog):
                 inline=False
             )
             
+            # 预览图设置
+            preview_mode = prefs.get('preview_image_mode', 'thumbnail')
+            preview_display = "缩略图（右侧小图）" if preview_mode == "thumbnail" else "大图（下方大图）"
+            embed.add_field(
+                name="预览图设置",
+                value=f"**预览图显示方式：** {preview_display}\n"
+                      f"• 缩略图：在搜索结果右侧显示小图\n"
+                      f"• 大图：在搜索结果下方显示大图",
+                inline=False
+            )
+            
             embed.set_footer(text="使用 /搜索偏好 子命令来修改这些设置")
             
             await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -311,7 +354,7 @@ class Search(commands.Cog):
         
         try:
             await database.save_user_search_preferences(
-                user_id, [], [], None, None, "and"
+                user_id, [], [], None, None, "and", "thumbnail"
             )
             
             await interaction.response.send_message("✅ 已清空所有搜索偏好设置。", ephemeral=True)
@@ -557,7 +600,7 @@ class Search(commands.Cog):
         await interaction.response.send_message("✅ 已创建全局搜索按钮。", ephemeral=True)
 
     # ----- Embed 构造 -----
-    def _build_thread_embed(self, thread_row: dict, guild: discord.Guild):
+    def _build_thread_embed(self, thread_row: dict, guild: discord.Guild, preview_mode: str = "thumbnail"):
         thread_id = thread_row['thread_id']
         title = thread_row['title']
         original_poster_id = thread_row['author_id']
@@ -589,8 +632,12 @@ class Search(commands.Cog):
         excerpt_display = first_message_excerpt[:200] + "..." if len(first_message_excerpt) > 200 else (first_message_excerpt or "无内容")
         embed.add_field(name="首楼摘要", value=excerpt_display, inline=False)
         
+        # 根据用户偏好设置预览图显示方式
         if attachment_url:
-            embed.set_thumbnail(url=attachment_url)
+            if preview_mode == "image":
+                embed.set_image(url=attachment_url)
+            else:  # thumbnail
+                embed.set_thumbnail(url=attachment_url)
         
         embed.url = f"https://discord.com/channels/{guild.id}/{thread_id}"
         return embed
@@ -807,7 +854,7 @@ class TagSelectionView(discord.ui.View):
             if not self.search_cog:
                 self.search_cog = interaction.client.get_cog("Search")
             
-            embeds = [self.search_cog._build_thread_embed(t, interaction.guild) for t in threads]
+            embeds = [self.search_cog._build_thread_embed(t, interaction.guild, prefs.get('preview_image_mode', 'thumbnail')) for t in threads]
             
             # 创建搜索结果view
             results_view = SearchResultsView(
@@ -1092,7 +1139,9 @@ class SearchResultsView(discord.ui.View):
             offset, self.per_page, self.sort_method, self.sort_order, self.tag_logic
         )
         
-        embeds = [self.cog._build_thread_embed(t, interaction.guild) for t in threads]
+        # 获取用户预览图偏好设置
+        prefs = await database.get_user_search_preferences(self.user_id)
+        embeds = [self.cog._build_thread_embed(t, interaction.guild, prefs.get('preview_image_mode', 'thumbnail')) for t in threads]
         self.current_page = target_page
         
         # 更新当前页按钮
@@ -1145,7 +1194,9 @@ class PageButton(discord.ui.Button):
             results_view.tag_logic
         )
         
-        embeds = [results_view.cog._build_thread_embed(t, interaction.guild) for t in threads]
+        # 获取用户预览图偏好设置
+        prefs = await database.get_user_search_preferences(results_view.user_id)
+        embeds = [results_view.cog._build_thread_embed(t, interaction.guild, prefs.get('preview_image_mode', 'thumbnail')) for t in threads]
         results_view.current_page = target_page
         
         # 更新当前页按钮

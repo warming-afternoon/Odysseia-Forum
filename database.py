@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS user_search_preferences(
     exclude_authors TEXT,
     after_date TEXT,
     before_date TEXT,
-    tag_logic TEXT DEFAULT 'and'
+    tag_logic TEXT DEFAULT 'and',
+    preview_image_mode TEXT DEFAULT 'thumbnail'
 );
 """
 
@@ -71,6 +72,11 @@ async def migrate_database(db):
             print("正在添加 tag_logic 字段...")
             await db.execute("ALTER TABLE user_search_preferences ADD COLUMN tag_logic TEXT DEFAULT 'and'")
             print("已添加 tag_logic 字段")
+            
+        if 'preview_image_mode' not in column_names:
+            print("正在添加 preview_image_mode 字段...")
+            await db.execute("ALTER TABLE user_search_preferences ADD COLUMN preview_image_mode TEXT DEFAULT 'thumbnail'")
+            print("已添加 preview_image_mode 字段")
 
 async def add_or_update_thread(info: dict):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -434,7 +440,7 @@ async def get_user_search_preferences(user_id: int):
     """获取用户搜索偏好"""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT include_authors, exclude_authors, after_date, before_date, tag_logic FROM user_search_preferences WHERE user_id = ?",
+            "SELECT include_authors, exclude_authors, after_date, before_date, tag_logic, preview_image_mode FROM user_search_preferences WHERE user_id = ?",
             (user_id,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -444,32 +450,35 @@ async def get_user_search_preferences(user_id: int):
                     'exclude_authors': [int(x) for x in row[1].split(',') if x] if row[1] else [],
                     'after_date': row[2],
                     'before_date': row[3],
-                    'tag_logic': row[4]
+                    'tag_logic': row[4],
+                    'preview_image_mode': row[5] if row[5] else 'thumbnail'
                 }
             return {
                 'include_authors': [],
                 'exclude_authors': [],
                 'after_date': None,
                 'before_date': None,
-                'tag_logic': 'and'
+                'tag_logic': 'and',
+                'preview_image_mode': 'thumbnail'
             }
 
-async def save_user_search_preferences(user_id: int, include_authors: list[int], exclude_authors: list[int], after_date: str | None, before_date: str | None, tag_logic: str):
+async def save_user_search_preferences(user_id: int, include_authors: list[int], exclude_authors: list[int], after_date: str | None, before_date: str | None, tag_logic: str, preview_image_mode: str = 'thumbnail'):
     """保存用户搜索偏好"""
     async with aiosqlite.connect(DB_PATH) as db:
         include_str = ','.join(map(str, include_authors)) if include_authors else ''
         exclude_str = ','.join(map(str, exclude_authors)) if exclude_authors else ''
         
         await db.execute("""
-            INSERT INTO user_search_preferences(user_id, include_authors, exclude_authors, after_date, before_date, tag_logic)
-            VALUES(?, ?, ?, ?, ?, ?)
+            INSERT INTO user_search_preferences(user_id, include_authors, exclude_authors, after_date, before_date, tag_logic, preview_image_mode)
+            VALUES(?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(user_id) DO UPDATE SET
                 include_authors = excluded.include_authors,
                 exclude_authors = excluded.exclude_authors,
                 after_date = excluded.after_date,
                 before_date = excluded.before_date,
-                tag_logic = excluded.tag_logic
-        """, (user_id, include_str, exclude_str, after_date, before_date, tag_logic))
+                tag_logic = excluded.tag_logic,
+                preview_image_mode = excluded.preview_image_mode
+        """, (user_id, include_str, exclude_str, after_date, before_date, tag_logic, preview_image_mode))
         await db.commit()
 
 async def get_thread_basic_info(thread_id: int):
