@@ -4,6 +4,9 @@ from discord.ext import commands
 import datetime
 import math
 import re
+import asyncio
+import pickle
+import base64
 
 import database
 from ranking_config import RankingConfig
@@ -699,7 +702,9 @@ class PersistentGlobalSearchView(discord.ui.View):
 
 class ChannelSelectionView(discord.ui.View):
     def __init__(self, channels: list[discord.ForumChannel]):
-        super().__init__(timeout=300)
+        super().__init__(timeout=900)  # 15分钟
+        self.channels = channels  # 保存频道列表
+        self._last_interaction = None
         
         # 如果频道太多，分批处理
         options = []
@@ -720,15 +725,38 @@ class ChannelSelectionView(discord.ui.View):
         self.add_item(self.channel_select)
 
     async def channel_selected(self, interaction: discord.Interaction):
+        self._last_interaction = interaction
         channel_id = int(self.channel_select.values[0])
         view = TagSelectionView(channel_id)
         await view.setup(interaction.guild, interaction.user.id)
         await interaction.response.edit_message(content="选择要搜索的标签：", view=view)
+    
+    async def on_timeout(self):
+        """超时处理"""
+        try:
+            # 创建状态字典
+            view_state = {
+                'view_type': 'ChannelSelectionView'
+            }
+            
+            # 创建超时视图
+            timeout_view = TimeoutView(view_state)
+            
+            # 更新消息
+            if self._last_interaction:
+                await self._last_interaction.edit_original_response(
+                    content="⏰ 频道选择界面已超时（15分钟），点击继续按钮重新选择",
+                    view=timeout_view,
+                    embeds=[]
+                )
+        except Exception:
+            # 如果更新失败，静默处理
+            pass
 
 # ----- 标签选择界面 -----
 class TagSelectionView(discord.ui.View):
     def __init__(self, channel_id: int):
-        super().__init__(timeout=300)
+        super().__init__(timeout=900)  # 15分钟
         self.channel_id = channel_id
         self.include_tags = set()
         self.exclude_tags = set()
@@ -742,6 +770,10 @@ class TagSelectionView(discord.ui.View):
         self.tag_page = 0  # 当前标签页
         self.tags_per_page = 10  # 每页显示的标签数
         self.all_tags = []  # 所有标签列表
+        self._last_interaction = None  # 保存最后一次交互
+        self._last_content = None  # 保存最后的内容
+        self._last_embeds = None  # 保存最后的embeds
+        self._has_results = False  # 是否有搜索结果
         
     async def setup(self, guild: discord.Guild, user_id: int = None):
         """获取标签并设置UI"""
@@ -806,6 +838,9 @@ class TagSelectionView(discord.ui.View):
     async def update_search_results(self, interaction: discord.Interaction, *, edit_original: bool = True):
         """更新搜索结果"""
         try:
+            # 保存交互状态
+            self._last_interaction = interaction
+            
             # 获取用户搜索偏好
             prefs = await database.get_user_search_preferences(self.user_id)
             
@@ -838,6 +873,10 @@ class TagSelectionView(discord.ui.View):
             if total == 0:
                 # 没有结果时只更新标签选择界面
                 content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+                self._last_content = content
+                self._last_embeds = []
+                self._has_results = False
+                
                 if edit_original:
                     await interaction.response.edit_message(content=content, view=self, embeds=[])
                 else:
@@ -869,6 +908,11 @@ class TagSelectionView(discord.ui.View):
             
             content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {total} 个帖子 (第1/{results_view.max_page}页)"
             
+            # 保存状态
+            self._last_content = content
+            self._last_embeds = embeds
+            self._has_results = True
+            
             if edit_original:
                 await interaction.response.edit_message(content=content, view=combined_view, embeds=embeds)
             else:
@@ -879,6 +923,40 @@ class TagSelectionView(discord.ui.View):
                 await interaction.response.send_message(f"搜索出错: {e}", ephemeral=True)
             else:
                 await interaction.followup.send(f"搜索出错: {e}", ephemeral=True)
+    
+    async def on_timeout(self):
+        """超时处理"""
+        try:
+            # 创建状态字典
+            view_state = {
+                'view_type': 'TagSelectionView',
+                'channel_id': self.channel_id,
+                'include_tags': list(self.include_tags),
+                'exclude_tags': list(self.exclude_tags),
+                'include_keywords': self.include_keywords,
+                'exclude_keywords': self.exclude_keywords,
+                'exclude_mode': self.exclude_mode,
+                'sort_method': self.sort_method,
+                'sort_order': self.sort_order,
+                'tag_page': self.tag_page,
+                'all_tags': self.all_tags,
+                'user_id': self.user_id,
+                'has_results': self._has_results
+            }
+            
+            # 创建超时视图
+            timeout_view = TimeoutView(view_state)
+            
+            # 更新消息
+            if self._last_interaction:
+                await self._last_interaction.edit_original_response(
+                    content="⏰ 搜索界面已超时（15分钟），点击继续按钮恢复搜索状态",
+                    view=timeout_view,
+                    embeds=[]
+                )
+        except Exception:
+            # 如果更新失败，静默处理
+            pass
 
 class TagPageButton(discord.ui.Button):
     def __init__(self, label: str, action: str):
@@ -893,6 +971,9 @@ class TagPageButton(discord.ui.Button):
         else:
             # 在TagSelectionView中
             tag_view = self.view  # type: ignore
+        
+        # 保存交互状态
+        tag_view._last_interaction = interaction
         
         max_page = (len(tag_view.all_tags) - 1) // tag_view.tags_per_page
         
@@ -924,6 +1005,9 @@ class TagButton(discord.ui.Button):
         else:
             # 在TagSelectionView中
             tag_view = self.view  # type: ignore
+        
+        # 保存交互状态
+        tag_view._last_interaction = interaction
         
         if not tag_view.exclude_mode:  # 正选模式
             if self.tag_name in tag_view.include_tags:
@@ -969,7 +1053,10 @@ class ModeToggleButton(discord.ui.Button):
             # 在TagSelectionView中
             tag_view = self.view  # type: ignore
             is_combined = False
-            
+        
+        # 保存交互状态
+        tag_view._last_interaction = interaction
+        
         tag_view.exclude_mode = not tag_view.exclude_mode
         
         # 先更新标签按钮样式
@@ -1021,7 +1108,10 @@ class SortMethodSelect(discord.ui.Select):
         else:
             # 在TagSelectionView中
             tag_view = self.view  # type: ignore
-            
+        
+        # 保存交互状态
+        tag_view._last_interaction = interaction
+        
         tag_view.sort_method = self.values[0]
         
         # 更新选择器的选中状态
@@ -1045,6 +1135,9 @@ class SortOrderButton(discord.ui.Button):
             # 在TagSelectionView中
             tag_view = self.view  # type: ignore
         
+        # 保存交互状态
+        tag_view._last_interaction = interaction
+        
         # 切换排序方向
         tag_view.sort_order = "asc" if tag_view.sort_order == "desc" else "desc"
         
@@ -1066,6 +1159,9 @@ class KeywordButton(discord.ui.Button):
         else:
             # 在TagSelectionView中
             tag_view = self.view  # type: ignore
+        
+        # 保存交互状态
+        tag_view._last_interaction = interaction
         
         await interaction.response.send_modal(KeywordModal(tag_view))
 
@@ -1090,6 +1186,9 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
         self.add_item(self.exclude_input)
 
     async def on_submit(self, interaction: discord.Interaction):
+        # 保存交互状态
+        self.parent_view._last_interaction = interaction
+        
         self.parent_view.include_keywords = [k.strip() for k in self.include_input.value.split(',') if k.strip()]
         self.parent_view.exclude_keywords = [k.strip() for k in self.exclude_input.value.split(',') if k.strip()]
         
@@ -1099,7 +1198,7 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
 # ----- 搜索结果分页 -----
 class SearchResultsView(discord.ui.View):
     def __init__(self, cog: Search, user_id: int, include_tags, exclude_tags, keywords, channel_ids, include_authors, exclude_authors, after_ts, before_ts, current_page, per_page, total, sort_method: str = "comprehensive", sort_order: str = "desc", tag_logic: str = "and"):
-        super().__init__(timeout=600)
+        super().__init__(timeout=900)  # 15分钟
         self.cog = cog
         self.user_id = user_id
         self.include_tags = include_tags
@@ -1117,6 +1216,7 @@ class SearchResultsView(discord.ui.View):
         self.sort_method = sort_method
         self.sort_order = sort_order
         self.tag_logic = tag_logic
+        self._last_interaction = None  # 保存最后一次交互
         
         # 添加分页按钮
         self.add_item(PageButton("⏮️", "first"))
@@ -1129,6 +1229,9 @@ class SearchResultsView(discord.ui.View):
         if target_page < 1 or target_page > self.max_page:
             await interaction.response.send_message("页码超出范围。", ephemeral=True)
             return
+        
+        # 保存交互状态
+        self._last_interaction = interaction
         
         await interaction.response.defer()
         
@@ -1150,6 +1253,43 @@ class SearchResultsView(discord.ui.View):
                 item.label = f"{self.current_page}/{self.max_page}"
         
         await interaction.edit_original_response(embeds=embeds, view=self)
+    
+    async def on_timeout(self):
+        """超时处理"""
+        try:
+            # 创建状态字典
+            view_state = {
+                'view_type': 'SearchResultsView',
+                'user_id': self.user_id,
+                'include_tags': self.include_tags,
+                'exclude_tags': self.exclude_tags,
+                'keywords': self.keywords,
+                'channel_ids': self.channel_ids,
+                'include_authors': self.include_authors,
+                'exclude_authors': self.exclude_authors,
+                'after_ts': self.after_ts,
+                'before_ts': self.before_ts,
+                'current_page': self.current_page,
+                'per_page': self.per_page,
+                'total': self.total,
+                'sort_method': self.sort_method,
+                'sort_order': self.sort_order,
+                'tag_logic': self.tag_logic
+            }
+            
+            # 创建超时视图
+            timeout_view = TimeoutView(view_state)
+            
+            # 更新消息
+            if self._last_interaction:
+                await self._last_interaction.edit_original_response(
+                    content="⏰ 搜索结果界面已超时（15分钟），点击继续按钮恢复搜索状态",
+                    view=timeout_view,
+                    embeds=[]
+                )
+        except Exception:
+            # 如果更新失败，静默处理
+            pass
 
 class PageButton(discord.ui.Button):
     def __init__(self, label: str, action: str):
@@ -1161,9 +1301,15 @@ class PageButton(discord.ui.Button):
         if hasattr(self.view, 'results_view'):
             # 在CombinedSearchView中
             results_view = self.view.results_view  # type: ignore
+            # 保存交互状态
+            results_view._last_interaction = interaction
+            if hasattr(self.view, 'tag_view'):
+                self.view.tag_view._last_interaction = interaction
         else:
             # 在独立的SearchResultsView中
             results_view = self.view  # type: ignore
+            # 保存交互状态
+            results_view._last_interaction = interaction
             
         page = results_view.current_page
         
@@ -1182,6 +1328,11 @@ class PageButton(discord.ui.Button):
         if target_page < 1 or target_page > results_view.max_page:
             await interaction.response.send_message("页码超出范围。", ephemeral=True)
             return
+        
+        # 保存交互状态
+        results_view._last_interaction = interaction
+        if hasattr(self.view, 'tag_view'):
+            self.view.tag_view._last_interaction = interaction
         
         await interaction.response.defer()
         
@@ -1209,6 +1360,11 @@ class PageButton(discord.ui.Button):
             tag_view = self.view.tag_view  # type: ignore
             mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
             content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {results_view.total} 个帖子 (第{results_view.current_page}/{results_view.max_page}页)"
+            
+            # 保存CombinedSearchView的状态
+            tag_view._last_content = content
+            tag_view._last_embeds = embeds
+            
             await interaction.edit_original_response(content=content, embeds=embeds, view=self.view)
         else:
             await interaction.edit_original_response(embeds=embeds, view=self.view)
@@ -1221,9 +1377,13 @@ class CurrentPageButton(discord.ui.Button):
         # 检查当前view是CombinedSearchView还是SearchResultsView
         if hasattr(self.view, 'results_view'):
             # 在CombinedSearchView中
+            self.view.results_view._last_interaction = interaction
+            if hasattr(self.view, 'tag_view'):
+                self.view.tag_view._last_interaction = interaction
             await interaction.response.send_modal(GotoPageModal(self.view.results_view, self.view))  # type: ignore
         else:
             # 在独立的SearchResultsView中
+            self.view._last_interaction = interaction
             await interaction.response.send_modal(GotoPageModal(self.view, None))  # type: ignore
 
 class GotoPageModal(discord.ui.Modal, title="跳转页码"):
@@ -1242,8 +1402,13 @@ class GotoPageModal(discord.ui.Modal, title="跳转页码"):
     async def on_submit(self, interaction: discord.Interaction):
         try:
             page = int(self.page_input.value)
+            # 保存交互状态
+            self.search_view._last_interaction = interaction
+            
             if self.combined_view:
                 # 在CombinedSearchView中，使用go_to_page_combined
+                if hasattr(self.combined_view, 'tag_view'):
+                    self.combined_view.tag_view._last_interaction = interaction
                 page_button = PageButton("", "")  # 临时创建一个button
                 page_button.view = self.combined_view
                 await page_button.go_to_page_combined(interaction, page, self.search_view)
@@ -1256,9 +1421,10 @@ class GotoPageModal(discord.ui.Modal, title="跳转页码"):
 # ----- 合并视图：标签选择 + 搜索结果分页 -----
 class CombinedSearchView(discord.ui.View):
     def __init__(self, tag_view: TagSelectionView, results_view: SearchResultsView):
-        super().__init__(timeout=600)
+        super().__init__(timeout=900)  # 15分钟
         self.tag_view = tag_view
         self.results_view = results_view
+        self._last_interaction = None  # 保存最后一次交互
         
         # 添加标签按钮 (第0-1行，每页最多10个)
         tag_buttons = [item for item in tag_view.children if isinstance(item, TagButton)]
@@ -1280,4 +1446,143 @@ class CombinedSearchView(discord.ui.View):
         page_buttons = [item for item in results_view.children if isinstance(item, (PageButton, CurrentPageButton))]
         for button in page_buttons[:5]:  # 最多5个按钮
             button.row = 4
-            self.add_item(button) 
+            self.add_item(button)
+    
+    async def on_timeout(self):
+        """超时处理"""
+        try:
+            # 创建状态字典，包含TagSelectionView和SearchResultsView的状态
+            view_state = {
+                'view_type': 'CombinedSearchView',
+                'channel_id': self.tag_view.channel_id,
+                'include_tags': list(self.tag_view.include_tags),
+                'exclude_tags': list(self.tag_view.exclude_tags),
+                'include_keywords': self.tag_view.include_keywords,
+                'exclude_keywords': self.tag_view.exclude_keywords,
+                'exclude_mode': self.tag_view.exclude_mode,
+                'sort_method': self.tag_view.sort_method,
+                'sort_order': self.tag_view.sort_order,
+                'tag_page': self.tag_view.tag_page,
+                'all_tags': self.tag_view.all_tags,
+                'user_id': self.tag_view.user_id,
+                'has_results': self.tag_view._has_results
+            }
+            
+            # 创建超时视图
+            timeout_view = TimeoutView(view_state)
+            
+            # 更新消息 - 优先使用tag_view的interaction
+            interaction = self.tag_view._last_interaction or self.results_view._last_interaction
+            if interaction:
+                await interaction.edit_original_response(
+                    content="⏰ 搜索界面已超时（15分钟），点击继续按钮恢复搜索状态",
+                    view=timeout_view,
+                    embeds=[]
+                )
+        except Exception:
+            # 如果更新失败，静默处理
+            pass 
+
+# 添加"继续"按钮类
+class ContinueButton(discord.ui.Button):
+    def __init__(self, view_state: dict):
+        super().__init__(label="🔄 继续搜索", style=discord.ButtonStyle.primary, custom_id="continue_search")
+        self.view_state = view_state
+
+    async def callback(self, interaction: discord.Interaction):
+        view_type = self.view_state.get('view_type')
+        
+        if view_type == 'TagSelectionView':
+            # 恢复TagSelectionView状态
+            view = TagSelectionView(self.view_state['channel_id'])
+            view.include_tags = set(self.view_state['include_tags'])
+            view.exclude_tags = set(self.view_state['exclude_tags'])
+            view.include_keywords = self.view_state['include_keywords']
+            view.exclude_keywords = self.view_state['exclude_keywords']
+            view.exclude_mode = self.view_state['exclude_mode']
+            view.sort_method = self.view_state['sort_method']
+            view.sort_order = self.view_state['sort_order']
+            view.tag_page = self.view_state['tag_page']
+            view.all_tags = self.view_state['all_tags']
+            
+            await view.setup(interaction.guild, self.view_state['user_id'])
+            
+            # 如果有搜索结果，恢复搜索状态
+            if self.view_state.get('has_results', False):
+                await view.update_search_results(interaction, edit_original=True)
+            else:
+                mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
+                await interaction.response.edit_message(
+                    content=f"选择要搜索的标签 - {mode_text}：",
+                    view=view,
+                    embeds=[]
+                )
+        
+        elif view_type == 'ChannelSelectionView':
+            # 恢复ChannelSelectionView状态
+            # 重新获取频道列表
+            all_forum_channels = [ch for ch in interaction.guild.channels if isinstance(ch, discord.ForumChannel)]
+            
+            # 从TagSystem获取已索引的频道ID
+            tag_system = interaction.client.get_cog("TagSystem")
+            if tag_system:
+                indexed_channel_ids = tag_system.indexed_channel_ids
+            else:
+                indexed_channel_ids = set(await database.get_indexed_channel_ids())
+            
+            forum_channels = [ch for ch in all_forum_channels if ch.id in indexed_channel_ids]
+            
+            if not forum_channels:
+                await interaction.response.send_message("暂无已索引的论坛频道。", ephemeral=True)
+                return
+            
+            view = ChannelSelectionView(forum_channels)
+            await interaction.response.edit_message(content="选择要搜索的频道：", view=view, embeds=[])
+        
+        elif view_type == 'SearchResultsView':
+            # 恢复SearchResultsView状态
+            search_cog = interaction.client.get_cog("Search")
+            if not search_cog:
+                await interaction.response.send_message("搜索功能不可用", ephemeral=True)
+                return
+            
+            view = SearchResultsView(
+                search_cog, self.view_state['user_id'],
+                self.view_state['include_tags'], self.view_state['exclude_tags'],
+                self.view_state['keywords'], self.view_state['channel_ids'],
+                self.view_state['include_authors'], self.view_state['exclude_authors'],
+                self.view_state['after_ts'], self.view_state['before_ts'],
+                self.view_state['current_page'], self.view_state['per_page'],
+                self.view_state['total'], self.view_state['sort_method'],
+                self.view_state['sort_order'], self.view_state['tag_logic']
+            )
+            
+            # 恢复当前页的搜索结果
+            await view.go_to_page(interaction, self.view_state['current_page'])
+        
+        elif view_type == 'CombinedSearchView':
+            # 恢复CombinedSearchView状态 - 先恢复TagSelectionView
+            tag_view = TagSelectionView(self.view_state['channel_id'])
+            tag_view.include_tags = set(self.view_state['include_tags'])
+            tag_view.exclude_tags = set(self.view_state['exclude_tags'])
+            tag_view.include_keywords = self.view_state['include_keywords']
+            tag_view.exclude_keywords = self.view_state['exclude_keywords']
+            tag_view.exclude_mode = self.view_state['exclude_mode']
+            tag_view.sort_method = self.view_state['sort_method']
+            tag_view.sort_order = self.view_state['sort_order']
+            tag_view.tag_page = self.view_state['tag_page']
+            tag_view.all_tags = self.view_state['all_tags']
+            
+            await tag_view.setup(interaction.guild, self.view_state['user_id'])
+            
+            # 恢复搜索结果
+            await tag_view.update_search_results(interaction, edit_original=True)
+
+class TimeoutView(discord.ui.View):
+    def __init__(self, view_state: dict):
+        super().__init__(timeout=None)
+        self.add_item(ContinueButton(view_state))
+
+# 添加async setup的cog加载时注册持久化View
+async def setup(bot):
+    await bot.add_cog(Search(bot)) 
