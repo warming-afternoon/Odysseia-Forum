@@ -160,7 +160,8 @@ async def search_threads(
     limit: int,
     sort_method: str = "comprehensive",  # 新增参数：comprehensive, created_time, active_time, reaction_count
     sort_order: str = "desc",  # 新增参数：desc, asc
-    tag_logic: str = "and"  # 新增参数：and, or
+    tag_logic: str = "and",  # 新增参数：and, or
+    exclude_keywords: str = ""  # 新增：排除关键词
 ):
     """搜索帖子并按指定方式排序。
 
@@ -315,7 +316,7 @@ async def search_threads(
                 scored_rows.sort(key=lambda x: x['final_score'], reverse=(sort_order == "desc"))
                 
                 # 在Python中应用标签和关键词过滤
-                filtered_rows = _filter_threads(scored_rows, include_tags, exclude_tags, keywords, tag_logic)
+                filtered_rows = _filter_threads(scored_rows, include_tags, exclude_tags, keywords, exclude_keywords, tag_logic)
                 
                 # 应用分页
                 start_idx = offset
@@ -349,7 +350,7 @@ async def search_threads(
                 dict_rows = [dict(row) for row in rows]
                 
                 # 在Python中应用标签和关键词过滤
-                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords, tag_logic)
+                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords, exclude_keywords, tag_logic)
                 
                 # 应用分页
                 start_idx = offset
@@ -366,7 +367,8 @@ async def count_threads_for_search(
     exclude_authors: list[int] | None,
     after_ts: str | None,
     before_ts: str | None,
-    tag_logic: str = "and"
+    tag_logic: str = "and",
+    exclude_keywords: str = ""  # 新增：排除关键词
 ):
     """统计搜索结果总数"""
     conditions = []
@@ -408,7 +410,7 @@ async def count_threads_for_search(
                 dict_rows = [dict(row) for row in rows]
                 
                 # 在Python中应用标签和关键词过滤
-                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords, tag_logic)
+                filtered_rows = _filter_threads(dict_rows, include_tags, exclude_tags, keywords, exclude_keywords, tag_logic)
                 
                 return len(filtered_rows)
     else:
@@ -510,14 +512,19 @@ async def get_indexed_channel_ids():
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
-def _filter_threads(threads: list[dict], include_tags: list[str], exclude_tags: list[str], keywords: str, tag_logic: str = "and") -> list[dict]:
+def _filter_threads(threads: list[dict], include_tags: list[str], exclude_tags: list[str], keywords: str, exclude_keywords: str = "", tag_logic: str = "and") -> list[dict]:
     """在Python中过滤帖子的标签和关键词
     
     Args:
         threads: 帖子列表，每个帖子必须包含tags字段，并可能包含title和first_message_excerpt字段
         include_tags: 必须包含的标签列表
         exclude_tags: 必须排除的标签列表（OR逻辑）
-        keywords: 关键词字符串，在标题或首楼摘要中搜索
+        keywords: 关键词字符串，支持混合AND/OR逻辑
+                 - 逗号（,或，）分隔AND组：必须满足所有组
+                 - 每组内斜杠（/）分隔OR选项：只需满足组内任一关键词
+                 - 示例："纯爱/甜，校园，男生/女生/学生"
+                   表示：必须包含（纯爱或甜）且包含校园且包含（男生或女生或学生）
+        exclude_keywords: 排除关键词字符串，支持AND（逗号分隔）和OR（斜杠分隔）逻辑
         tag_logic: 标签逻辑，"and"表示AND逻辑，"or"表示OR逻辑
     
     Returns:
@@ -555,13 +562,57 @@ def _filter_threads(threads: list[dict], include_tags: list[str], exclude_tags: 
         
         # 检查关键词过滤
         if keywords:
-            keywords_lower = keywords.lower()
             title = (thread.get('title', '') or '').lower()
             excerpt = (thread.get('first_message_excerpt', '') or '').lower()
             
-            # 关键词必须在标题或首楼摘要中出现
-            if keywords_lower not in title and keywords_lower not in excerpt:
-                continue  # 不包含关键词，跳过
+            # 支持混合AND/OR逻辑：
+            # 1. 逗号分隔AND组（必须都满足）
+            # 2. 每组内斜杠分隔OR选项（满足其中一个即可）
+            # 例如：纯爱/甜，校园，男生/女生/学生
+            
+            # 支持中文逗号"，"和英文逗号","
+            keywords_replaced = keywords.replace('，', ',')  # 统一转换为英文逗号
+            and_groups = [group.strip() for group in keywords_replaced.split(',') if group.strip()]
+            
+            # 检查每个AND组是否满足
+            all_groups_satisfied = True
+            for group in and_groups:
+                if '/' in group:
+                    # OR逻辑：组内只需满足任意一个关键词
+                    or_keywords = [kw.strip().lower() for kw in group.split('/') if kw.strip()]
+                    group_satisfied = False
+                    for keyword in or_keywords:
+                        if keyword in title or keyword in excerpt:
+                            group_satisfied = True
+                            break
+                    if not group_satisfied:
+                        all_groups_satisfied = False
+                        break
+                else:
+                    # 单个关键词：必须包含
+                    keyword = group.strip().lower()
+                    if keyword not in title and keyword not in excerpt:
+                        all_groups_satisfied = False
+                        break
+            
+            if not all_groups_satisfied:
+                continue  # 不满足关键词条件，跳过
+        
+        # 检查排除关键词
+        if exclude_keywords:
+            # 排除关键词使用OR逻辑：包含任何一个排除关键词就排除该帖子
+            # 支持中文逗号"，"和英文逗号","
+            exclude_keywords_replaced = exclude_keywords.replace('，', ',')  # 统一转换为英文逗号
+            exclude_keywords_list = [kw.strip().lower() for kw in exclude_keywords_replaced.split(',') if kw.strip()]
+            
+            # 检查是否包含任何排除关键词
+            exclude_found = False
+            for exclude_keyword in exclude_keywords_list:
+                if exclude_keyword in title or exclude_keyword in excerpt:
+                    exclude_found = True
+                    break
+            if exclude_found:
+                continue  # 包含排除关键词，跳过该帖子
         
         # 通过所有过滤条件
         filtered_threads.append(thread)
