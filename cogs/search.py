@@ -1304,7 +1304,7 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
         self.parent_view = parent_view
         
         self.include_input = discord.ui.TextInput(
-            label="包含关键词（全部包含：逗号分隔，如：关键词1，关键词2；包含任意：斜杠分隔，如：关键词1/关键词2）",
+            label="包含关键词（逗号或斜杠分隔）",
             placeholder="在标题或首楼中必须包含的关键词",
             required=False,
             default=", ".join(self.parent_view.include_keywords)
