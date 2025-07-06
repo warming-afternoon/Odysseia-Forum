@@ -512,6 +512,25 @@ async def get_indexed_channel_ids():
             rows = await cursor.fetchall()
             return [row[0] for row in rows]
 
+async def get_tags_for_author(author_id: int):
+    """获取指定作者所有帖子中出现过的标签"""
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("""
+            SELECT DISTINCT tags FROM threads 
+            WHERE author_id = ? AND tags IS NOT NULL AND tags != ''
+        """, (author_id,)) as cursor:
+            rows = await cursor.fetchall()
+            
+            # 收集所有标签名
+            all_tags = set()
+            for row in rows:
+                tags_str = row[0] or ''
+                tag_names = [tag.strip() for tag in tags_str.split(',') if tag.strip()]
+                all_tags.update(tag_names)
+            
+            # 返回格式：[(tag_id, tag_name)]，tag_id设为0因为我们主要用名称搜索
+            return [(0, tag_name) for tag_name in sorted(all_tags)]
+
 def _filter_threads(threads: list[dict], include_tags: list[str], exclude_tags: list[str], keywords: str, exclude_keywords: str = "", tag_logic: str = "and") -> list[dict]:
     """在Python中过滤帖子的标签和关键词
     

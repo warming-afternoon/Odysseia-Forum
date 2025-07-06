@@ -646,6 +646,62 @@ class Search(commands.Cog):
         await interaction.channel.send(embed=embed, view=view)
         await interaction.response.send_message("✅ 已创建全局搜索按钮。", ephemeral=True)
 
+    @app_commands.command(name="快捷搜索", description="快速搜索指定作者的所有帖子")
+    @app_commands.describe(author="要搜索的作者（@用户 或 用户ID）")
+    async def quick_author_search(self, interaction: discord.Interaction, author: discord.User):
+        # 刷新缓存
+        await self.cache_channel_tags()
+        
+        # 获取所有已索引的频道ID
+        indexed_channel_ids = await database.get_indexed_channel_ids()
+        
+        if not indexed_channel_ids:
+            await interaction.response.send_message("暂无已索引的论坛频道。", ephemeral=True)
+            return
+        
+        # 创建作者搜索视图并执行初始搜索
+        view = AuthorTagSelectionView(indexed_channel_ids, author.id)
+        initial_results = await view.setup_with_initial_search(interaction.guild, interaction.user.id)
+        
+        mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
+        
+        if not initial_results['has_results']:
+            # 没有搜索结果时
+            if 'error' in initial_results:
+                content = f"快捷搜索 - 作者：{author.mention} - {mode_text}：\n\n❌ **搜索出错：** {initial_results['error']}"
+            else:
+                content = f"快捷搜索 - 作者：{author.mention} - {mode_text}：\n\n🔍 **搜索结果：** 该作者暂无帖子"
+            
+            # 更新view状态
+            view._last_content = content
+            view._last_embeds = []
+            view._has_results = False
+            
+            await interaction.response.send_message(content, view=view, ephemeral=True)
+        else:
+            # 有搜索结果时，创建合并视图
+            results_view = SearchResultsView(
+                view.search_cog, view.user_id,
+                [], [], "",  # 初始搜索为空条件（只限制作者）
+                view.channel_ids, 
+                [author.id], None,  # 强制只看指定作者
+                None, None,  # 忽略时间偏好
+                1, initial_results['per_page'], initial_results['total'], 
+                view.sort_method, view.sort_order, "and"  # 固定标签逻辑
+            )
+            
+            # 合并两个view的按钮
+            combined_view = CombinedSearchView(view, results_view)
+            
+            content = f"快捷搜索 - 作者：{author.mention} - {mode_text}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
+            
+            # 保存状态
+            view._last_content = content
+            view._last_embeds = initial_results['embeds']
+            view._has_results = True
+            
+            await interaction.response.send_message(content, view=combined_view, embeds=initial_results['embeds'], ephemeral=True)
+
     # ----- Embed 构造 -----
     def _build_thread_embed(self, thread_row: dict, guild: discord.Guild, preview_mode: str = "thumbnail"):
         thread_id = thread_row['thread_id']
@@ -712,9 +768,49 @@ class PersistentChannelSearchView(discord.ui.View):
         else:
             channel_id = self.channel_id
             
+        # 创建标签选择视图并执行初始搜索
         view = TagSelectionView(channel_id)
-        await view.setup(interaction.guild, interaction.user.id)
-        await interaction.response.send_message("选择要搜索的标签：", view=view, ephemeral=True)
+        initial_results = await view.setup_with_initial_search(interaction.guild, interaction.user.id)
+        
+        mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
+        
+        if not initial_results['has_results']:
+            # 没有搜索结果时
+            if 'error' in initial_results:
+                content = f"选择要搜索的标签 - {mode_text}：\n\n❌ **搜索出错：** {initial_results['error']}"
+            else:
+                content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+            
+            # 更新view状态
+            view._last_content = content
+            view._last_embeds = []
+            view._has_results = False
+            
+            await interaction.response.send_message(content, view=view, ephemeral=True)
+        else:
+            # 有搜索结果时，创建合并视图
+            results_view = SearchResultsView(
+                view.search_cog, view.user_id,
+                [], [], "",  # 初始搜索为空条件
+                view.channel_ids, 
+                initial_results['prefs']['include_authors'] if initial_results['prefs']['include_authors'] else None,
+                initial_results['prefs']['exclude_authors'] if initial_results['prefs']['exclude_authors'] else None,
+                initial_results['prefs']['after_date'], initial_results['prefs']['before_date'],
+                1, initial_results['per_page'], initial_results['total'], 
+                view.sort_method, view.sort_order, initial_results['prefs']['tag_logic']
+            )
+            
+            # 合并两个view的按钮
+            combined_view = CombinedSearchView(view, results_view)
+            
+            content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
+            
+            # 保存状态
+            view._last_content = content
+            view._last_embeds = initial_results['embeds']
+            view._has_results = True
+            
+            await interaction.response.send_message(content, view=combined_view, embeds=initial_results['embeds'], ephemeral=True)
 
 class PersistentGlobalSearchView(discord.ui.View):
     def __init__(self, message_id: str = None):
@@ -815,9 +911,9 @@ class ChannelSelectionView(discord.ui.View):
             await interaction.response.send_message("请先选择要搜索的频道。", ephemeral=True)
             return
         
-        # 创建标签选择视图
+        # 创建标签选择视图并执行初始搜索
         view = TagSelectionView(self.selected_channels)
-        await view.setup(interaction.guild, interaction.user.id)
+        initial_results = await view.setup_with_initial_search(interaction.guild, interaction.user.id)
         
         # 显示选择的频道信息
         if len(self.selected_channels) == len(self.channels):
@@ -826,10 +922,45 @@ class ChannelSelectionView(discord.ui.View):
             selected_names = [ch.name for ch in self.channels if ch.id in self.selected_channels]
             channel_info = ", ".join(selected_names)
         
-        await interaction.response.edit_message(
-            content=f"选择要搜索的标签：\n\n**搜索范围：** {channel_info}",
-            view=view
-        )
+        mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
+        
+        if not initial_results['has_results']:
+            # 没有搜索结果时
+            if 'error' in initial_results:
+                content = f"选择要搜索的标签 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n❌ **搜索出错：** {initial_results['error']}"
+            else:
+                content = f"选择要搜索的标签 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+            
+            # 更新view状态
+            view._last_content = content
+            view._last_embeds = []
+            view._has_results = False
+            
+            await interaction.response.edit_message(content=content, view=view, embeds=[])
+        else:
+            # 有搜索结果时，创建合并视图
+            results_view = SearchResultsView(
+                view.search_cog, view.user_id,
+                [], [], "",  # 初始搜索为空条件
+                view.channel_ids, 
+                initial_results['prefs']['include_authors'] if initial_results['prefs']['include_authors'] else None,
+                initial_results['prefs']['exclude_authors'] if initial_results['prefs']['exclude_authors'] else None,
+                initial_results['prefs']['after_date'], initial_results['prefs']['before_date'],
+                1, initial_results['per_page'], initial_results['total'], 
+                view.sort_method, view.sort_order, initial_results['prefs']['tag_logic']
+            )
+            
+            # 合并两个view的按钮
+            combined_view = CombinedSearchView(view, results_view)
+            
+            content = f"选择要搜索的标签 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
+            
+            # 保存状态
+            view._last_content = content
+            view._last_embeds = initial_results['embeds']
+            view._has_results = True
+            
+            await interaction.response.edit_message(content=content, view=combined_view, embeds=initial_results['embeds'])
     
     async def on_timeout(self):
         """超时处理"""
@@ -961,6 +1092,88 @@ class TagSelectionView(discord.ui.View):
         sort_select = SortMethodSelect(self.sort_method)
         sort_select.row = 3
         self.add_item(sort_select)
+
+    async def setup_with_initial_search(self, guild: discord.Guild, user_id: int = None):
+        """获取标签并设置UI，同时执行初始搜索"""
+        # 先执行普通setup
+        await self.setup(guild, user_id)
+        
+        # 执行初始搜索并返回结果
+        return await self.get_initial_search_results(guild)
+
+    async def get_initial_search_results(self, guild: discord.Guild):
+        """获取初始搜索结果（显示所有帖子，应用用户偏好）"""
+        try:
+            # 获取用户搜索偏好
+            prefs = await database.get_user_search_preferences(self.user_id)
+            
+            # 初始搜索：空标签，空关键词（显示所有帖子）
+            include_tags = []
+            exclude_tags = []
+            include_keywords = ""
+            
+            per_page = await database.get_results_per_page(self.user_id)
+            
+            # 应用用户偏好
+            include_authors = prefs['include_authors'] if prefs['include_authors'] else None
+            exclude_authors = prefs['exclude_authors'] if prefs['exclude_authors'] else None
+            after_ts = prefs['after_date']
+            before_ts = prefs['before_date']
+            
+            total = await database.count_threads_for_search(
+                include_tags, exclude_tags, include_keywords, 
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
+                prefs['tag_logic']
+            )
+            
+            if total == 0:
+                # 没有结果时只返回基本信息
+                return {
+                    'total': 0,
+                    'threads': [],
+                    'embeds': [],
+                    'has_results': False
+                }
+            
+            threads = await database.search_threads(
+                include_tags, exclude_tags, include_keywords,
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
+                0, per_page, self.sort_method, self.sort_order, prefs['tag_logic']
+            )
+            
+            # 获取搜索cog来构建embed
+            if not self.search_cog:
+                # 通过guild.me获取bot实例
+                if hasattr(guild, 'me') and guild.me:
+                    bot = guild.me._state._get_client()
+                    self.search_cog = bot.get_cog("Search")
+                    
+            # 如果缓存已失效，重新缓存标签
+            if self.search_cog and hasattr(self.search_cog, 'cache_channel_tags'):
+                # 检查是否需要更新缓存
+                if not self.search_cog.channel_tags_cache:
+                    await self.search_cog.cache_channel_tags()
+                    
+            embeds = [self.search_cog._build_thread_embed(t, guild, prefs.get('preview_image_mode', 'thumbnail')) for t in threads]
+            
+            return {
+                'total': total,
+                'threads': threads,
+                'embeds': embeds,
+                'has_results': True,
+                'per_page': per_page,
+                'prefs': prefs
+            }
+            
+        except Exception as e:
+            print(f"初始搜索出错: {e}")
+            return {
+                'total': 0,
+                'threads': [],
+                'embeds': [],
+                'has_results': False,
+                'error': str(e)
+            }
 
     async def update_search_results(self, interaction: discord.Interaction, *, edit_original: bool = True):
         """更新搜索结果"""
@@ -1635,6 +1848,10 @@ class CombinedSearchView(discord.ui.View):
                 'has_results': self.tag_view._has_results
             }
             
+            # 如果是作者快捷搜索，添加author_id
+            if isinstance(self.tag_view, AuthorTagSelectionView):
+                view_state['author_id'] = self.tag_view.author_id
+            
             # 创建超时视图
             timeout_view = TimeoutView(view_state)
             
@@ -1678,12 +1895,47 @@ class ContinueButton(discord.ui.Button):
             if self.view_state.get('has_results', False):
                 await view.update_search_results(interaction, edit_original=True)
             else:
+                # 没有搜索结果时，执行初始搜索
+                initial_results = await view.get_initial_search_results(interaction.guild)
                 mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
-                await interaction.response.edit_message(
-                    content=f"选择要搜索的标签 - {mode_text}：",
-                    view=view,
-                    embeds=[]
-                )
+                
+                if not initial_results['has_results']:
+                    # 仍然没有结果时
+                    if 'error' in initial_results:
+                        content = f"选择要搜索的标签 - {mode_text}：\n\n❌ **搜索出错：** {initial_results['error']}"
+                    else:
+                        content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+                    
+                    # 更新view状态
+                    view._last_content = content
+                    view._last_embeds = []
+                    view._has_results = False
+                    
+                    await interaction.response.edit_message(content=content, view=view, embeds=[])
+                else:
+                    # 有搜索结果时，创建合并视图
+                    results_view = SearchResultsView(
+                        view.search_cog, view.user_id,
+                        [], [], "",  # 初始搜索为空条件
+                        view.channel_ids, 
+                        initial_results['prefs']['include_authors'] if initial_results['prefs']['include_authors'] else None,
+                        initial_results['prefs']['exclude_authors'] if initial_results['prefs']['exclude_authors'] else None,
+                        initial_results['prefs']['after_date'], initial_results['prefs']['before_date'],
+                        1, initial_results['per_page'], initial_results['total'], 
+                        view.sort_method, view.sort_order, initial_results['prefs']['tag_logic']
+                    )
+                    
+                    # 合并两个view的按钮
+                    combined_view = CombinedSearchView(view, results_view)
+                    
+                    content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
+                    
+                    # 保存状态
+                    view._last_content = content
+                    view._last_embeds = initial_results['embeds']
+                    view._has_results = True
+                    
+                    await interaction.response.edit_message(content=content, view=combined_view, embeds=initial_results['embeds'])
         
         elif view_type == 'ChannelSelectionView':
             # 恢复ChannelSelectionView状态
@@ -1729,7 +1981,14 @@ class ContinueButton(discord.ui.Button):
         
         elif view_type == 'CombinedSearchView':
             # 恢复CombinedSearchView状态 - 先恢复TagSelectionView
-            tag_view = TagSelectionView(self.view_state['channel_ids'])
+            # 检查是否是作者快捷搜索
+            if 'author_id' in self.view_state:
+                # 恢复AuthorTagSelectionView
+                tag_view = AuthorTagSelectionView(self.view_state['channel_ids'], self.view_state['author_id'])
+            else:
+                # 恢复普通TagSelectionView
+                tag_view = TagSelectionView(self.view_state['channel_ids'])
+            
             tag_view.include_tags = set(self.view_state['include_tags'])
             tag_view.exclude_tags = set(self.view_state['exclude_tags'])
             tag_view.include_keywords = self.view_state['include_keywords']
@@ -1749,6 +2008,241 @@ class TimeoutView(discord.ui.View):
     def __init__(self, view_state: dict):
         super().__init__(timeout=None)
         self.add_item(ContinueButton(view_state))
+
+# ----- 作者快捷搜索视图 -----
+class AuthorTagSelectionView(TagSelectionView):
+    def __init__(self, channel_ids, author_id: int):
+        super().__init__(channel_ids)
+        self.author_id = author_id  # 指定的作者ID
+        
+    async def setup(self, guild: discord.Guild, user_id: int = None):
+        """获取作者标签并设置UI"""
+        self.user_id = user_id
+        
+        # 获取指定作者的标签
+        self.all_tags = await database.get_tags_for_author(self.author_id)
+        
+        # 清空现有items
+        self.clear_items()
+        
+        # 计算当前页的标签
+        start_idx = self.tag_page * self.tags_per_page
+        end_idx = start_idx + self.tags_per_page
+        current_page_tags = self.all_tags[start_idx:end_idx]
+        
+        # 添加标签按钮 (第0-1行，每行5个)
+        for i, (tag_id, tag_name) in enumerate(current_page_tags):
+            style = discord.ButtonStyle.secondary
+            
+            # 优化：无论在哪种模式下，都显示已选择的标签状态
+            if tag_name in self.include_tags:
+                style = discord.ButtonStyle.green  # 正选标签始终显示绿色
+            elif tag_name in self.exclude_tags:
+                style = discord.ButtonStyle.red    # 反选标签始终显示红色
+                
+            button = TagButton(tag_name, style)
+            button.row = i // 5  # 每行5个按钮，分配到第0-1行
+            self.add_item(button)
+        
+        # 添加第2行按钮：上一页 + 控制按钮 + 下一页
+        if len(self.all_tags) > self.tags_per_page:
+            self.add_item(TagPageButton("◀️ 上一页", "prev"))
+        
+        # 控制按钮放在中间 (第2行)
+        mode_button = ModeToggleButton(self.exclude_mode)
+        mode_button.row = 2
+        self.add_item(mode_button)
+        
+        keyword_button = KeywordButton()
+        keyword_button.row = 2
+        self.add_item(keyword_button)
+        
+        # 添加升序/降序按钮
+        sort_order_button = SortOrderButton(self.sort_order)
+        sort_order_button.row = 2
+        self.add_item(sort_order_button)
+        
+        if len(self.all_tags) > self.tags_per_page:
+            self.add_item(TagPageButton("▶️ 下一页", "next"))
+        
+        # 添加排序选择器 (第3行)
+        sort_select = SortMethodSelect(self.sort_method)
+        sort_select.row = 3
+        self.add_item(sort_select)
+
+    async def get_initial_search_results(self, guild: discord.Guild):
+        """获取初始搜索结果（显示指定作者的所有帖子，忽略用户偏好）"""
+        try:
+            # 初始搜索：空标签，空关键词，但强制限制作者
+            include_tags = []
+            exclude_tags = []
+            include_keywords = ""
+            
+            per_page = await database.get_results_per_page(self.user_id)
+            
+            # 忽略用户偏好，强制使用指定作者
+            include_authors = [self.author_id]
+            exclude_authors = None
+            after_ts = None
+            before_ts = None
+            tag_logic = "and"  # 固定使用AND逻辑
+            
+            total = await database.count_threads_for_search(
+                include_tags, exclude_tags, include_keywords, 
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
+                tag_logic
+            )
+            
+            if total == 0:
+                # 没有结果时只返回基本信息
+                return {
+                    'total': 0,
+                    'threads': [],
+                    'embeds': [],
+                    'has_results': False
+                }
+            
+            threads = await database.search_threads(
+                include_tags, exclude_tags, include_keywords,
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
+                0, per_page, self.sort_method, self.sort_order, tag_logic
+            )
+            
+            # 获取搜索cog来构建embed
+            if not self.search_cog:
+                # 通过guild.me获取bot实例
+                if hasattr(guild, 'me') and guild.me:
+                    bot = guild.me._state._get_client()
+                    self.search_cog = bot.get_cog("Search")
+                    
+            # 如果缓存已失效，重新缓存标签
+            if self.search_cog and hasattr(self.search_cog, 'cache_channel_tags'):
+                # 检查是否需要更新缓存
+                if not self.search_cog.channel_tags_cache:
+                    await self.search_cog.cache_channel_tags()
+                    
+            # 对于作者快捷搜索，固定使用缩略图模式
+            embeds = [self.search_cog._build_thread_embed(t, guild, 'thumbnail') for t in threads]
+            
+            return {
+                'total': total,
+                'threads': threads,
+                'embeds': embeds,
+                'has_results': True,
+                'per_page': per_page,
+                'prefs': {
+                    'include_authors': include_authors,
+                    'exclude_authors': exclude_authors,
+                    'after_date': after_ts,
+                    'before_date': before_ts,
+                    'tag_logic': tag_logic,
+                    'preview_image_mode': 'thumbnail'
+                }
+            }
+            
+        except Exception as e:
+            print(f"作者快捷搜索出错: {e}")
+            return {
+                'total': 0,
+                'threads': [],
+                'embeds': [],
+                'has_results': False,
+                'error': str(e)
+            }
+
+    async def update_search_results(self, interaction: discord.Interaction, *, edit_original: bool = True):
+        """更新搜索结果（作者快捷搜索版本）"""
+        try:
+            # 保存交互状态
+            self._last_interaction = interaction
+            
+            include_tags = list(self.include_tags)
+            exclude_tags = list(self.exclude_tags)
+            
+            # 处理关键词
+            keywords_parts = []
+            if self.include_keywords:
+                keywords_parts.append(" ".join(self.include_keywords))
+            
+            include_keywords = " ".join(keywords_parts) if keywords_parts else ""
+            
+            per_page = await database.get_results_per_page(self.user_id)
+            
+            # 忽略用户偏好，强制使用指定作者
+            include_authors = [self.author_id]
+            exclude_authors = None
+            after_ts = None
+            before_ts = None
+            tag_logic = "and"  # 固定使用AND逻辑
+            
+            total = await database.count_threads_for_search(
+                include_tags, exclude_tags, include_keywords, 
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
+                tag_logic
+            )
+            
+            mode_text = "反选模式 (选择要排除的标签)" if self.exclude_mode else "正选模式 (选择要包含的标签)"
+            
+            if total == 0:
+                # 没有结果时只更新标签选择界面
+                content = f"快捷搜索 - 作者：<@{self.author_id}> - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+                self._last_content = content
+                self._last_embeds = []
+                self._has_results = False
+                
+                if edit_original:
+                    await interaction.response.edit_message(content=content, view=self, embeds=[])
+                else:
+                    await interaction.edit_original_response(content=content, view=self, embeds=[])
+                return
+            
+            threads = await database.search_threads(
+                include_tags, exclude_tags, include_keywords,
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
+                0, per_page, self.sort_method, self.sort_order, tag_logic
+            )
+            
+            # 获取搜索cog来构建embed
+            if not self.search_cog:
+                self.search_cog = interaction.client.get_cog("Search")
+                
+            # 如果缓存已失效，重新缓存标签
+            if self.search_cog and hasattr(self.search_cog, 'cache_channel_tags'):
+                # 检查是否需要更新缓存
+                if not self.search_cog.channel_tags_cache:
+                    await self.search_cog.cache_channel_tags()
+                
+            # 对于作者快捷搜索，固定使用缩略图模式
+            embeds = [self.search_cog._build_thread_embed(t, interaction.guild, 'thumbnail') for t in threads]
+            
+            # 创建搜索结果view
+            results_view = SearchResultsView(
+                self.search_cog, self.user_id,
+                include_tags, exclude_tags, include_keywords,
+                self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
+                1, per_page, total, self.sort_method, self.sort_order, tag_logic
+            )
+            
+            # 合并两个view的按钮
+            combined_view = CombinedSearchView(self, results_view)
+            
+            content = f"快捷搜索 - 作者：<@{self.author_id}> - {mode_text}：\n\n🔍 **搜索结果：** 找到 {total} 个帖子 (第1/{results_view.max_page}页)"
+            
+            # 保存状态
+            self._last_content = content
+            self._last_embeds = embeds
+            self._has_results = True
+            
+            if edit_original:
+                await interaction.response.edit_message(content=content, view=combined_view, embeds=embeds)
+            else:
+                await interaction.edit_original_response(content=content, view=combined_view, embeds=embeds)
+            
+        except Exception as e:
+            if not interaction.response.is_done():
+                await interaction.response.send_message(f"搜索出错: {e}", ephemeral=True)
+            else:
+                await interaction.followup.send(f"搜索出错: {e}", ephemeral=True)
 
 # 添加async setup的cog加载时注册持久化View
 async def setup(bot):
