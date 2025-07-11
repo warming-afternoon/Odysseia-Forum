@@ -620,8 +620,8 @@ class Search(commands.Cog):
             inline=False
         )
         
-        await interaction.channel.send(embed=embed, view=view)
         await interaction.response.send_message("✅ 已创建频道搜索按钮。", ephemeral=True)
+        await interaction.channel.send(embed=embed, view=view)
 
     @app_commands.command(name="创建全局搜索", description="在当前频道创建全局搜索按钮")
     async def create_global_search(self, interaction: discord.Interaction):
@@ -642,8 +642,8 @@ class Search(commands.Cog):
             inline=False
         )
         
-        await interaction.channel.send(embed=embed, view=view)
         await interaction.response.send_message("✅ 已创建全局搜索按钮。", ephemeral=True)
+        await interaction.channel.send(embed=embed, view=view)
 
     @app_commands.command(name="快捷搜索", description="快速搜索指定作者的所有帖子")
     @app_commands.describe(author="要搜索的作者（@用户 或 用户ID）")

@@ -5,6 +5,9 @@ import asyncio
 import datetime
 from typing import TYPE_CHECKING
 
+if TYPE_CHECKING:
+    from .main import Search
+
 import database
 
 # ----- 持久化搜索按钮 -----
@@ -34,14 +37,14 @@ class PersistentChannelSearchView(discord.ui.View):
         view = TagSelectionView(channel_id)
         initial_results = await view.setup_with_initial_search(interaction.guild, interaction.user.id)
         
-        mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
+        mode_text = f"标签匹配: {'全部' if view.tag_logic == 'and' else '任一'}"
         
         if not initial_results['has_results']:
             # 没有搜索结果时
             if 'error' in initial_results:
-                content = f"选择要搜索的标签 - {mode_text}：\n\n❌ **搜索出错：** {initial_results['error']}"
+                content = f"选择搜索条件 - {mode_text}：\n\n❌ **搜索出错：** {initial_results['error']}"
             else:
-                content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+                content = f"选择搜索条件 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
             
             # 更新view状态
             view._last_content = content
@@ -49,6 +52,7 @@ class PersistentChannelSearchView(discord.ui.View):
             view._has_results = False
             
             await interaction.response.send_message(content, view=view, ephemeral=True)
+            
         else:
             # 有搜索结果时，创建合并视图
             results_view = SearchResultsView(
@@ -65,7 +69,7 @@ class PersistentChannelSearchView(discord.ui.View):
             # 合并两个view的按钮
             combined_view = CombinedSearchView(view, results_view)
             
-            content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
+            content = f"选择搜索条件 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
             
             # 保存状态
             view._last_content = content
@@ -184,14 +188,14 @@ class ChannelSelectionView(discord.ui.View):
             selected_names = [ch.name for ch in self.channels if ch.id in self.selected_channels]
             channel_info = ", ".join(selected_names)
         
-        mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
+        mode_text = f"标签匹配: {'全部' if view.tag_logic == 'and' else '任一'}"
         
         if not initial_results['has_results']:
             # 没有搜索结果时
             if 'error' in initial_results:
-                content = f"选择要搜索的标签 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n❌ **搜索出错：** {initial_results['error']}"
+                content = f"选择搜索条件 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n❌ **搜索出错：** {initial_results['error']}"
             else:
-                content = f"选择要搜索的标签 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+                content = f"选择搜索条件 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
             
             # 更新view状态
             view._last_content = content
@@ -215,7 +219,7 @@ class ChannelSelectionView(discord.ui.View):
             # 合并两个view的按钮
             combined_view = CombinedSearchView(view, results_view)
             
-            content = f"选择要搜索的标签 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
+            content = f"选择搜索条件 - {mode_text}：\n\n**搜索范围：** {channel_info}\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
             
             # 保存状态
             view._last_content = content
@@ -265,13 +269,13 @@ class TagSelectionView(discord.ui.View):
         self.exclude_tags = set()
         self.include_keywords = []
         self.exclude_keywords = []
-        self.exclude_mode = False  # False=正选模式, True=反选模式
+        self.tag_logic = "and"  # 'and' 或 'or'
         self.search_cog: "Search" = None  # 将在setup中设置
         self.user_id = None  # 将在setup中设置
         self.sort_method = "comprehensive"  # 默认使用综合排序
         self.sort_order = "desc"  # 默认降序排序
         self.tag_page = 0  # 当前标签页
-        self.tags_per_page = 10  # 每页显示的标签数
+        self.tags_per_page = 25  # 每页显示的标签数 (Select菜单最多25个)
         self.all_tags = []  # 所有标签列表
         self._last_interaction = None  # 保存最后一次交互
         self._last_content = None  # 保存最后的内容
@@ -316,42 +320,36 @@ class TagSelectionView(discord.ui.View):
         end_idx = start_idx + self.tags_per_page
         current_page_tags = self.all_tags[start_idx:end_idx]
         
-        # 添加标签按钮 (第0-1行，每行5个)
-        for i, (tag_id, tag_name) in enumerate(current_page_tags):
-            style = discord.ButtonStyle.secondary
-            
-            # 优化：无论在哪种模式下，都显示已选择的标签状态
-            if tag_name in self.include_tags:
-                style = discord.ButtonStyle.green  # 正选标签始终显示绿色
-            elif tag_name in self.exclude_tags:
-                style = discord.ButtonStyle.red    # 反选标签始终显示红色
-                
-            button = TagButton(tag_name, style)
-            button.row = i // 5  # 每行5个按钮，分配到第0-1行
-            self.add_item(button)
+        # 第 0 行: 正选标签
+        include_options = [discord.SelectOption(label=tag_name, value=tag_name) for _, tag_name in current_page_tags]
+        self.add_item(IncludeTagSelect(include_options, list(self.include_tags)))
+
+        # 第 1 行: 反选标签
+        exclude_options = [discord.SelectOption(label=tag_name, value=tag_name) for _, tag_name in current_page_tags]
+        self.add_item(ExcludeTagSelect(exclude_options, list(self.exclude_tags)))
         
-        # 添加第2行按钮：上一页 + 控制按钮 + 下一页
-        if len(self.all_tags) > self.tags_per_page:
-            self.add_item(TagPageButton("◀️ 上一页", "prev"))
-        
-        # 控制按钮放在中间 (第2行)
-        mode_button = ModeToggleButton(self.exclude_mode)
-        mode_button.row = 2
-        self.add_item(mode_button)
-        
+        # 第 2 行: 控制按钮
         keyword_button = KeywordButton()
         keyword_button.row = 2
         self.add_item(keyword_button)
-        
-        # 添加升序/降序按钮
+
+        if len(self.all_tags) > self.tags_per_page:
+            prev_page_button = TagPageButton("◀️ 上一页", "prev")
+            self.add_item(prev_page_button)
+
+        tag_logic_button = TagLogicButton(self.tag_logic)
+        tag_logic_button.row = 2
+        self.add_item(tag_logic_button)
+
+        if len(self.all_tags) > self.tags_per_page:
+            next_page_button = TagPageButton("▶️ 下一页", "next")
+            self.add_item(next_page_button)
+            
         sort_order_button = SortOrderButton(self.sort_order)
         sort_order_button.row = 2
         self.add_item(sort_order_button)
         
-        if len(self.all_tags) > self.tags_per_page:
-            self.add_item(TagPageButton("▶️ 下一页", "next"))
-        
-        # 添加排序选择器 (第3行)
+        # 第 3 行: 排序选择器
         sort_select = SortMethodSelect(self.sort_method)
         sort_select.row = 3
         self.add_item(sort_select)
@@ -444,6 +442,9 @@ class TagSelectionView(discord.ui.View):
             # 保存交互状态
             self._last_interaction = interaction
             
+            # 重新构建UI以更新占位符等状态
+            await self.setup(interaction.guild, self.user_id)
+            
             # 获取用户搜索偏好
             prefs = await database.get_user_search_preferences(self.user_id)
             
@@ -466,16 +467,16 @@ class TagSelectionView(discord.ui.View):
             before_ts = prefs['before_date']
             
             total = await database.count_threads_for_search(
-                include_tags, exclude_tags, include_keywords, 
+                include_tags, exclude_tags, include_keywords,
                 self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
-                prefs['tag_logic']
+                self.tag_logic
             )
             
-            mode_text = "反选模式 (选择要排除的标签)" if self.exclude_mode else "正选模式 (选择要包含的标签)"
+            mode_text = f"标签匹配: {'全部' if self.tag_logic == 'and' else '任一'}"
             
             if total == 0:
                 # 没有结果时只更新标签选择界面
-                content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+                content = f"选择搜索条件 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
                 self._last_content = content
                 self._last_embeds = []
                 self._has_results = False
@@ -489,7 +490,7 @@ class TagSelectionView(discord.ui.View):
             threads = await database.search_threads(
                 include_tags, exclude_tags, include_keywords,
                 self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
-                0, per_page, self.sort_method, self.sort_order, prefs['tag_logic']
+                0, per_page, self.sort_method, self.sort_order, self.tag_logic
             )
             
             # 获取搜索cog来构建embed
@@ -509,13 +510,13 @@ class TagSelectionView(discord.ui.View):
                 self.search_cog, self.user_id,
                 include_tags, exclude_tags, include_keywords,
                 self.channel_ids, include_authors, exclude_authors, after_ts, before_ts,
-                1, per_page, total, self.sort_method, self.sort_order, prefs['tag_logic']
+                1, per_page, total, self.sort_method, self.sort_order, self.tag_logic
             )
             
             # 合并两个view的按钮
             combined_view = CombinedSearchView(self, results_view)
             
-            content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {total} 个帖子 (第1/{results_view.max_page}页)"
+            content = f"选择搜索条件 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {total} 个帖子 (第1/{results_view.max_page}页)"
             
             # 保存状态
             self._last_content = content
@@ -544,7 +545,7 @@ class TagSelectionView(discord.ui.View):
                 'exclude_tags': list(self.exclude_tags),
                 'include_keywords': self.include_keywords,
                 'exclude_keywords': self.exclude_keywords,
-                'exclude_mode': self.exclude_mode,
+                'tag_logic': self.tag_logic,
                 'sort_method': self.sort_method,
                 'sort_order': self.sort_order,
                 'tag_page': self.tag_page,
@@ -567,21 +568,111 @@ class TagSelectionView(discord.ui.View):
             # 如果更新失败，静默处理
             pass
 
+class IncludeTagSelect(discord.ui.Select):
+    def __init__(self, options: list[discord.SelectOption], current_values: list[str]):
+        if current_values:
+            placeholder_text = "已选正选: " + ", ".join(current_values)
+            if len(placeholder_text) > 100: # Discord 占位符长度限制
+                placeholder_text = placeholder_text[:97] + "..."
+        else:
+            placeholder_text = "选择要包含的标签 (正选)"
+
+        super().__init__(
+            placeholder=placeholder_text,
+            min_values=0,
+            max_values=len(options) if options else 1, # max_values不能为0
+            options=options if options else [discord.SelectOption(label="无可用标签", value="no_tags_placeholder", default=True)],
+            row=0,
+            disabled=not options
+        )
+        # 设置当前选中的值
+        for option in self.options:
+            if option.value in current_values:
+                option.default = True
+
+    async def callback(self, interaction: discord.Interaction):
+        tag_view = self.view.tag_view if hasattr(self.view, 'tag_view') else self.view
+        
+        # 获取当前页所有可见的标签
+        current_page_options = {opt.value for opt in self.options if opt.value != "no_tags_placeholder"}
+        
+        # 计算在其他页面上已选的标签
+        tags_selected_on_other_pages = tag_view.include_tags - current_page_options
+        
+        # 获取当前页选中的标签
+        selected_on_this_page = set(self.values)
+        selected_on_this_page.discard("no_tags_placeholder")
+        
+        # 新的总选择 = 其他页面的选择 + 当前页面的选择
+        tag_view.include_tags = tags_selected_on_other_pages.union(selected_on_this_page)
+        
+        await tag_view.update_search_results(interaction, edit_original=True)
+
+class ExcludeTagSelect(discord.ui.Select):
+    def __init__(self, options: list[discord.SelectOption], current_values: list[str]):
+        if current_values:
+            placeholder_text = "已选反选: " + ", ".join(current_values)
+            if len(placeholder_text) > 100: # Discord 占位符长度限制
+                placeholder_text = placeholder_text[:97] + "..."
+        else:
+            placeholder_text = "选择要排除的标签 (反选)"
+
+        super().__init__(
+            placeholder=placeholder_text,
+            min_values=0,
+            max_values=len(options) if options else 1,
+            options=options if options else [discord.SelectOption(label="无可用标签", value="no_tags_placeholder", default=True)],
+            row=1,
+            disabled=not options
+        )
+        # 设置当前选中的值
+        for option in self.options:
+            if option.value in current_values:
+                option.default = True
+
+    async def callback(self, interaction: discord.Interaction):
+        tag_view = self.view.tag_view if hasattr(self.view, 'tag_view') else self.view
+        
+        # 获取当前页所有可见的标签
+        current_page_options = {opt.value for opt in self.options if opt.value != "no_tags_placeholder"}
+        
+        # 计算在其他页面上已选的标签
+        tags_selected_on_other_pages = tag_view.exclude_tags - current_page_options
+        
+        # 获取当前页选中的标签
+        selected_on_this_page = set(self.values)
+        selected_on_this_page.discard("no_tags_placeholder")
+        
+        # 新的总选择 = 其他页面的选择 + 当前页面的选择
+        tag_view.exclude_tags = tags_selected_on_other_pages.union(selected_on_this_page)
+        
+        await tag_view.update_search_results(interaction, edit_original=True)
+
+class TagLogicButton(discord.ui.Button):
+    def __init__(self, current_logic: str):
+        self.current_logic = current_logic
+        label = "匹配: 同时" if current_logic == "and" else "匹配: 任一"
+        style = discord.ButtonStyle.primary if current_logic == "and" else discord.ButtonStyle.secondary
+        super().__init__(label=label, style=style, row=2)
+
+    async def callback(self, interaction: discord.Interaction):
+        tag_view = self.view.tag_view if hasattr(self.view, 'tag_view') else self.view
+        tag_view.tag_logic = "or" if tag_view.tag_logic == "and" else "and"
+        
+        # 更新自身状态
+        self.label = "匹配: 全部" if tag_view.tag_logic == "and" else "匹配: 任一"
+        self.style = discord.ButtonStyle.primary if tag_view.tag_logic == "and" else discord.ButtonStyle.secondary
+        
+        await tag_view.update_search_results(interaction, edit_original=True)
+
 class TagPageButton(discord.ui.Button):
     def __init__(self, label: str, action: str):
         super().__init__(label=label, style=discord.ButtonStyle.secondary, row=2)
         self.action = action
 
     async def callback(self, interaction: discord.Interaction):
-        # 检查当前view是CombinedSearchView还是TagSelectionView
-        if hasattr(self.view, 'tag_view'):
-            # 在CombinedSearchView中
-            tag_view = self.view.tag_view
-        else:
-            # 在TagSelectionView中
-            tag_view = self.view
+        tag_view = self.view.tag_view if hasattr(self.view, 'tag_view') else self.view
         
-        # 保存交互状态
         tag_view._last_interaction = interaction
         
         max_page = (len(tag_view.all_tags) - 1) // tag_view.tags_per_page
@@ -591,93 +682,11 @@ class TagPageButton(discord.ui.Button):
         elif self.action == "next":
             tag_view.tag_page = min(max_page, tag_view.tag_page + 1)
         
-        # 重新设置UI，保持当前状态
+        # 重新设置UI，这会创建新的Select菜单
         await tag_view.setup(interaction.guild, tag_view.user_id)
         
-        # 如果在CombinedSearchView中，需要重新执行搜索以保持搜索结果
-        if hasattr(self.view, 'tag_view'):
-            await tag_view.update_search_results(interaction, edit_original=True)
-        else:
-            mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
-            await interaction.response.edit_message(content=f"选择要搜索的标签 - {mode_text}：", view=tag_view)
-
-class TagButton(discord.ui.Button):
-    def __init__(self, tag_name: str, style: discord.ButtonStyle):
-        super().__init__(label=tag_name, style=style)
-        self.tag_name = tag_name
-
-    async def callback(self, interaction: discord.Interaction):
-        # 检查当前view是CombinedSearchView还是TagSelectionView
-        if hasattr(self.view, 'tag_view'):
-            # 在CombinedSearchView中
-            tag_view = self.view.tag_view
-        else:
-            # 在TagSelectionView中
-            tag_view = self.view
-        
-        # 保存交互状态
-        tag_view._last_interaction = interaction
-        
-        if not tag_view.exclude_mode:  # 正选模式
-            if self.tag_name in tag_view.include_tags:
-                tag_view.include_tags.remove(self.tag_name)
-            else:
-                tag_view.include_tags.add(self.tag_name)
-                # 如果之前在反选中，移除
-                if self.tag_name in tag_view.exclude_tags:
-                    tag_view.exclude_tags.remove(self.tag_name)
-        else:  # 反选模式
-            if self.tag_name in tag_view.exclude_tags:
-                tag_view.exclude_tags.remove(self.tag_name)
-            else:
-                tag_view.exclude_tags.add(self.tag_name)
-                # 如果之前在正选中，移除
-                if self.tag_name in tag_view.include_tags:
-                    tag_view.include_tags.remove(self.tag_name)
-        
-        # 更新按钮样式（与setup方法保持一致）
-        if self.tag_name in tag_view.include_tags:
-            self.style = discord.ButtonStyle.green
-        elif self.tag_name in tag_view.exclude_tags:
-            self.style = discord.ButtonStyle.red
-        else:
-            self.style = discord.ButtonStyle.secondary
-        
-        # 立即更新搜索结果
+        # 翻页后，需要重新渲染整个视图，包括可能存在的搜索结果
         await tag_view.update_search_results(interaction, edit_original=True)
-
-class ModeToggleButton(discord.ui.Button):
-    def __init__(self, exclude_mode: bool):
-        label = "🔄 切换到正选" if exclude_mode else "🔄 切换到反选"
-        style = discord.ButtonStyle.danger if exclude_mode else discord.ButtonStyle.primary
-        super().__init__(label=label, style=style)
-
-    async def callback(self, interaction: discord.Interaction):
-        # 检查当前view是CombinedSearchView还是TagSelectionView
-        if hasattr(self.view, 'tag_view'):
-            # 在CombinedSearchView中
-            tag_view = self.view.tag_view
-            is_combined = True
-        else:
-            # 在TagSelectionView中
-            tag_view = self.view
-            is_combined = False
-        
-        # 保存交互状态
-        tag_view._last_interaction = interaction
-        
-        tag_view.exclude_mode = not tag_view.exclude_mode
-        
-        # 先更新标签按钮样式
-        await tag_view.setup(interaction.guild, tag_view.user_id)
-        
-        if is_combined:
-            # 在CombinedSearchView中，重新执行搜索以保持搜索结果
-            await tag_view.update_search_results(interaction, edit_original=True)
-        else:
-            # 在单独的TagSelectionView中
-            mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
-            await interaction.response.edit_message(content=f"选择要搜索的标签 - {mode_text}：", view=tag_view)
 
 class SortMethodSelect(discord.ui.Select):
     def __init__(self, current_sort: str):
@@ -967,8 +976,8 @@ class PageButton(discord.ui.Button):
         # 如果在CombinedSearchView中，更新内容
         if hasattr(self.view, 'tag_view'):
             tag_view = self.view.tag_view
-            mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
-            content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {results_view.total} 个帖子 (第{results_view.current_page}/{results_view.max_page}页)"
+            mode_text = f"标签匹配: {'全部' if tag_view.tag_logic == 'and' else '任一'}"
+            content = f"选择搜索条件 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {results_view.total} 个帖子 (第{results_view.current_page}/{results_view.max_page}页)"
             
             # 保存CombinedSearchView的状态
             tag_view._last_content = content
@@ -1047,8 +1056,8 @@ class GotoPageModal(discord.ui.Modal, title="跳转页码"):
                 
                 # 更新内容
                 tag_view = self.combined_view.tag_view
-                mode_text = "反选模式 (选择要排除的标签)" if tag_view.exclude_mode else "正选模式 (选择要包含的标签)"
-                content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {self.search_view.total} 个帖子 (第{self.search_view.current_page}/{self.search_view.max_page}页)"
+                mode_text = f"标签匹配: {'全部' if tag_view.tag_logic == 'and' else '任一'}"
+                content = f"选择搜索条件 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {self.search_view.total} 个帖子 (第{self.search_view.current_page}/{self.search_view.max_page}页)"
                 
                 # 保存CombinedSearchView的状态
                 tag_view._last_content = content
@@ -1069,21 +1078,10 @@ class CombinedSearchView(discord.ui.View):
         self.results_view = results_view
         self._last_interaction = None  # 保存最后一次交互
         
-        # 添加标签按钮 (第0-1行，每页最多10个)
-        tag_buttons = [item for item in tag_view.children if isinstance(item, TagButton)]
-        for button in tag_buttons:
-            # 保持原有的row设置（在setup中已经设置为0-1行）
-            self.add_item(button)
-        
-        # 添加第2行所有按钮：标签翻页 + 控制按钮 (按添加顺序：上一页 + 控制按钮 + 下一页)
-        second_row_buttons = [item for item in tag_view.children if isinstance(item, (TagPageButton, ModeToggleButton, KeywordButton, SortOrderButton))]
-        for button in second_row_buttons:
-            self.add_item(button)
-        
-        # 添加排序选择器 (第3行)
-        sort_select = [item for item in tag_view.children if isinstance(item, SortMethodSelect)]
-        for select in sort_select:
-            self.add_item(select)
+        # 从TagSelectionView中添加所有组件 (Selects, Buttons, etc.)
+        # setup方法已经为它们分配了正确的行号 (0-3)
+        for item in tag_view.children:
+            self.add_item(item)
         
         # 添加搜索结果分页按钮 (第4行，最多5个)
         page_buttons = [item for item in results_view.children if isinstance(item, (PageButton, CurrentPageButton))]
@@ -1102,7 +1100,7 @@ class CombinedSearchView(discord.ui.View):
                 'exclude_tags': list(self.tag_view.exclude_tags),
                 'include_keywords': self.tag_view.include_keywords,
                 'exclude_keywords': self.tag_view.exclude_keywords,
-                'exclude_mode': self.tag_view.exclude_mode,
+                'tag_logic': self.tag_view.tag_logic,
                 'sort_method': self.tag_view.sort_method,
                 'sort_order': self.tag_view.sort_order,
                 'tag_page': self.tag_view.tag_page,
@@ -1146,7 +1144,7 @@ class ContinueButton(discord.ui.Button):
             view.exclude_tags = set(self.view_state['exclude_tags'])
             view.include_keywords = self.view_state['include_keywords']
             view.exclude_keywords = self.view_state['exclude_keywords']
-            view.exclude_mode = self.view_state['exclude_mode']
+            view.tag_logic = self.view_state.get('tag_logic', 'and') # 兼容旧的状态
             view.sort_method = self.view_state['sort_method']
             view.sort_order = self.view_state['sort_order']
             view.tag_page = self.view_state['tag_page']
@@ -1160,14 +1158,14 @@ class ContinueButton(discord.ui.Button):
             else:
                 # 没有搜索结果时，执行初始搜索
                 initial_results = await view.get_initial_search_results(interaction.guild)
-                mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
+                mode_text = f"标签匹配: {'全部' if view.tag_logic == 'and' else '任一'}"
                 
                 if not initial_results['has_results']:
                     # 仍然没有结果时
                     if 'error' in initial_results:
-                        content = f"选择要搜索的标签 - {mode_text}：\n\n❌ **搜索出错：** {initial_results['error']}"
+                        content = f"选择搜索条件 - {mode_text}：\n\n❌ **搜索出错：** {initial_results['error']}"
                     else:
-                        content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
+                        content = f"选择搜索条件 - {mode_text}：\n\n🔍 **搜索结果：** 未找到符合条件的帖子"
                     
                     # 更新view状态
                     view._last_content = content
@@ -1191,7 +1189,7 @@ class ContinueButton(discord.ui.Button):
                     # 合并两个view的按钮
                     combined_view = CombinedSearchView(view, results_view)
                     
-                    content = f"选择要搜索的标签 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
+                    content = f"选择搜索条件 - {mode_text}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
                     
                     # 保存状态
                     view._last_content = content
@@ -1256,7 +1254,7 @@ class ContinueButton(discord.ui.Button):
             tag_view.exclude_tags = set(self.view_state['exclude_tags'])
             tag_view.include_keywords = self.view_state['include_keywords']
             tag_view.exclude_keywords = self.view_state['exclude_keywords']
-            tag_view.exclude_mode = self.view_state['exclude_mode']
+            tag_view.tag_logic = self.view_state.get('tag_logic', 'and') # 兼容旧的状态
             tag_view.sort_method = self.view_state['sort_method']
             tag_view.sort_order = self.view_state['sort_order']
             tag_view.tag_page = self.view_state['tag_page']
@@ -1293,42 +1291,35 @@ class AuthorTagSelectionView(TagSelectionView):
         end_idx = start_idx + self.tags_per_page
         current_page_tags = self.all_tags[start_idx:end_idx]
         
-        # 添加标签按钮 (第0-1行，每行5个)
-        for i, (tag_id, tag_name) in enumerate(current_page_tags):
-            style = discord.ButtonStyle.secondary
-            
-            # 优化：无论在哪种模式下，都显示已选择的标签状态
-            if tag_name in self.include_tags:
-                style = discord.ButtonStyle.green  # 正选标签始终显示绿色
-            elif tag_name in self.exclude_tags:
-                style = discord.ButtonStyle.red    # 反选标签始终显示红色
-                
-            button = TagButton(tag_name, style)
-            button.row = i // 5  # 每行5个按钮，分配到第0-1行
-            self.add_item(button)
+        # 第 0 行: 正选标签
+        include_options = [discord.SelectOption(label=tag_name, value=tag_name) for _, tag_name in current_page_tags]
+        self.add_item(IncludeTagSelect(include_options, list(self.include_tags)))
+
+        # 第 1 行: 反选标签
+        exclude_options = [discord.SelectOption(label=tag_name, value=tag_name) for _, tag_name in current_page_tags]
+        self.add_item(ExcludeTagSelect(exclude_options, list(self.exclude_tags)))
         
-        # 添加第2行按钮：上一页 + 控制按钮 + 下一页
-        if len(self.all_tags) > self.tags_per_page:
-            self.add_item(TagPageButton("◀️ 上一页", "prev"))
-        
-        # 控制按钮放在中间 (第2行)
-        mode_button = ModeToggleButton(self.exclude_mode)
-        mode_button.row = 2
-        self.add_item(mode_button)
-        
+        # 第 2 行: 控制按钮
         keyword_button = KeywordButton()
         keyword_button.row = 2
         self.add_item(keyword_button)
-        
-        # 添加升序/降序按钮
+
+        if len(self.all_tags) > self.tags_per_page:
+            self.add_item(TagPageButton("◀️ 上一页", "prev"))
+
+        # 作者搜索固定为 AND 逻辑，不显示切换按钮
+        # tag_logic_button = TagLogicButton(self.tag_logic)
+        # tag_logic_button.row = 2
+        # self.add_item(tag_logic_button)
+
+        if len(self.all_tags) > self.tags_per_page:
+            self.add_item(TagPageButton("▶️ 下一页", "next"))
+            
         sort_order_button = SortOrderButton(self.sort_order)
         sort_order_button.row = 2
         self.add_item(sort_order_button)
         
-        if len(self.all_tags) > self.tags_per_page:
-            self.add_item(TagPageButton("▶️ 下一页", "next"))
-        
-        # 添加排序选择器 (第3行)
+        # 第 3 行: 排序选择器
         sort_select = SortMethodSelect(self.sort_method)
         sort_select.row = 3
         self.add_item(sort_select)
@@ -1444,7 +1435,7 @@ class AuthorTagSelectionView(TagSelectionView):
                 tag_logic
             )
             
-            mode_text = "反选模式 (选择要排除的标签)" if self.exclude_mode else "正选模式 (选择要包含的标签)"
+            mode_text = f"标签匹配: {'全部' if self.tag_logic == 'and' else '任一'}"
             
             if total == 0:
                 # 没有结果时只更新标签选择界面
@@ -1489,7 +1480,7 @@ class AuthorTagSelectionView(TagSelectionView):
             # 合并两个view的按钮
             combined_view = CombinedSearchView(self, results_view)
             
-            content = f"快捷搜索 - 作者：<@{self.author_id}> - {mode_text}：\n\n🔍 **搜索结果：** 找到 {total} 个帖子 (第1/{results_view.max_page}页)"
+            content = f"快捷搜索 - 作者：<@{self.author_id}>：\n\n🔍 **搜索结果：** 找到 {total} 个帖子 (第1/{results_view.max_page}页)"
             
             # 保存状态
             self._last_content = content
