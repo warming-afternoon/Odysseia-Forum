@@ -620,8 +620,8 @@ class Search(commands.Cog):
             inline=False
         )
         
-        await interaction.channel.send(embed=embed, view=view)
         await interaction.response.send_message("✅ 已创建频道搜索按钮。", ephemeral=True)
+        await interaction.channel.send(embed=embed, view=view)
 
     @app_commands.command(name="创建全局搜索", description="在当前频道创建全局搜索按钮")
     async def create_global_search(self, interaction: discord.Interaction):
@@ -642,12 +642,14 @@ class Search(commands.Cog):
             inline=False
         )
         
-        await interaction.channel.send(embed=embed, view=view)
         await interaction.response.send_message("✅ 已创建全局搜索按钮。", ephemeral=True)
+        await interaction.channel.send(embed=embed, view=view)
 
     @app_commands.command(name="快捷搜索", description="快速搜索指定作者的所有帖子")
     @app_commands.describe(author="要搜索的作者（@用户 或 用户ID）")
     async def quick_author_search(self, interaction: discord.Interaction, author: discord.User):
+        await interaction.response.defer(ephemeral=True)
+        
         # 刷新缓存
         await self.cache_channel_tags()
         
@@ -655,51 +657,49 @@ class Search(commands.Cog):
         indexed_channel_ids = await database.get_indexed_channel_ids()
         
         if not indexed_channel_ids:
-            await interaction.response.send_message("暂无已索引的论坛频道。", ephemeral=True)
+            await interaction.followup.send("暂无已索引的论坛频道。", ephemeral=True)
             return
         
         # 创建作者搜索视图并执行初始搜索
         view = AuthorTagSelectionView(indexed_channel_ids, author.id)
         initial_results = await view.setup_with_initial_search(interaction.guild, interaction.user.id)
         
-        mode_text = "反选模式 (选择要排除的标签)" if view.exclude_mode else "正选模式 (选择要包含的标签)"
-        
         if not initial_results['has_results']:
             # 没有搜索结果时
             if 'error' in initial_results:
-                content = f"快捷搜索 - 作者：{author.mention} - {mode_text}：\n\n❌ **搜索出错：** {initial_results['error']}"
+                content = f"快捷搜索 - 作者：{author.mention}：\n\n❌ **搜索出错：** {initial_results['error']}"
             else:
-                content = f"快捷搜索 - 作者：{author.mention} - {mode_text}：\n\n🔍 **搜索结果：** 该作者暂无帖子"
+                content = f"快捷搜索 - 作者：{author.mention}：\n\n🔍 **搜索结果：** 该作者暂无帖子"
             
             # 更新view状态
             view._last_content = content
             view._last_embeds = []
             view._has_results = False
             
-            await interaction.response.send_message(content, view=view, ephemeral=True)
+            await interaction.followup.send(content, view=view, ephemeral=True)
         else:
             # 有搜索结果时，创建合并视图
             results_view = SearchResultsView(
                 view.search_cog, view.user_id,
                 [], [], "",  # 初始搜索为空条件（只限制作者）
-                view.channel_ids, 
+                view.channel_ids,
                 [author.id], None,  # 强制只看指定作者
                 None, None,  # 忽略时间偏好
-                1, initial_results['per_page'], initial_results['total'], 
+                1, initial_results['per_page'], initial_results['total'],
                 view.sort_method, view.sort_order, "and"  # 固定标签逻辑
             )
             
             # 合并两个view的按钮
             combined_view = CombinedSearchView(view, results_view)
             
-            content = f"快捷搜索 - 作者：{author.mention} - {mode_text}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
+            content = f"快捷搜索 - 作者：{author.mention}：\n\n🔍 **搜索结果：** 找到 {initial_results['total']} 个帖子 (第1/{results_view.max_page}页)"
             
             # 保存状态
             view._last_content = content
             view._last_embeds = initial_results['embeds']
             view._has_results = True
             
-            await interaction.response.send_message(content, view=combined_view, embeds=initial_results['embeds'], ephemeral=True)
+            await interaction.followup.send(content, view=combined_view, embeds=initial_results['embeds'], ephemeral=True)
 
     # ----- Embed 构造 -----
     def _build_thread_embed(self, thread_row: dict, guild: discord.Guild, preview_mode: str = "thumbnail"):
