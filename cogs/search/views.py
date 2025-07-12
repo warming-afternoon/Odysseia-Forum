@@ -83,18 +83,22 @@ class PersistentGlobalSearchView(discord.ui.View):
         super().__init__(timeout=None)
         self.message_id = message_id
 
-    @discord.ui.button(label="🌐 选择频道搜索", style=discord.ButtonStyle.success, custom_id="persistent_global_search")
-    async def search_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def start_search_flow(self, interaction: discord.Interaction):
+        """启动全局搜索流程的通用逻辑"""
         # 获取所有论坛频道
         all_forum_channels = [ch for ch in interaction.guild.channels if isinstance(ch, discord.ForumChannel)]
         
         # 从TagSystem获取已索引的频道ID（使用缓存）
         tag_system = interaction.client.get_cog("TagSystem")
-        if tag_system:
+        if tag_system and hasattr(tag_system, 'indexed_channel_ids'):
             indexed_channel_ids = tag_system.indexed_channel_ids
         else:
             # 如果TagSystem不可用，回退到数据库查询
-            indexed_channel_ids = set(await database.get_indexed_channel_ids())
+            try:
+                indexed_channel_ids = set(await database.get_indexed_channel_ids())
+            except Exception as e:
+                await interaction.response.send_message(f"❌ 查询索引频道时出错: {e}", ephemeral=True)
+                return
         
         # 只保留已索引的论坛频道
         forum_channels = [ch for ch in all_forum_channels if ch.id in indexed_channel_ids]
@@ -105,6 +109,11 @@ class PersistentGlobalSearchView(discord.ui.View):
         
         view = ChannelSelectionView(forum_channels)
         await interaction.response.send_message("选择要搜索的频道：", view=view, ephemeral=True)
+
+    @discord.ui.button(label="🌐 选择频道搜索", style=discord.ButtonStyle.success, custom_id="persistent_global_search")
+    async def search_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """按钮回调，调用通用的搜索流程方法"""
+        await self.start_search_flow(interaction)
 
 class ChannelSelectionView(discord.ui.View):
     def __init__(self, channels: list[discord.ForumChannel]):

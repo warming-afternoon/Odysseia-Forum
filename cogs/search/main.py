@@ -6,8 +6,8 @@ import datetime
 import database
 from ranking_config import RankingConfig
 from .views import (
-    PersistentChannelSearchView, PersistentGlobalSearchView, AuthorTagSelectionView, 
-    SearchResultsView, CombinedSearchView
+    PersistentChannelSearchView, PersistentGlobalSearchView, AuthorTagSelectionView,
+    SearchResultsView, CombinedSearchView, ChannelSelectionView
 )
 
 class Search(commands.Cog):
@@ -644,6 +644,12 @@ class Search(commands.Cog):
         
         await interaction.response.send_message("✅ 已创建全局搜索按钮。", ephemeral=True)
         await interaction.channel.send(embed=embed, view=view)
+
+    @app_commands.command(name="全局搜索", description="开始一次仅自己可见的全局搜索")
+    async def global_search(self, interaction: discord.Interaction):
+        """直接触发全局搜索流程"""
+        view = PersistentGlobalSearchView()
+        await view.start_search_flow(interaction)
 
     @app_commands.command(name="快捷搜索", description="快速搜索指定作者的所有帖子")
     @app_commands.describe(author="要搜索的作者（@用户 或 用户ID）")
