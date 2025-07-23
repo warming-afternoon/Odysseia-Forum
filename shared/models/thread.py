@@ -1,10 +1,12 @@
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, Any
 from sqlmodel import Field, SQLModel, Relationship
+from sqlalchemy import JSON, Column
 from datetime import datetime
 
 if TYPE_CHECKING:
     from .tag import Tag
     from .thread_tag_link import ThreadTagLink
+    from .tag_vote import TagVote
 
 class Thread(SQLModel, table=True):
     """帖子模型。"""
@@ -15,4 +17,8 @@ class Thread(SQLModel, table=True):
     author_id: int
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
     
-    tags: List["Tag"] = Relationship(back_populates="threads", link_model=ThreadTagLink)
+    # 用于存标签投票统计的 JSON 字段，提高查询性能
+    tag_votes_summary: Any = Field(sa_column=Column(JSON), default={})
+
+    tags: List["Tag"] = Relationship(back_populates="threads", link_model="ThreadTagLink")
+    votes: List["TagVote"] = Relationship(back_populates="thread")

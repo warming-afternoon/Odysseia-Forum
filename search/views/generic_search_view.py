@@ -2,7 +2,7 @@ import discord
 from typing import List, TYPE_CHECKING
 
 from shared.models.tag import Tag
-from ..models.qo.thread_search import ThreadSearchQO
+from ..models.qo.thread_search import ThreadSearchQuery
 from .results_view import NewSearchResultsView
 from .components.search_button import SearchButton
 from .components.keyword_button import KeywordButton
@@ -28,6 +28,7 @@ class GenericSearchView(discord.ui.View):
         self.exclude_tags = set()
         self.author_ids = set()
         self.keywords = ""
+        self.exclude_keywords = ""
         self.tag_logic = "and"
         self.sort_method = "comprehensive"
         self.sort_order = "desc"
@@ -116,6 +117,8 @@ class GenericSearchView(discord.ui.View):
             parts.append(f"**指定作者:** {', '.join([f'<@{uid}>' for uid in self.author_ids])}")
         if self.keywords:
             parts.append(f"**关键词:** {self.keywords}")
+        if self.exclude_keywords:
+            parts.append(f"**排除关键词:** {self.exclude_keywords}")
         
         if len(parts) == 1:
             parts.append("当前无任何筛选条件。")
@@ -129,14 +132,17 @@ class GenericSearchView(discord.ui.View):
             priority=1
         )
 
-        qo = ThreadSearchQO(
+        # 注意：这里的 ThreadSearchQO 实际上就是 ThreadSearchQuery。
+        # 为了清晰，我们直接使用 repository 能理解的字段名。
+        qo = ThreadSearchQuery(
             channel_ids=self.channel_ids,
-            author_ids=list(self.author_ids) if self.author_ids else None,
-            include_tag_ids=list(self.include_tags),
-            exclude_tag_ids=list(self.exclude_tags),
+            include_authors=list(self.author_ids) if self.author_ids else None,
+            include_tags=[tag.name for tag in self.all_tags if tag.id in self.include_tags],
+            exclude_tags=[tag.name for tag in self.all_tags if tag.id in self.exclude_tags],
             keywords=self.keywords,
+            exclude_keywords=self.exclude_keywords,
             tag_logic=self.tag_logic,
-            sort_by=self.sort_method,
+            sort_method=self.sort_method,
             sort_order=self.sort_order
         )
 

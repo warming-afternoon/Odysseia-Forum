@@ -3,16 +3,16 @@ from discord import app_commands
 from discord.ext import commands
 import asyncio
 
-from tag_system.repository import TagSystemRepository
+from sqlalchemy.orm import sessionmaker
 from tag_system.cog import TagSystem
 from .views import IndexerDashboard
 
 class Indexer(commands.Cog):
     """构建索引相关命令"""
 
-    def __init__(self, bot: commands.Bot, tag_system_repo: TagSystemRepository):
+    def __init__(self, bot: commands.Bot, session_factory: sessionmaker):
         self.bot = bot
-        self.tag_system_repo = tag_system_repo
+        self.session_factory = session_factory
         self.queue = asyncio.Queue()
         self.progress = {
             "discovered": 0,
@@ -120,9 +120,3 @@ class Indexer(commands.Cog):
                 await dashboard.update_embed()
             
             self.queue.task_done()
-
-async def setup(bot: commands.Bot):
-    from shared.database import Database
-    db = Database(bot.db_url)
-    tag_system_repo = TagSystemRepository(db)
-    await bot.add_cog(Indexer(bot, tag_system_repo))
