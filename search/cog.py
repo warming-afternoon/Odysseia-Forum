@@ -6,10 +6,11 @@ import datetime
 from ranking_config import RankingConfig
 from .views.author_search_view import NewAuthorTagSelectionView
 from .views.global_search_view import GlobalSearchView
+from sqlalchemy.orm import sessionmaker
 from .repository import SearchRepository
 from tag_system.repository import TagSystemRepository
 from shared.models.thread import Thread as ThreadModel
-from search.models.qo.thread_search import ThreadSearchQO
+from search.models.qo.thread_search import ThreadSearchQuery
 from .views.channel_selection_view import ChannelSelectionView
 from .views.author_search_view import NewAuthorTagSelectionView
 from .views.global_search_view import GlobalSearchView
@@ -20,11 +21,11 @@ class Search(commands.Cog):
     """搜索相关命令"""
 
 
-    def __init__(self, bot: commands.Bot, search_repo: SearchRepository, tag_system_repo: TagSystemRepository):
+    def __init__(self, bot: commands.Bot, session_factory: sessionmaker):
         self.bot = bot
-        self.search_repo = search_repo
-        self.tag_system_repo = tag_system_repo
-        self.prefs_handler = SearchPreferencesHandler(bot, search_repo)
+        self.session_factory = session_factory
+        self.tag_system_repo = TagSystemRepository
+        self.prefs_handler = SearchPreferencesHandler(bot, session_factory)
         self.channel_tags_cache = {}  # 缓存频道tags
         self.global_search_view = GlobalSearchView(self)
         self.persistent_channel_search_view = PersistentChannelSearchView(self)
@@ -42,7 +43,9 @@ class Search(commands.Cog):
         """缓存所有已索引频道的tags"""
         try:
             # 获取已索引的频道ID
-            indexed_channel_ids = await self.tag_system_repo.get_indexed_channel_ids()
+            async with self.session_factory() as session:
+                repo = TagSystemRepository(session)
+                indexed_channel_ids = await repo.get_indexed_channel_ids()
             
             self.channel_tags_cache = {}
             
@@ -76,7 +79,10 @@ class Search(commands.Cog):
     @app_commands.command(name="每页结果数量", description="设置每页展示的搜索结果数量（3-10）")
     @app_commands.describe(num="要设置的数量 (3-10)")
     async def set_page_size(self, interaction: discord.Interaction, num: app_commands.Range[int, 3, 10]):
-        await self.search_repo.save_user_preferences(interaction.user.id, {'results_per_page': num})
+        async with self.session_factory() as session:
+            repo = SearchRepository(session)
+            await repo.save_user_preferences(interaction.user.id, {'results_per_page': num})
+        
         await self.bot.api_scheduler.submit(
             coro=interaction.response.send_message(f"已将每页结果数量设置为 {num}。", ephemeral=True),
             priority=1
@@ -423,7 +429,10 @@ class Search(commands.Cog):
             priority=1
         )
         
-        indexed_channel_ids = await self.tag_system_repo.get_indexed_channel_ids()
+        async with self.session_factory() as session:
+            repo = TagSystemRepository(session)
+            indexed_channel_ids = await repo.get_indexed_channel_ids()
+
         if not indexed_channel_ids:
             await self.bot.api_scheduler.submit(
                 coro=interaction.followup.send("没有已索引的频道可供搜索。", ephemeral=True),
@@ -521,7 +530,7 @@ class Search(commands.Cog):
     async def _search_and_display(
         self,
         interaction: discord.Interaction,
-        search_qo: 'ThreadSearchQO',
+        search_qo: 'ThreadSearchQuery',
         page: int = 1
     ) -> dict:
         """
@@ -533,17 +542,19 @@ class Search(commands.Cog):
         :return: 包含搜索结果信息的字典
         """
         try:
-            user_prefs = await self.search_repo.get_user_preferences(interaction.user.id)
-            per_page = user_prefs.results_per_page if user_prefs else 5
-            preview_mode = user_prefs.preview_image_mode if user_prefs else "thumbnail"
+            async with self.session_factory() as session:
+                repo = SearchRepository(session)
+                user_prefs = await repo.get_user_preferences(interaction.user.id)
+                per_page = user_prefs.results_per_page if user_prefs else 5
+                preview_mode = user_prefs.preview_image_mode if user_prefs else "thumbnail"
 
-            # 设置分页
-            search_qo.offset = (page - 1) * per_page
-            search_qo.limit = per_page
+                # 设置分页
+                search_qo.offset = (page - 1) * per_page
+                search_qo.limit = per_page
 
-            # 执行搜索
-            threads = await self.search_repo.search_threads(search_qo)
-            total_threads = await self.search_repo.count_threads(search_qo)
+                # 执行搜索
+                threads = await repo.search_threads(search_qo)
+                total_threads = await repo.count_threads(search_qo)
 
             if not threads:
                 return {'has_results': False, 'total': 0}
@@ -567,17 +578,3 @@ class Search(commands.Cog):
             return {'has_results': False, 'error': str(e)}
 
 
-
-# 添加async setup的cog加载时注册持久化View
-async def setup(bot: commands.Bot):
-    # 这是旧的 setup 方式，新的方式是在 bot_main.py 中进行依赖注入
-    # 为了保持兼容性，我们在这里暂时保留，但理想状态下应该由 main 来管理 repo 实例
-    from shared.database import Database
-    from search.repository import SearchRepository
-    from tag_system.repository import TagSystemRepository
-
-    db = Database(bot.db_url)
-    search_repo = SearchRepository(db)
-    tag_system_repo = TagSystemRepository(db)
-    
-    await bot.add_cog(Search(bot, search_repo, tag_system_repo))

@@ -21,7 +21,9 @@ class GlobalSearchView(discord.ui.View):
                 priority=1
             )
         
-        indexed_channel_ids = await self.cog.tag_system_repo.get_indexed_channel_ids()
+        async with self.cog.session_factory() as session:
+            repo = self.cog.tag_system_repo(session)
+            indexed_channel_ids = await repo.get_indexed_channel_ids()
         if not indexed_channel_ids:
             await self.cog.bot.api_scheduler.submit(
                 coro=interaction.followup.send("没有已索引的频道。", ephemeral=True),

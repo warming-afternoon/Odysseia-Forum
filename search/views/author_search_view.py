@@ -2,7 +2,7 @@ import discord
 from typing import List, TYPE_CHECKING
 
 from shared.models.tag import Tag
-from ..models.qo.thread_search import ThreadSearchQO
+from ..models.qo.thread_search import ThreadSearchQuery
 from .results_view import NewSearchResultsView
 from .components.search_button import SearchButton
 from .components.keyword_button import KeywordButton

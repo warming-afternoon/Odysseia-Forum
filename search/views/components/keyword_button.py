@@ -14,8 +14,17 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
         )
         self.add_item(self.include_input)
 
+        self.exclude_input = discord.ui.TextInput(
+            label="排除关键词（逗号分隔）",
+            placeholder="在标题或首楼中不能包含的关键词",
+            required=False,
+            default=self.parent_view.exclude_keywords
+        )
+        self.add_item(self.exclude_input)
+
     async def on_submit(self, interaction: discord.Interaction):
         self.parent_view.keywords = self.include_input.value
+        self.parent_view.exclude_keywords = self.exclude_input.value
         await self.update_callback(interaction)
 
 class KeywordButton(discord.ui.Button):

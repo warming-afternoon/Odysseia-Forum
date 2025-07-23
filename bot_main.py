@@ -3,10 +3,8 @@ import discord
 from discord.ext import commands
 import asyncio
 
-# 新的架构组件
-from shared.database import Database
-from tag_system.repository import TagSystemRepository
-from search.repository import SearchRepository
+
+from shared.database import AsyncSessionFactory, init_db
 from tag_system.cog import TagSystem
 from indexer.cog import Indexer
 from search.cog import Search
@@ -24,17 +22,13 @@ class MyBot(commands.Bot):
         # 启动API调度器
         self.api_scheduler.start()
 
-        # 初始化数据库和仓库
-        db = Database(self.db_url)
-        await db.init_db()
-        tag_system_repo = TagSystemRepository(db)
-        search_repo = SearchRepository(db)
+        # 初始化数据库
+        await init_db()
 
-        # 加载 Cogs 并注入依赖项
-        # 注意：现在 cog 可以通过 self.bot.api_scheduler 访问调度器
-        await self.add_cog(TagSystem(self, tag_system_repo))
-        await self.add_cog(Indexer(self, tag_system_repo))
-        await self.add_cog(Search(self, search_repo, tag_system_repo))
+        # 加载 Cogs 并注入会话工厂
+        await self.add_cog(TagSystem(bot=self, session_factory=AsyncSessionFactory))
+        await self.add_cog(Indexer(bot=self, session_factory=AsyncSessionFactory))
+        await self.add_cog(Search(bot=self, session_factory=AsyncSessionFactory))
 
         # 同步应用程序命令
         try:
