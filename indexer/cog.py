@@ -2,33 +2,37 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import asyncio
+import logging
 
 from sqlalchemy.orm import sessionmaker
+from shared.discord_utils import safe_defer
 from tag_system.cog import TagSystem
+from tag_system.tagService import TagService
 from .views import IndexerDashboard
 
 class Indexer(commands.Cog):
     """构建索引相关命令"""
 
-    def __init__(self, bot: commands.Bot, session_factory: sessionmaker):
+    def __init__(self, bot: commands.Bot, session_factory: sessionmaker, config: dict, tag_service: TagService):
         self.bot = bot
         self.session_factory = session_factory
-        self.queue = asyncio.Queue()
-        self.progress = {
-            "discovered": 0,
-            "processed": 0,
-            "total": 0,
-            "finished": False
-        }
+        self.config = config
+        self.tag_service = tag_service
 
-    def get_progress(self):
-        return self.progress
+    @staticmethod
+    async def _aiter_to_list(aiter):
+        return [item async for item in aiter]
+
+    @staticmethod
+    async def _aiter_to_list(aiter):
+        return [item async for item in aiter]
 
     @app_commands.command(name="构建索引", description="对当前论坛频道的所有帖子进行索引")
     async def build_index(self, interaction: discord.Interaction):
+        await safe_defer(interaction)
         if not isinstance(interaction.channel, discord.Thread):
             await self.bot.api_scheduler.submit(
-                coro=interaction.response.send_message("请在论坛频道的帖子内使用此命令。", ephemeral=True),
+                coro=interaction.followup.send("请在论坛频道的帖子内使用此命令", ephemeral=True),
                 priority=1
             )
             return
@@ -36,39 +40,62 @@ class Indexer(commands.Cog):
         channel = interaction.channel.parent
         if not isinstance(channel, discord.ForumChannel):
             await self.bot.api_scheduler.submit(
-                coro=interaction.response.send_message("此命令仅适用于论坛频道。", ephemeral=True),
+                coro=interaction.followup.send("此命令仅适用于论坛频道。", ephemeral=True),
                 priority=1
             )
             return
 
-        dashboard = IndexerDashboard(self, channel)
+        dashboard = IndexerDashboard(self, channel, self.config)
         await dashboard.start(interaction)
 
     async def run_indexer(self, dashboard: IndexerDashboard):
         """运行生产者和消费者任务"""
-        self.progress = {"discovered": 0, "processed": 0, "total": 0, "finished": False}
-        producer_task = self.bot.loop.create_task(self.producer(dashboard))
-        consumer_task = self.bot.loop.create_task(self.consumer(dashboard))
+        logging.info(f"[{dashboard.channel.id}] run_indexer 开始，启动 {dashboard.consumer_concurrency} 个消费者")
         
-        await asyncio.gather(producer_task, consumer_task)
-        
-        self.progress['finished'] = True
-        await dashboard.update_embed()
+        loop = self.bot.loop
+        producer_task = loop.create_task(self.producer(dashboard))
+        consumer_tasks = [
+            loop.create_task(self.consumer(dashboard, consumer_id=i))
+            for i in range(dashboard.consumer_concurrency)
+        ]
 
-        # 通知TagSystem刷新缓存
-        tag_system_cog: TagSystem = self.bot.get_cog("TagSystem")
-        if tag_system_cog:
-            await tag_system_cog.refresh_indexed_channels_cache()
+        try:
+            # 1. 等待生产者完成（所有帖子都被发现并放入队列）
+            await producer_task
+            
+            # 2. 等待队列中的所有项目都被消费者处理
+            await dashboard.queue.join()
+
+        except Exception as e:
+            dashboard.progress['error'] = f"{type(e).__name__}: {e}"
+            producer_task.cancel() # 如果出错，也取消生产者
+        finally:
+            # 3. 所有项目处理完毕，取消所有消费者任务
+            for task in consumer_tasks:
+                task.cancel()
+            
+            # 4. 等待所有被取消的消费者任务完全停止
+            await asyncio.gather(*consumer_tasks, return_exceptions=True)
+
+            # 5. 标记完成并更新UI
+            dashboard.progress['finished'] = True
+            await dashboard.update_embed()
+
+            # 6. 分发全局事件
+            if not dashboard.progress.get('error'):
+                logging.info(f"[{dashboard.channel.id}] 索引完成，分发 'index_updated' 事件。")
+                self.bot.dispatch("index_updated")
 
     async def producer(self, dashboard: IndexerDashboard):
         """生产者：发现帖子并放入队列"""
         channel = dashboard.channel
+        progress = dashboard.progress
+        queue = dashboard.queue
         
         # 活跃线程 (来自缓存，无API调用)
         for thread in channel.threads:
-            await self.queue.put(thread)
-            self.progress['discovered'] += 1
-        await dashboard.update_embed()
+            await queue.put(thread)
+            progress['discovered'] += 1
 
         # 已归档线程 (手动分页，通过调度器获取)
         last_thread_timestamp = None
@@ -76,7 +103,7 @@ class Indexer(commands.Cog):
             # 将获取一个批次的操作作为一个协程，提交给调度器
             archived_threads_iterator = channel.archived_threads(limit=100, before=last_thread_timestamp)
             batch = await self.bot.api_scheduler.submit(
-                coro=asyncio.gather(*[t async for t in archived_threads_iterator]),
+                coro=self._aiter_to_list(archived_threads_iterator),
                 priority=10 # 这是低优先级后台任务
             )
 
@@ -85,38 +112,63 @@ class Indexer(commands.Cog):
 
             for thread in batch:
                 await self.queue.put(thread)
-                self.progress['discovered'] += 1
+                progress['discovered'] += 1
             
             last_thread_timestamp = batch[-1].created_at
             
-            # 每处理完一个批次，更新一次UI
-            await dashboard.update_embed()
-
         if not dashboard.is_cancelled():
-            self.progress['total'] = self.progress['discovered']
-            await dashboard.update_embed()
+            progress['total'] = progress['discovered']
 
-        await self.queue.put(None) # Sentinel to signal producer is done
+        # 生产者完成
 
-    async def consumer(self, dashboard: IndexerDashboard):
-        """消费者：从队列中取出帖子并处理"""
+    async def consumer(self, dashboard: IndexerDashboard, consumer_id: int):
+        """消费者：从队列中取出帖子并处理，受信号量控制。"""
+        # logging.info(f"消费者 #{consumer_id} 启动")
         tag_system_cog: TagSystem = self.bot.get_cog("TagSystem")
 
-        while True:
-            await dashboard.wait_if_paused()
-            if dashboard.is_cancelled():
-                break
+        try:
+            while True:
+                await dashboard.wait_if_paused()
+                if dashboard.is_cancelled():
+                    break
 
-            thread = await self.queue.get()
-            if thread is None: # Sentinel reached
-                self.queue.task_done()
-                break
-            
-            if tag_system_cog:
-                await tag_system_cog.sync_thread(thread)
+                async with dashboard.consumer_semaphore:
+                    if dashboard.is_cancelled(): # 再次检查，因为可能在等待信号量时被取消
+                        break
+                    
+                    thread = await dashboard.queue.get()
+                    
+                    try:
+                        if tag_system_cog:
+                            await tag_system_cog.sync_thread(thread, fetch_if_incomplete=True)
+                        dashboard.progress['processed'] += 1
+                    except Exception as e:
+                        logging.error(f"消费者 #{consumer_id} 处理帖子 {thread.id} 时出错: {e}", exc_info=True)
+                    finally:
+                        dashboard.queue.task_done()
 
-            self.progress['processed'] += 1
-            if self.progress['processed'] % 5 == 0: # Avoid updating too frequently
-                await dashboard.update_embed()
-            
-            self.queue.task_done()
+        except asyncio.CancelledError:
+            # logging.info(f"消费者 #{consumer_id} 被取消")
+            pass
+
+    @commands.Cog.listener()
+    async def on_guild_channel_update(self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel):
+        """
+        监听频道更新事件。
+        只要论坛频道的标签发生任何变化（增、删、改），就重建 TagService 的缓存。
+        """
+        if not isinstance(after, discord.ForumChannel) or not isinstance(before, discord.ForumChannel):
+            return
+
+        # 如果可用标签列表没有发生任何变化，则提前返回，避免不必要的操作。
+        if before.available_tags == after.available_tags:
+            return
+
+        logging.info(f"检测到论坛频道 '{after.name}' (ID: {after.id}) 的标签发生变化，准备刷新 TagService 缓存。")
+        
+        try:
+            # 调用服务重建整个缓存，确保数据完全同步
+            await self.tag_service.build_cache()
+            logging.info("TagService 缓存已因频道更新而成功刷新。")
+        except Exception as e:
+            logging.error(f"因频道更新事件刷新 TagService 缓存时出错: {e}", exc_info=True)

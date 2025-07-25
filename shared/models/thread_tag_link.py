@@ -6,6 +6,4 @@ class ThreadTagLink(SQLModel, table=True):
     thread_id: Optional[int] = Field(
         default=None, foreign_key="thread.id", primary_key=True
     )
-    tag_id: Optional[int] = Field(
-        default=None, foreign_key="tag.id", primary_key=True
-    )
+    tag_id: int = Field(foreign_key="tag.id", primary_key=True)

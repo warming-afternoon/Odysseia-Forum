@@ -2,6 +2,7 @@ import discord
 import re
 from typing import TYPE_CHECKING
 
+from shared.discord_utils import safe_defer
 from .generic_search_view import GenericSearchView
 
 if TYPE_CHECKING:
@@ -22,10 +23,7 @@ class PersistentChannelSearchView(discord.ui.View):
         当用户点击“搜索本频道”按钮时，启动一个预设了频道ID的通用搜索流程。
         它从按钮所在消息的 embed 中解析出频道 ID。
         """
-        await self.cog.bot.api_scheduler.submit(
-            coro=interaction.response.defer(ephemeral=True, thinking=True),
-            priority=1
-        )
+        await safe_defer(interaction, ephemeral=True)
 
         if not interaction.message.embeds:
             await self.cog.bot.api_scheduler.submit(
@@ -55,10 +53,9 @@ class PersistentChannelSearchView(discord.ui.View):
             )
             return
 
-        # 创建并启动通用搜索视图，预设了频道ID
         generic_view = GenericSearchView(
             cog=self.cog,
-            original_interaction=interaction,
+            interaction=interaction,
             channel_ids=[channel_id]
         )
-        await generic_view.start()
+        await generic_view.start(send_new_ephemeral=True)

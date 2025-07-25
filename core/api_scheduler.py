@@ -1,6 +1,8 @@
 import asyncio
 import logging
 from typing import Coroutine, Any, NamedTuple
+from itertools import count
+from functools import partial
 
 # 设置日志记录器
 logger = logging.getLogger(__name__)
@@ -13,6 +15,7 @@ class APIRequest(NamedTuple):
     - future: 一个asyncio.Future对象，用于在协程执行完毕后返回结果或异常。
     """
     priority: int
+    count: int
     coro: Coroutine[Any, Any, Any]
     future: asyncio.Future
 
@@ -31,46 +34,55 @@ class APIScheduler:
         self._semaphore = asyncio.Semaphore(concurrent_requests)
         self._task: asyncio.Task | None = None
         self._is_running = False
+        self._counter = count()
 
     async def _dispatcher_loop(self):
-        """调度器的主循环，在后台任务中运行。"""
-        logger.info("API acheduler loop started.")
+        """调度器的主循环，从队列中拉取请求并派发给worker。"""
+        logger.info("API scheduler loop started.")
         while self._is_running:
             try:
                 # 从优先级队列中获取下一个最高优先级的请求
                 request = await self._queue.get()
+
+                # 检查是否是哨兵对象 (None)
+                if request is None:
+                    self._queue.task_done()
+                    break
                 
-                # 等待一个可用的API令牌
-                await self._semaphore.acquire()
+                # 为请求创建一个worker任务，但不等待它完成
+                # 这使得调度循环可以立即回去处理下一个请求
+                asyncio.create_task(self._worker(request))
                 
-                # 创建一个任务来执行API调用，这样我们可以附加一个完成回调
-                api_task = asyncio.create_task(request.coro)
-                api_task.add_done_callback(
-                    lambda t: self._on_api_task_done(t, request)
-                )
+                # 立即标记任务完成，因为我们已经把它移交给了worker
+                self._queue.task_done()
 
             except asyncio.CancelledError:
-                logger.info("API scheduler loop cancelled.")
+                logger.info("API scheduler loop was explicitly cancelled.")
                 break
             except Exception:
                 logger.exception("Error in API scheduler loop. This should not happen.")
-                # 即使出现意外错误，也短暂等待后继续，以保证调度器健壮性
                 await asyncio.sleep(1)
 
-    def _on_api_task_done(self, task: asyncio.Task, request: APIRequest):
-        """当API协程执行完毕后的回调函数。"""
-        # 总是释放令牌，无论成功还是失败
-        self._semaphore.release()
-        
-        # 将结果或异常设置到future中，以唤醒原始的调用者
-        if task.cancelled():
-            request.future.cancel()
-        elif exc := task.exception():
-            request.future.set_exception(exc)
-        else:
-            request.future.set_result(task.result())
+    async def _worker(self, request: APIRequest):
+        """处理单个API请求的完整生命周期。"""
+        try:
+            # 等待一个可用的API令牌
+            await self._semaphore.acquire()
             
-        self._queue.task_done()
+            # 执行API调用协程
+            result = await request.coro
+            
+            # 将结果设置到future中，以唤醒原始的调用者
+            if not request.future.done():
+                request.future.set_result(result)
+
+        except Exception as e:
+            # 如果发生异常，将异常设置到future中
+            if not request.future.done():
+                request.future.set_exception(e)
+        finally:
+            # 确保信号量总是被释放，无论成功还是失败
+            self._semaphore.release()
 
     async def submit(self, coro: Coroutine, priority: int) -> Any:
         """
@@ -82,10 +94,11 @@ class APIScheduler:
         :return: API调用协程的返回结果。
         """
         if not self._is_running:
-            raise RuntimeError("APIScheduler is not running.")
+            raise RuntimeError("API 调度器没有在运行")
             
         future = asyncio.get_running_loop().create_future()
-        request = APIRequest(priority=priority, coro=coro, future=future)
+        count = next(self._counter)
+        request = APIRequest(priority=priority, count=count, coro=coro, future=future)
         await self._queue.put(request)
         
         # 等待future被设置结果，并返回
@@ -97,24 +110,21 @@ class APIScheduler:
             return
         self._is_running = True
         self._task = asyncio.create_task(self._dispatcher_loop())
-        logger.info("APIScheduler started.")
+        # logger.info("API 调度器开始")
 
     async def stop(self):
-        """优雅地停止调度器。"""
+        """停止调度器"""
         if not self._is_running or not self._task:
             return
         
-        logger.info("Stopping APIScheduler...")
+        logger.info("即将停止API调度器...")
         self._is_running = False
         
-        # 等待队列中所有任务完成
-        await self._queue.join()
+        # 向队列中放入哨兵对象，以通知循环退出
+        await self._queue.put(None)
         
-        # 取消调度器主循环任务
-        self._task.cancel()
-        try:
+        # 等待调度器主循环任务自然结束
+        if self._task:
             await self._task
-        except asyncio.CancelledError:
-            pass
         
-        logger.info("APIScheduler stopped.")
+        logger.info("API调度器停止")

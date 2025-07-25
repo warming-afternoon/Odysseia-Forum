@@ -14,9 +14,6 @@ class UserSearchPreferences(SQLModel, table=True):
     after_date: Optional[datetime] = Field(default=None)
     before_date: Optional[datetime] = Field(default=None)
     
-    # 搜索逻辑
-    tag_logic: str = Field(default="and")
-    
     # 显示偏好
     preview_image_mode: str = Field(default="thumbnail")
     results_per_page: int = Field(default=5)

@@ -4,20 +4,32 @@ from discord.ext import commands
 import datetime
 from sqlalchemy.orm import sessionmaker
 
+from shared.discord_utils import safe_defer
 from .repository import TagSystemRepository
 from shared.database import get_session
 from .views.vote_view import TagVoteView
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 class TagSystem(commands.Cog):
     """处理标签同步与评价"""
 
-    def __init__(self, bot: commands.Bot, session_factory: sessionmaker):
+    def __init__(self, bot: commands.Bot, session_factory: sessionmaker, config: dict):
         self.bot = bot
         self.session_factory = session_factory
+        self.config = config
         self.indexed_channel_ids = set()  # 缓存已索引的频道ID
 
     async def cog_load(self):
         """Cog加载时初始化缓存"""
+        await self.refresh_indexed_channels_cache()
+
+    @commands.Cog.listener()
+    async def on_index_updated(self):
+        """监听由 Indexer 发出的索引更新事件。"""
+        logger.info("接收到 'index_updated' 事件，正在刷新标签系统的频道缓存...")
         await self.refresh_indexed_channels_cache()
 
     async def refresh_indexed_channels_cache(self):
@@ -25,7 +37,7 @@ class TagSystem(commands.Cog):
         async with self.session_factory() as session:
             repo = TagSystemRepository(session)
             self.indexed_channel_ids = set(await repo.get_indexed_channel_ids())
-        print(f"已缓存的索引频道: {self.indexed_channel_ids}")
+        logger.info(f"已缓存的索引频道: {self.indexed_channel_ids}")
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道是否已索引"""
@@ -51,22 +63,152 @@ class TagSystem(commands.Cog):
                 await repo.delete_thread_index(thread_id=thread.id)
             await self.refresh_indexed_channels_cache()
 
-    # 其他监听器（on_message, on_raw_message_edit, etc.）可以暂时保持不变，
-    # 因为它们主要更新活跃时间等信息，这部分逻辑在 sync_thread 中已经覆盖。
-    # 为了简化，我们将主要依赖 on_thread_create/update/delete。
-    # 也可以在未来细化，只更新部分字段以提高性能。
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message):
+        if not message.guild or not isinstance(message.channel, discord.Thread):
+            return
+        
+        thread = message.channel
+        if self.is_channel_indexed(thread.parent_id):
+            # 使用调度器提交数据库更新
+            await self.bot.api_scheduler.submit(
+                coro=self._update_activity(thread, message.created_at),
+                priority=5 # 中等优先级
+            )
 
-    async def sync_thread(self, thread: discord.Thread, priority: int = 10):
+    @commands.Cog.listener()
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+        if not payload.guild_id:
+            return
+            
+        try:
+            channel = self.bot.get_channel(payload.channel_id)
+            if isinstance(channel, discord.Thread) and self.is_channel_indexed(channel.parent_id):
+                # 如果是首楼消息被编辑，需要重新同步整个帖子
+                if payload.message_id == channel.id:
+                    # 因为这是 raw 事件，缓存的 channel 对象可能不是最新的
+                    # 我们需要确保同步的是最完整的数据
+                    await self.sync_thread(thread=channel, priority=2, fetch_if_incomplete=True)
+                else:
+                    # 普通消息编辑只更新活跃时间
+                    await self.bot.api_scheduler.submit(
+                        coro=self._update_activity(channel, datetime.datetime.now(datetime.timezone.utc)),
+                        priority=5
+                    )
+        except Exception:
+            logger.warning("处理消息编辑事件失败", exc_info=True)
+
+    @commands.Cog.listener()
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        if not payload.guild_id:
+            return
+
+        try:
+            channel = self.bot.get_channel(payload.channel_id)
+            if isinstance(channel, discord.Thread) and self.is_channel_indexed(channel.parent_id):
+                # 如果首楼被删除，删除整个索引
+                if payload.message_id == channel.id:
+                    async with self.session_factory() as session:
+                        repo = TagSystemRepository(session=session)
+                        await repo.delete_thread_index(thread_id=channel.id)
+                    await self.refresh_indexed_channels_cache()
+                else:
+                    # 普通消息删除，更新回复数和活跃时间
+                    await self.bot.api_scheduler.submit(
+                        coro=self._update_activity(channel),
+                        priority=5
+                    )
+        except Exception:
+            logger.warning("处理消息删除事件失败", exc_info=True)
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        if not payload.guild_id:
+            return
+        
+        try:
+            channel = self.bot.get_channel(payload.channel_id)
+            if isinstance(channel, discord.Thread) and self.is_channel_indexed(channel.parent_id):
+                # 只有对首楼消息的反应才更新统计
+                if payload.message_id == channel.id:
+                    await self.bot.api_scheduler.submit(
+                        coro=self._update_reaction_count(channel),
+                        priority=5
+                    )
+        except Exception:
+            logger.warning("处理反应添加事件失败", exc_info=True)
+
+    @commands.Cog.listener()
+    async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        if not payload.guild_id:
+            return
+            
+        try:
+            channel = self.bot.get_channel(payload.channel_id)
+            if isinstance(channel, discord.Thread) and self.is_channel_indexed(channel.parent_id):
+                # 只有对首楼消息的反应才更新统计
+                if payload.message_id == channel.id:
+                    await self.bot.api_scheduler.submit(
+                        coro=self._update_reaction_count(channel),
+                        priority=5
+                    )
+        except Exception:
+            logger.warning("处理反应移除事件失败", exc_info=True)
+
+    async def _update_activity(self, thread: discord.Thread, last_active_time: datetime = None):
+        """(协程) 更新帖子的活跃度和回复数"""
+        if last_active_time is None:
+            # 如果没有提供时间，就用当前时间
+            last_active_time = datetime.datetime.now(datetime.timezone.utc)
+        
+        # message_count 通常是准确的，除非有大量删除
+        reply_count = thread.message_count
+        
+        async with self.session_factory() as session:
+            repo = TagSystemRepository(session)
+            await repo.update_thread_activity(thread.id, last_active_time, reply_count)
+
+    async def _update_reaction_count(self, thread: discord.Thread):
+        """(协程) 更新帖子的反应数"""
+        try:
+            # 优先从缓存获取，失败则API调用
+            first_msg = thread.get_partial_message(thread.id)
+            first_msg = await first_msg.fetch()
+            
+            reaction_count = max([r.count for r in first_msg.reactions]) if first_msg.reactions else 0
+            
+            async with self.session_factory() as session:
+                repo = TagSystemRepository(session)
+                await repo.update_thread_reaction_count(thread.id, reaction_count)
+        except Exception:
+            logger.warning(f"更新反应数失败 (帖子ID: {thread.id})", exc_info=True)
+
+    async def sync_thread(self, thread: discord.Thread, priority: int = 10, *, fetch_if_incomplete: bool = False):
         """
         同步一个帖子的数据到数据库，包括其标签。
-        这是一个核心方法，由事件监听器和索引器调用。
+        该方法由事件监听器和索引器调用。
         :param thread: 要同步的帖子对象。
         :param priority: 此操作的API调用优先级。
+        :param fetch_if_incomplete: 如果为True，则强制从API获取最新的帖子对象，用于处理可能不完整的对象。
         """
+        if fetch_if_incomplete:
+            try:
+                thread = await self.bot.api_scheduler.submit(
+                coro=self.bot.fetch_channel(thread.id),
+                priority=priority
+            )
+            except discord.NotFound:
+                logger.warning(f"sync_thread: 无法找到帖子 {thread.id}，可能已被删除。")
+                
+                async with self.session_factory() as session:
+                    repo = TagSystemRepository(session=session)
+                    await repo.delete_thread_index(thread_id=thread.id)
+                return
+        
         # 将频道添加到已索引缓存中
         self.indexed_channel_ids.add(thread.parent_id)
         
-        tag_names = [t.name for t in thread.applied_tags or []]
+        tags_data = {t.id: t.name for t in thread.applied_tags or []}
         
         excerpt = ""
         thumbnail_url = ""
@@ -83,13 +225,13 @@ class TagSystem(commands.Cog):
                     thumbnail_url = first_msg.attachments[0].url
                 reaction_count = max([r.count for r in first_msg.reactions]) if first_msg.reactions else 0
         except discord.NotFound:
-            print(f"无法获取帖子 {thread.id} 的首楼消息，可能已被删除。")
+            logger.warning(f"无法获取帖子 {thread.id} 的首楼消息，可能已被删除。")
             async with self.session_factory() as session:
                 repo = TagSystemRepository(session=session)
                 await repo.delete_thread_index(thread_id=thread.id)
             return
-        except Exception as e:
-            print(f"同步帖子 {thread.id} 时获取首楼消息失败: {e}")
+        except Exception:
+            logger.error(f"同步帖子 {thread.id} 时获取首楼消息失败", exc_info=True)
 
         thread_data = {
             "thread_id": thread.id,
@@ -97,7 +239,7 @@ class TagSystem(commands.Cog):
             "title": thread.name,
             "author_id": thread.owner_id or 0,
             "created_at": thread.created_at,
-            "last_active_at": datetime.datetime.now(datetime.timezone.utc), # 简化处理，每次同步都更新活跃时间
+            "last_active_at": thread.last_message.created_at if thread.last_message else thread.created_at,
             "reaction_count": reaction_count,
             "reply_count": thread.message_count,
             "first_message_excerpt": excerpt,
@@ -106,50 +248,50 @@ class TagSystem(commands.Cog):
         
         async with self.session_factory() as session:
             repo = TagSystemRepository(session=session)
-            await repo.add_or_update_thread_with_tags(thread_data=thread_data, tag_names=tag_names)
-        print(f"已同步帖子: {thread.name} (ID: {thread.id})")
+            await repo.add_or_update_thread_with_tags(thread_data=thread_data, tags_data=tags_data)
+        # logger.info(f"已同步帖子: {thread.name} (ID: {thread.id})")
 
     @app_commands.command(name="标签评价", description="对当前帖子的标签进行评价（赞或踩）")
     async def tag_rate(self, interaction: discord.Interaction):
-        if not isinstance(interaction.channel, discord.Thread):
-            await interaction.response.send_message("此命令只能在帖子（Thread）中使用。", ephemeral=True)
-            return
+        await safe_defer(interaction)
+        try:
+            if not isinstance(interaction.channel, discord.Thread):
+                await self.bot.api_scheduler.submit(
+                    coro=interaction.followup.send("此命令只能在帖子中使用。", ephemeral=True),
+                    priority=1
+                )
+                return
 
-        if not interaction.channel.applied_tags:
-            await interaction.response.send_message("该帖子没有应用任何标签。", ephemeral=True)
-            return
+            if not interaction.channel.applied_tags:
+                await self.bot.api_scheduler.submit(
+                    coro=interaction.followup.send("该帖子没有应用任何标签。", ephemeral=True),
+                    priority=1
+                )
+                return
 
-        # 将会话工厂传递给视图
-        view = TagVoteView(tags=interaction.channel.applied_tags, session_factory=self.session_factory)
-        await interaction.response.send_message(content="请选择您要评价的标签：", view=view, ephemeral=True)
+            tag_map = {tag.id: tag.name for tag in interaction.channel.applied_tags}
 
-    @app_commands.command(name="查看标签评价", description="查看当前帖子的标签评价统计")
-    async def check_tag_stats(self, interaction: discord.Interaction):
-        if not isinstance(interaction.channel, discord.Thread):
-            await interaction.response.send_message("此命令只能在帖子（Thread）中使用。", ephemeral=True)
-            return
-
-        async with self.session_factory() as session:
-            repo = TagSystemRepository(session=session)
-            stats = await repo.get_tag_vote_stats(thread_id=interaction.channel.id)
-        
-        if not stats:
-            await interaction.response.send_message("该帖子暂无任何标签评价。", ephemeral=True)
-            return
-
-        embed = discord.Embed(
-            title=f"帖子 “{interaction.channel.name}” 的标签评价",
-            color=discord.Color.blue()
-        )
-        
-        # 对标签按名称排序，以获得一致的显示顺序
-        sorted_tags = sorted(stats.items())
-
-        for tag_name, data in sorted_tags:
-            embed.add_field(
-                name=tag_name,
-                value=f"👍 {data.get('up', 0)}   👎 {data.get('down', 0)}   总分: **{data.get('score', 0)}**",
-                inline=False
+            view = TagVoteView(
+                thread_id=interaction.channel.id,
+                thread_name=interaction.channel.name,
+                tag_map=tag_map,
+                session_factory=self.session_factory,
+                api_scheduler=self.bot.api_scheduler
             )
+            # 获取初始统计数据
+            async with self.session_factory() as session:
+                repo = TagSystemRepository(session)
+                initial_stats = await repo.get_tag_vote_stats(interaction.channel.id, tag_map)
+
+            # 使用初始统计数据创建嵌入
+            embed = view.create_embed(initial_stats)
             
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+            await self.bot.api_scheduler.submit(
+                coro=interaction.followup.send(embed=embed, view=view, ephemeral=True),
+                priority=1
+            )
+        except Exception as e:
+            await self.bot.api_scheduler.submit(
+                coro=interaction.followup.send(f"❌ 命令执行失败: {e}", ephemeral=True),
+                priority=1
+            )

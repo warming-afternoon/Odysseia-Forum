@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 
 class Tag(SQLModel, table=True):
     """标签模型。"""
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(index=True, unique=True)
+    id: int = Field(primary_key=True, description="Discord tag的id")
+    name: str = Field(index=True)
     
     threads: List["Thread"] = Relationship(back_populates="tags", link_model=ThreadTagLink)
     votes: List["TagVote"] = Relationship(back_populates="tag")
