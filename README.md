@@ -37,7 +37,7 @@
 - discord.py 2.0+
 - aiosqlite
 
-## 🚀 安装配置
+## 🚀 快速开始
 
 ### 1. 克隆项目
 ```bash
@@ -45,23 +45,24 @@ git clone https://github.com/your-username/Odysseia-Forum.git
 cd Odysseia-Forum
 ```
 
-### 2. 安装依赖
+### 2. 配置文件
+根据 `config.example.json` 创建你自己的 `config.json` 文件，并填入你的Discord机器人Token。
+
+### 3. 一键启动
+我们提供了一个一键启动脚本 `start.sh`。
+
 ```bash
-pip install discord.py aiosqlite
+# 首次运行前，请赋予脚本执行权限
+chmod +x ./start.sh
+
+# 执行脚本
+./start.sh
 ```
 
-### 3. 配置文件
-创建 `config.json` 文件：
-```json
-{
-  "token": "你的Discord机器人Token"
-}
-```
-
-### 4. 运行机器人
-```bash
-python bot_main.py
-```
+### 脚本高级用法
+- **仅设置环境**: `./start.sh setup`
+- **重启机器人**: `./start.sh restart`
+- **查看帮助**: `./start.sh --help`
 
 ## 📖 使用指南
 
@@ -191,7 +192,3 @@ python bot_main.py
 
 **注意**：使用前请确保您已阅读Discord的服务条款和机器人使用政策。
 
-```bash
-pip install -r requirements.txt
-python bot_main.py
-```
