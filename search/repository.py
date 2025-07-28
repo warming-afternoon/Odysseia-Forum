@@ -91,8 +91,8 @@ class SearchRepository:
             # (tag_votes_summary -> 'id' ->> 'upvotes')::int
             upvotes_case_clauses = [
                 (
-                    (Thread.tag_votes_summary.op('->')(str(tag_id)).op('->>')('upvotes')).isnot(None),
-                    cast(Thread.tag_votes_summary.op('->')(str(tag_id)).op('->>')('upvotes'), Float)
+                    func.json_extract(Thread.tag_votes_summary, f'$.{tag_id}.upvotes').isnot(None),
+                    cast(func.json_extract(Thread.tag_votes_summary, f'$.{tag_id}.upvotes'), Float)
                 )
                 for tag_id in resolved_include_tag_ids
             ]
@@ -100,8 +100,8 @@ class SearchRepository:
 
             downvotes_case_clauses = [
                 (
-                    (Thread.tag_votes_summary.op('->')(str(tag_id)).op('->>')('downvotes')).isnot(None),
-                    cast(Thread.tag_votes_summary.op('->')(str(tag_id)).op('->>')('downvotes'), Float)
+                    func.json_extract(Thread.tag_votes_summary, f'$.{tag_id}.downvotes').isnot(None),
+                    cast(func.json_extract(Thread.tag_votes_summary, f'$.{tag_id}.downvotes'), Float)
                 )
                 for tag_id in resolved_include_tag_ids
             ]
@@ -221,6 +221,7 @@ class SearchRepository:
 
             statement = statement.order_by(order_by).options(selectinload(Thread.tags)).offset(offset).limit(limit)
             
+            # logging.info(f"Executing search query: {statement.compile(compile_kwargs={'literal_binds': True})}")
             result = await self.session.execute(statement)
             
             rows = result.all()

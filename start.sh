@@ -94,9 +94,9 @@ setup_environment() {
     fi
 
     if [ -f "requirements.txt" ]; then
-        log_info "正在从 requirements.txt 同步依赖..."
-        uv pip sync requirements.txt
-        log_success "依赖已是最新状态。"
+        log_info "正在从 requirements.txt 安装依赖..."
+        uv pip install -r requirements.txt
+        log_success "依赖安装完成。"
     else
         log_warning "未找到 requirements.txt，跳过依赖安装。"
     fi
