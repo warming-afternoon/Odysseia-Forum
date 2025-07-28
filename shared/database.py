@@ -25,26 +25,9 @@ AsyncSessionFactory = sessionmaker(
     expire_on_commit=False,
 )
 
-async def migrate_database(conn):
-    """
-    执行数据库迁移，例如添加新列。
-    """
-    # 检查 threads 表是否有 tag_votes_summary 字段
-    table_info = await conn.run_sync(
-        lambda sync_conn: sync_conn.execute(
-            text("PRAGMA table_info(thread)")
-        ).fetchall()
-    )
-    column_names = [col[1] for col in table_info]
-    
-    if 'tag_votes_summary' not in column_names:
-        print("正在为 'thread' 表添加 'tag_votes_summary' 字段...")
-        await conn.execute(text("ALTER TABLE thread ADD COLUMN tag_votes_summary TEXT"))
-        print("已添加 'tag_votes_summary' 字段。")
-
 async def init_db():
     """
-    初始化数据库，创建所有在 SQLModel.metadata 中注册的表，并执行迁移。
+    初始化数据库，创建所有在 SQLModel.metadata 中注册的表
     """
     # 确保数据库文件所在的目录存在
     db_dir = os.path.dirname(DB_PATH)
@@ -52,11 +35,8 @@ async def init_db():
         os.makedirs(db_dir, exist_ok=True)
 
     async with async_engine.begin() as conn:
-        # 1. 创建所有不存在的表
         await conn.run_sync(SQLModel.metadata.create_all)
         
-        # 2. 执行手动迁移
-        await migrate_database(conn)
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
