@@ -69,6 +69,7 @@ class Indexer(commands.Cog):
         except Exception as e:
             dashboard.progress['error'] = f"{type(e).__name__}: {e}"
             producer_task.cancel() # 如果出错，也取消生产者
+            dashboard.progress['finished'] = True
         finally:
             # 3. 所有项目处理完毕，取消所有消费者任务
             for task in consumer_tasks:
@@ -78,7 +79,8 @@ class Indexer(commands.Cog):
             await asyncio.gather(*consumer_tasks, return_exceptions=True)
 
             # 5. 标记完成并更新UI
-            dashboard.progress['finished'] = True
+            if not dashboard.progress.get('error'):
+                dashboard.progress['finished'] = True
             await dashboard.update_embed()
 
             # 6. 分发全局事件
@@ -111,7 +113,7 @@ class Indexer(commands.Cog):
                 break
 
             for thread in batch:
-                await self.queue.put(thread)
+                await queue.put(thread)
                 progress['discovered'] += 1
             
             last_thread_timestamp = batch[-1].created_at

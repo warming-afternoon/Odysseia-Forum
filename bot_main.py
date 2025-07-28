@@ -3,9 +3,11 @@ import discord
 import logging
 from discord.ext import commands
 import asyncio
+import uvloop
+import orjson
 
 
-from shared.database import AsyncSessionFactory, init_db
+from shared.database import AsyncSessionFactory, init_db, close_db
 from tag_system.cog import TagSystem
 from tag_system.tagService import TagService
 from indexer.cog import Indexer
@@ -15,7 +17,7 @@ from core.api_scheduler import APIScheduler
 class MyBot(commands.Bot):
     def __init__(self, *, intents: discord.Intents, config: dict):
         proxy = config.get("proxy")
-        super().__init__(command_prefix="/", intents=intents, proxy=proxy)
+        super().__init__(command_prefix="/", intents=intents, proxy=proxy, json_impl=orjson)
         self.config = config
         self.db_url = config["db_url"]
         self.tag_service: TagService | None = None
@@ -50,8 +52,9 @@ class MyBot(commands.Bot):
             print(f"Failed to sync commands: {e}")
 
     async def close(self):
-        """关闭机器人时，优雅地关闭调度器。"""
+        """关闭机器人时，一并关闭调度器和数据库连接。"""
         await self.api_scheduler.stop()
+        await close_db()
         await super().close()
 
 async def main():
@@ -77,4 +80,8 @@ async def main():
         await bot.start(config["token"])
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        uvloop.install()
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("机器人关闭。")
