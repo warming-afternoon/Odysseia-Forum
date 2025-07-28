@@ -65,3 +65,11 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
     async with AsyncSessionFactory() as session:
         yield session
+
+async def close_db():
+    """
+    关闭数据库引擎，释放连接池。
+    """
+    print("正在关闭数据库连接池...")
+    await async_engine.dispose()
+    print("数据库连接池已关闭。")

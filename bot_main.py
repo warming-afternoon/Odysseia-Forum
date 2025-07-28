@@ -5,7 +5,7 @@ from discord.ext import commands
 import asyncio
 
 
-from shared.database import AsyncSessionFactory, init_db
+from shared.database import AsyncSessionFactory, init_db, close_db
 from tag_system.cog import TagSystem
 from tag_system.tagService import TagService
 from indexer.cog import Indexer
@@ -50,8 +50,9 @@ class MyBot(commands.Bot):
             print(f"Failed to sync commands: {e}")
 
     async def close(self):
-        """关闭机器人时，优雅地关闭调度器。"""
+        """关闭机器人时，优雅地关闭调度器和数据库连接。"""
         await self.api_scheduler.stop()
+        await close_db()
         await super().close()
 
 async def main():
@@ -77,4 +78,7 @@ async def main():
         await bot.start(config["token"])
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("机器人关闭。")
