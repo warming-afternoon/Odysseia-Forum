@@ -37,7 +37,7 @@
 - discord.py 2.0+
 - aiosqlite
 
-## 🚀 安装配置
+## 🚀 快速开始
 
 ### 1. 克隆项目
 ```bash
@@ -45,23 +45,51 @@ git clone https://github.com/your-username/Odysseia-Forum.git
 cd Odysseia-Forum
 ```
 
-### 2. 安装依赖
+### 2. 配置文件
+根据 `config.example.json` 创建你自己的 `config.json` 文件，并填入你的Discord机器人Token。
+
+### 3. 一键启动
+我们提供了一个一键启动脚本 `start.sh`。
+
 ```bash
-pip install discord.py aiosqlite
+# 首次运行前，请赋予脚本执行权限
+chmod +x ./start.sh
+
+# 执行脚本
+./start.sh
 ```
 
-### 3. 配置文件
-创建 `config.json` 文件：
-```json
-{
-  "token": "你的Discord机器人Token"
-}
-```
+### 脚本高级用法
+- **仅设置环境**: `./start.sh setup`
+- **重启机器人**: `./start.sh restart`
 
-### 4. 运行机器人
-```bash
-python bot_main.py
-```
+### 手动运行
+
+如果你不想使用 `start.sh` 脚本，或者需要进行更细致的调试，可以按照以下步骤手动运行机器人：
+
+1.  创建并激活虚拟环境
+    ```bash
+    # 下载 uv
+    pip install uv 
+
+    # 使用 uv 创建虚拟环境
+    uv venv
+
+    # 激活虚拟环境 (Linux/macOS)
+    source .venv/bin/activate
+    ```
+
+2.  安装依赖
+    ```bash
+    # 使用 uv 安装 requirements.txt 中的依赖
+    uv pip install -r requirements.txt
+    ```
+
+3.  运行机器人
+    ```bash
+    python bot_main.py
+    ```
+- **查看帮助**: `./start.sh --help`
 
 ## 📖 使用指南
 
@@ -97,20 +125,19 @@ python bot_main.py
 #### 搜索相关
 - `/创建频道搜索` - 在当前帖子内创建频道搜索按钮
 - `/创建全局搜索` - 创建全局搜索按钮
+- `/全局搜索` - 开始一次仅自己可见的全局搜索
 - `/快捷搜索 [作者]` - 快速搜索指定作者的帖子
 
 #### 偏好设置
-- `/每页结果数量 [数量]` - 设置每页显示的搜索结果数量（3-10）
+- `/每页结果数量 [数量]` - 设置每页显示的搜索结果数量（3-9）
 - `/搜索偏好 作者` - 管理作者偏好（只看/屏蔽/取消屏蔽/清空）
 - `/搜索偏好 时间` - 设置搜索时间范围
-- `/搜索偏好 标签` - 设置多选标签逻辑（同时/任一）
 - `/搜索偏好 预览图` - 设置预览图显示方式（缩略图/大图）
 - `/搜索偏好 查看` - 查看当前搜索偏好设置
 - `/搜索偏好 清空` - 清空所有搜索偏好设置
 
 #### 标签系统
 - `/标签评价` - 对当前帖子的标签进行点赞/点踩
-- `/查看帖子标签` - 查看当前帖子标签的评价统计
 
 ### 管理员命令
 
@@ -191,7 +218,3 @@ python bot_main.py
 
 **注意**：使用前请确保您已阅读Discord的服务条款和机器人使用政策。
 
-```bash
-pip install -r requirements.txt
-python bot_main.py
-```
