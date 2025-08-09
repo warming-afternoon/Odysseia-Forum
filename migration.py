@@ -4,8 +4,8 @@ import json
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlmodel import SQLModel, select
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel, Session, select
 
 # 导入新数据库的模型
 from shared.models.user_search_preferences import UserSearchPreferences
@@ -84,7 +84,7 @@ async def migrate_user_preferences():
             new_prefs_to_add.append(new_pref)
 
         # 5. 写入新数据库
-        async with AsyncSession(new_engine) as session:
+        async with Session(new_engine) as session:
             print(f"正在向新数据库写入 {len(new_prefs_to_add)} 条记录...")
             session.add_all(new_prefs_to_add)
             await session.commit()
