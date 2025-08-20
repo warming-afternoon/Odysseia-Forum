@@ -5,6 +5,7 @@ from shared.models.tag_vote import TagVote
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, attributes
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from shared.models.thread import Thread
 from shared.models.tag import Tag
@@ -20,36 +21,44 @@ class TagSystemRepository:
    async def get_or_create_tags(self, tags_data: dict[int, str]) -> List[Tag]:
        """
        根据标签ID和名称的字典，获取或创建标签对象。
+       此操作是幂等的，并能安全地处理并发请求。
        """
        if not tags_data:
            return []
 
+       # 步骤 1: 使用 INSERT ... ON CONFLICT DO NOTHING 批量插入所有可能的标签。
+       # 这确保了所有标签在数据库中都存在，并且是原子操作，避免了并发冲突。
+       insert_stmt = sqlite_insert(Tag).values(
+           [{"id": id, "name": name} for id, name in tags_data.items()]
+       )
+       do_nothing_stmt = insert_stmt.on_conflict_do_nothing(
+           index_elements=['id']
+       )
+       await self.session.execute(do_nothing_stmt)
+
+       # 步骤 2: 更新可能已更改名称的标签。
+       # (这一步在实践中很少发生，因为Discord标签ID是唯一的，但为了健壮性而保留)
        tag_ids = list(tags_data.keys())
-       # 查询已存在的标签
        statement = select(Tag).where(Tag.id.in_(tag_ids))
        result = await self.session.execute(statement)
-       existing_tags = result.scalars().all()
-       existing_tags_map = {tag.id: tag for tag in existing_tags}
-       existing_tag_ids = set(existing_tags_map.keys())
+       existing_tags_map = {tag.id: tag for tag in result.scalars().all()}
 
-       # 检查现有标签的名称是否有变化
+       updated = False
        for tag_id, tag in existing_tags_map.items():
            if tags_data[tag_id] != tag.name:
                tag.name = tags_data[tag_id]
                self.session.add(tag)
-
-       # 找出需要创建的新标签
-       new_tags_data = {id: name for id, name in tags_data.items() if id not in existing_tag_ids}
-       new_tags = [Tag(id=id, name=name) for id, name in new_tags_data.items()]
-
-       if new_tags:
-           self.session.add_all(new_tags)
-
-       # 如果有任何新标签或更新，刷新会话以确保它们在返回前已持久化
-       if new_tags or any(tags_data[tag_id] != existing_tags_map[tag_id].name for tag_id in existing_tag_ids):
+               updated = True
+       
+       if updated:
            await self.session.flush()
 
-       return list(existing_tags) + new_tags
+       # 步骤 3: 返回所有相关的标签对象。
+       # 此时，我们知道所有需要的标签都已在数据库中，并且名称是最新的。
+       # 重新查询以获取完整的对象列表。
+       final_statement = select(Tag).where(Tag.id.in_(tag_ids))
+       final_result = await self.session.execute(final_statement)
+       return final_result.scalars().all()
 
    async def add_or_update_thread_with_tags(self, thread_data: dict, tags_data: dict[int, str]):
        """

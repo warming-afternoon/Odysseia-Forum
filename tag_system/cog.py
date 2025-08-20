@@ -3,6 +3,7 @@ from discord import app_commands
 from discord.ext import commands
 import datetime
 from sqlalchemy.orm import sessionmaker
+from typing import Coroutine
 
 from shared.discord_utils import safe_defer
 from .repository import TagSystemRepository
@@ -70,11 +71,7 @@ class TagSystem(commands.Cog):
         
         thread = message.channel
         if self.is_channel_indexed(thread.parent_id):
-            # 使用调度器提交数据库更新
-            await self.bot.api_scheduler.submit(
-                coro=self._update_activity(thread, message.created_at),
-                priority=5 # 中等优先级
-            )
+            self.bot.loop.create_task(self._update_activity(thread, message.created_at))
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
@@ -91,10 +88,7 @@ class TagSystem(commands.Cog):
                     await self.sync_thread(thread=channel, priority=2, fetch_if_incomplete=True)
                 else:
                     # 普通消息编辑只更新活跃时间
-                    await self.bot.api_scheduler.submit(
-                        coro=self._update_activity(channel, datetime.datetime.now(datetime.timezone.utc)),
-                        priority=5
-                    )
+                    self.bot.loop.create_task(self._update_activity(channel, datetime.datetime.now(datetime.timezone.utc)))
         except Exception:
             logger.warning("处理消息编辑事件失败", exc_info=True)
 
@@ -114,10 +108,7 @@ class TagSystem(commands.Cog):
                     await self.refresh_indexed_channels_cache()
                 else:
                     # 普通消息删除，更新回复数和活跃时间
-                    await self.bot.api_scheduler.submit(
-                        coro=self._update_activity(channel),
-                        priority=5
-                    )
+                    self.bot.loop.create_task(self._update_activity(channel))
         except Exception:
             logger.warning("处理消息删除事件失败", exc_info=True)
 
@@ -183,6 +174,40 @@ class TagSystem(commands.Cog):
         except Exception:
             logger.warning(f"更新反应数失败 (帖子ID: {thread.id})", exc_info=True)
 
+    async def pre_sync_forum_tags(self, channel: discord.ForumChannel):
+        """
+        预同步一个论坛频道的所有可用标签，确保它们都存在于数据库中。
+        """
+        logger.debug(f"开始为频道 '{channel.name}' (ID: {channel.id}) 预同步所有可用标签...")
+        if not channel.available_tags:
+            logger.debug(f"频道 '{channel.name}' (ID: {channel.id}) 没有任何可用标签，跳过同步。")
+            return
+
+        tags_data = {tag.id: tag.name for tag in channel.available_tags}
+        
+        try:
+            async with self.session_factory() as session:
+                repo = TagSystemRepository(session=session)
+                await repo.get_or_create_tags(tags_data)
+            logger.debug(f"为频道 '{channel.name}' (ID: {channel.id}) 预同步了 {len(tags_data)} 个标签。")
+        except Exception as e:
+            logger.error(f"为频道 '{channel.name}' (ID: {channel.id}) 预同步标签时出错: {e}", exc_info=True)
+            # 即使这里失败，我们也不应该中断整个索引过程，
+            # 因为后续的 consumer 仍然有机会（虽然有风险）去创建标签。
+            # 抛出异常让调用者决定如何处理。
+            raise
+
+    @staticmethod
+    async def _fetch_message_wrapper(fetch_coro: Coroutine) -> discord.Message | None:
+        """
+        包装一个获取消息的协程
+        如果协程成功，返回消息对象；如果抛出 NotFound，返回 None。
+        """
+        try:
+            return await fetch_coro
+        except discord.NotFound:
+            return None
+
     async def sync_thread(self, thread: discord.Thread, priority: int = 10, *, fetch_if_incomplete: bool = False):
         """
         同步一个帖子的数据到数据库，包括其标签。
@@ -213,25 +238,30 @@ class TagSystem(commands.Cog):
         excerpt = ""
         thumbnail_url = ""
         reaction_count = 0
-        try:
-            # 使用调度器以指定优先级获取消息
-            first_msg = await self.bot.api_scheduler.submit(
-                coro=thread.fetch_message(thread.id),
-                priority=priority
-            )
-            if first_msg:
-                excerpt = first_msg.content
-                if first_msg.attachments:
-                    thumbnail_url = first_msg.attachments[0].url
-                reaction_count = max([r.count for r in first_msg.reactions]) if first_msg.reactions else 0
-        except discord.NotFound:
-            logger.warning(f"无法获取帖子 {thread.id} 的首楼消息，可能已被删除。")
+
+        # 创建原始的获取消息的协程，并用包装器包裹它
+        fetch_coro = thread.fetch_message(thread.id)
+        first_msg = await self.bot.api_scheduler.submit(
+            coro=self._fetch_message_wrapper(fetch_coro),
+            priority=priority
+        )
+
+        # 如果返回 None，说明帖子已被删除，记录日志并从数据库删除
+        if first_msg is None:
+            logger.debug(f"无法获取帖子 {thread.id} 的首楼消息，其可能已被删除\n已将其从索引中删除")
             async with self.session_factory() as session:
                 repo = TagSystemRepository(session=session)
                 await repo.delete_thread_index(thread_id=thread.id)
             return
+
+        # 消息获取成功，但解析内容时可能出错
+        try:
+            excerpt = first_msg.content
+            if first_msg.attachments:
+                thumbnail_url = first_msg.attachments[0].url
+            reaction_count = max([r.count for r in first_msg.reactions]) if first_msg.reactions else 0
         except Exception:
-            logger.error(f"同步帖子 {thread.id} 时获取首楼消息失败", exc_info=True)
+            logger.error(f"同步帖子 {thread.id} 时解析首楼消息内容失败", exc_info=True)
 
         thread_data = {
             "thread_id": thread.id,

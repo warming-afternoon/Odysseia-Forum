@@ -24,7 +24,8 @@ class IndexerDashboard(discord.ui.View):
             "processed": 0,
             "total": 0,
             "finished": False,
-            "error": None
+            "error": None,
+            "failures": [] # 用于记录非致命的处理失败
         }
 
         self._paused = asyncio.Event()
@@ -80,7 +81,20 @@ class IndexerDashboard(discord.ui.View):
         embed.add_field(name="已处理帖子", value=f"{progress_stats['processed']} / {progress_stats.get('total', progress_stats['discovered'])}", inline=True)
         
         if error:
-            embed.add_field(name="错误信息", value=f"```\n{error}\n```", inline=False)
+            embed.add_field(name="致命错误", value=f"```\n{error}\n```", inline=False)
+
+        failures = progress_stats.get('failures')
+        if failures:
+            # 为了避免 embed 过长，只显示前 5 个错误
+            error_list = "\n".join([f"- 帖子 {f['id']}: {f['reason']}" for f in failures[:5]])
+            if len(failures) > 5:
+                error_list += f"\n...等 {len(failures) - 5} 个其他错误"
+            
+            embed.add_field(
+                name=f"⚠️ 处理失败 ({len(failures)})",
+                value=f"```\n{error_list}\n```",
+                inline=False
+            )
 
         return embed
 
@@ -109,7 +123,7 @@ class IndexerDashboard(discord.ui.View):
                 self.cancel_button.disabled = True
             
             # 使用中等优先级更新进度，以免阻塞高优任务
-            logging.info(f"正在为频道 {self.channel.id} 更新UI...")
+            # logging.info(f"正在为频道 {self.channel.id} 更新UI...")
             await self.cog.bot.api_scheduler.submit(
                 coro=self.interaction.edit_original_response(embed=embed, view=self),
                 priority=5

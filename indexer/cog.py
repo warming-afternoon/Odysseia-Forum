@@ -19,13 +19,6 @@ class Indexer(commands.Cog):
         self.config = config
         self.tag_service = tag_service
 
-    @staticmethod
-    async def _aiter_to_list(aiter):
-        return [item async for item in aiter]
-
-    @staticmethod
-    async def _aiter_to_list(aiter):
-        return [item async for item in aiter]
 
     @app_commands.command(name="构建索引", description="对当前论坛频道的所有帖子进行索引")
     async def build_index(self, interaction: discord.Interaction):
@@ -50,8 +43,25 @@ class Indexer(commands.Cog):
 
     async def run_indexer(self, dashboard: IndexerDashboard):
         """运行生产者和消费者任务"""
-        logging.info(f"[{dashboard.channel.id}] run_indexer 开始，启动 {dashboard.consumer_concurrency} 个消费者")
+        logging.info(f"[{dashboard.channel.id}] run_indexer 开始")
         
+        # 步骤 1: 预同步该频道的所有可用标签，避免后续的并发冲突
+        try:
+            tag_system_cog: TagSystem = self.bot.get_cog("TagSystem")
+            if tag_system_cog:
+                await tag_system_cog.pre_sync_forum_tags(dashboard.channel)
+            else:
+                logging.warning(f"[{dashboard.channel.id}] 无法获取 TagSystem Cog，跳过标签预同步。")
+        except Exception as e:
+            # 如果预同步失败，记录一个致命错误并停止索引
+            logging.error(f"[{dashboard.channel.id}] 预同步标签时发生严重错误，索引已中止: {e}", exc_info=True)
+            dashboard.progress['error'] = f"预同步标签失败: {e}"
+            dashboard.progress['finished'] = True
+            await dashboard.update_embed()
+            return
+
+        # 步骤 2: 启动生产者和消费者
+        logging.info(f"[{dashboard.channel.id}] 标签预同步完成，启动 {dashboard.consumer_concurrency} 个消费者")
         loop = self.bot.loop
         producer_task = loop.create_task(self.producer(dashboard))
         consumer_tasks = [
@@ -60,10 +70,10 @@ class Indexer(commands.Cog):
         ]
 
         try:
-            # 1. 等待生产者完成（所有帖子都被发现并放入队列）
+            # 等待生产者完成（所有帖子都被发现并放入队列）
             await producer_task
             
-            # 2. 等待队列中的所有项目都被消费者处理
+            # 等待队列中的所有项目都被消费者处理
             await dashboard.queue.join()
 
         except Exception as e:
@@ -71,19 +81,19 @@ class Indexer(commands.Cog):
             producer_task.cancel() # 如果出错，也取消生产者
             dashboard.progress['finished'] = True
         finally:
-            # 3. 所有项目处理完毕，取消所有消费者任务
+            # 所有项目处理完毕，取消所有消费者任务
             for task in consumer_tasks:
                 task.cancel()
             
-            # 4. 等待所有被取消的消费者任务完全停止
+            # 等待所有被取消的消费者任务完全停止
             await asyncio.gather(*consumer_tasks, return_exceptions=True)
 
-            # 5. 标记完成并更新UI
+            # 标记完成并更新UI
             if not dashboard.progress.get('error'):
                 dashboard.progress['finished'] = True
             await dashboard.update_embed()
 
-            # 6. 分发全局事件
+            # 分发全局事件
             if not dashboard.progress.get('error'):
                 logging.info(f"[{dashboard.channel.id}] 索引完成，分发 'index_updated' 事件。")
                 self.bot.dispatch("index_updated")
@@ -99,24 +109,23 @@ class Indexer(commands.Cog):
             await queue.put(thread)
             progress['discovered'] += 1
 
-        # 已归档线程 (手动分页，通过调度器获取)
-        last_thread_timestamp = None
+        # 已归档线程 (手动分页)
+        before_timestamp = None
         while not dashboard.is_cancelled():
-            # 将获取一个批次的操作作为一个协程，提交给调度器
-            archived_threads_iterator = channel.archived_threads(limit=100, before=last_thread_timestamp)
-            batch = await self.bot.api_scheduler.submit(
-                coro=self._aiter_to_list(archived_threads_iterator),
-                priority=10 # 这是低优先级后台任务
-            )
+            batch = []
+            try:
+                async for thread in channel.archived_threads(limit=100, before=before_timestamp):
+                    batch.append(thread)
+                    await queue.put(thread)
+                    progress['discovered'] += 1
+            except Exception as e:
+                logging.error(f"[{channel.id}] 获取归档帖子时出错: {e}", exc_info=True)
+                pass
 
             if not batch:
                 break
-
-            for thread in batch:
-                await queue.put(thread)
-                progress['discovered'] += 1
             
-            last_thread_timestamp = batch[-1].created_at
+            before_timestamp = batch[-1].archive_timestamp
             
         if not dashboard.is_cancelled():
             progress['total'] = progress['discovered']
@@ -125,7 +134,6 @@ class Indexer(commands.Cog):
 
     async def consumer(self, dashboard: IndexerDashboard, consumer_id: int):
         """消费者：从队列中取出帖子并处理，受信号量控制。"""
-        # logging.info(f"消费者 #{consumer_id} 启动")
         tag_system_cog: TagSystem = self.bot.get_cog("TagSystem")
 
         try:
@@ -143,10 +151,13 @@ class Indexer(commands.Cog):
                     try:
                         if tag_system_cog:
                             await tag_system_cog.sync_thread(thread, fetch_if_incomplete=True)
-                        dashboard.progress['processed'] += 1
                     except Exception as e:
+                        error_reason = f"{type(e).__name__}"
                         logging.error(f"消费者 #{consumer_id} 处理帖子 {thread.id} 时出错: {e}", exc_info=True)
+                        dashboard.progress['failures'].append({"id": thread.id, "reason": error_reason})
                     finally:
+                        # 无论成功还是失败，都将帖子标记为“已处理”，以确保进度条最终能达到100%
+                        dashboard.progress['processed'] += 1
                         dashboard.queue.task_done()
 
         except asyncio.CancelledError:

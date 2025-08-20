@@ -28,8 +28,9 @@ class GenericSearchView(discord.ui.View):
         self.channel_ids = channel_ids
         
         # --- 搜索参数 ---
-        # 从 TagService 获取数据
-        self.all_unique_tags: List[str] = self.cog.tag_service.get_unique_tag_names()
+        # 根据所选频道获取合并后的标签
+        merged_tags = self.cog.get_merged_tags(self.channel_ids)
+        self.all_unique_tags: List[str] = [tag.name for tag in merged_tags]
         
         self.include_tags: set[str] = set()
         self.exclude_tags: set[str] = set()

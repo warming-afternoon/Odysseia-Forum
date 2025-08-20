@@ -3,7 +3,7 @@ import discord
 import logging
 from discord.ext import commands
 import asyncio
-import uvloop
+# import uvloop
 import orjson
 
 
@@ -12,7 +12,7 @@ from tag_system.cog import TagSystem
 from tag_system.tagService import TagService
 from indexer.cog import Indexer
 from search.cog import Search
-from core.api_scheduler import APIScheduler
+from shared.models.api_scheduler import APIScheduler
 
 class MyBot(commands.Bot):
     def __init__(self, *, intents: discord.Intents, config: dict):
@@ -81,7 +81,7 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        uvloop.install()
+        # uvloop.install()
         asyncio.run(main())
     except KeyboardInterrupt:
         print("机器人关闭。")
