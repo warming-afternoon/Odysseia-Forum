@@ -112,7 +112,7 @@ class IndexerDashboard(discord.ui.View):
         """独立的UI更新循环"""
         logging.info(f"[{self.channel.id}] UI updater_loop started.")
         while not self.get_progress()["finished"] and not self.is_cancelled():
-            logging.info(f"[{self.channel.id}] UI updater_loop tick.")
+            logging.debug(f"[{self.channel.id}] UI updater_loop tick.")
             await self.update_embed()
             await asyncio.sleep(2)  # 每2秒更新一次
 

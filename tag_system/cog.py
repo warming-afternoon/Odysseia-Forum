@@ -309,8 +309,8 @@ class TagSystem(commands.Cog):
             "title": thread.name,
             "author_id": thread.owner_id or 0,
             "created_at": thread.created_at,
-            "last_active_at": thread.last_message.created_at
-            if thread.last_message
+            "last_active_at": discord.utils.snowflake_time(thread.last_message_id)
+            if thread.last_message_id
             else thread.created_at,
             "reaction_count": reaction_count,
             "reply_count": thread.message_count,
