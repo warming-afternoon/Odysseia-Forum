@@ -2,7 +2,7 @@ import discord
 import re
 from typing import TYPE_CHECKING
 
-from shared.discord_utils import safe_defer
+from shared.safe_defer import safe_defer
 from .generic_search_view import GenericSearchView
 
 if TYPE_CHECKING:
@@ -66,7 +66,17 @@ class PersistentChannelSearchView(discord.ui.View):
             )
             return
 
+        # 获取用户偏好
+        async with self.cog.session_factory() as session:
+            from ..repository import SearchRepository
+
+            repo = SearchRepository(session, self.cog.tag_service)
+            user_prefs = await repo.get_user_preferences(interaction.user.id)
+
         generic_view = GenericSearchView(
-            cog=self.cog, interaction=interaction, channel_ids=[channel_id]
+            cog=self.cog,
+            interaction=interaction,
+            channel_ids=[channel_id],
+            user_prefs=user_prefs,
         )
         await generic_view.start(send_new_ephemeral=True)

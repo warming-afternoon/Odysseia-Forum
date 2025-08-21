@@ -3,12 +3,17 @@ from discord import app_commands
 from discord.ext import commands
 import asyncio
 import logging
+from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.orm import sessionmaker
-from shared.discord_utils import safe_defer
+from shared.safe_defer import safe_defer
 from tag_system.cog import TagSystem
 from tag_system.tagService import TagService
 from .views import IndexerDashboard
+
+
+if TYPE_CHECKING:
+    from bot_main import MyBot
 
 
 class Indexer(commands.Cog):
@@ -16,7 +21,7 @@ class Indexer(commands.Cog):
 
     def __init__(
         self,
-        bot: commands.Bot,
+        bot: "MyBot",
         session_factory: sessionmaker,
         config: dict,
         tag_service: TagService,
@@ -59,7 +64,7 @@ class Indexer(commands.Cog):
 
         # 步骤 1: 预同步该频道的所有可用标签，避免后续的并发冲突
         try:
-            tag_system_cog: TagSystem = self.bot.get_cog("TagSystem")
+            tag_system_cog = cast(TagSystem, self.bot.get_cog("TagSystem"))
             if tag_system_cog:
                 await tag_system_cog.pre_sync_forum_tags(dashboard.channel)
             else:
@@ -157,7 +162,7 @@ class Indexer(commands.Cog):
 
     async def consumer(self, dashboard: IndexerDashboard, consumer_id: int):
         """消费者：从队列中取出帖子并处理，受信号量控制。"""
-        tag_system_cog: TagSystem = self.bot.get_cog("TagSystem")
+        tag_system_cog = cast(TagSystem, self.bot.get_cog("TagSystem"))
 
         try:
             while True:

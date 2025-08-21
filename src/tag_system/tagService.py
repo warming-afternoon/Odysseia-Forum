@@ -1,8 +1,7 @@
 import logging
 from collections import defaultdict
 from typing import List, Dict
-
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import sessionmaker
 
 from tag_system.repository import TagSystemRepository
 
@@ -14,8 +13,8 @@ class TagService:
     一个封装了标签数据访问和缓存的服务
     """
 
-    def __init__(self, session: AsyncSession):
-        self.repo = TagSystemRepository(session)
+    def __init__(self, session_factory: sessionmaker):
+        self.session_factory = session_factory
         self._id_to_name: Dict[int, str] = {}
         self._name_to_ids: Dict[str, List[int]] = defaultdict(list)
         self._unique_tag_names: List[str] = []
@@ -23,10 +22,13 @@ class TagService:
     async def build_cache(self):
         """
         从数据库加载所有标签，并构建/重建缓存。
-        这应该在机器人启动时调用。
+        这应该在机器人启动时以及索引更新后调用。
         """
         logger.info("Building tag cache...")
-        all_tags = await self.repo.get_all_tags()
+        async with self.session_factory() as session:
+            repo = TagSystemRepository(session)
+            all_tags = await repo.get_all_tags()
+
         self._id_to_name.clear()
         self._name_to_ids.clear()
 
@@ -40,34 +42,6 @@ class TagService:
         logger.info(
             f"Tag cache built. Found {len(all_tags)} tags, {len(self._unique_tag_names)} unique names."
         )
-
-    def update_cached_tag(self, tag_id: int, old_name: str, new_name: str):
-        """
-        精确地更新缓存中的单个标签信息。
-        这应该在检测到标签名称变更后调用。
-        """
-        logger.info(
-            f"Updating cached tag: id={tag_id}, old_name='{old_name}', new_name='{new_name}'"
-        )
-        # 更新 id -> name 映射
-        self._id_to_name[tag_id] = new_name
-
-        # 更新 name -> ids 映射
-        # 从旧名称的列表中移除
-        if old_name in self._name_to_ids and tag_id in self._name_to_ids[old_name]:
-            self._name_to_ids[old_name].remove(tag_id)
-            # 如果旧名称下没有其他id了，就删除这个键
-            if not self._name_to_ids[old_name]:
-                del self._name_to_ids[old_name]
-
-        # 添加到新名称的列表中
-        if new_name not in self._name_to_ids:
-            self._name_to_ids[new_name] = []
-        self._name_to_ids[new_name].append(tag_id)
-
-        # 重建唯一名称列表
-        self._unique_tag_names = sorted(self._name_to_ids.keys())
-        logger.info("Tag cache updated successfully.")
 
     def get_name_by_id(self, tag_id: int) -> str | None:
         """从缓存中通过ID获取标签名称。"""

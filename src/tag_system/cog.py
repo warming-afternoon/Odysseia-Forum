@@ -3,9 +3,12 @@ from discord import app_commands
 from discord.ext import commands
 import datetime
 from sqlalchemy.orm import sessionmaker
-from typing import Coroutine
+from typing import Coroutine, TYPE_CHECKING, Optional
 
-from shared.discord_utils import safe_defer
+from shared.safe_defer import safe_defer
+
+if TYPE_CHECKING:
+    from bot_main import MyBot
 from .repository import TagSystemRepository
 from .views.vote_view import TagVoteView
 
@@ -17,7 +20,7 @@ logger = logging.getLogger(__name__)
 class TagSystem(commands.Cog):
     """处理标签同步与评价"""
 
-    def __init__(self, bot: commands.Bot, session_factory: sessionmaker, config: dict):
+    def __init__(self, bot: "MyBot", session_factory: sessionmaker, config: dict):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
@@ -162,7 +165,9 @@ class TagSystem(commands.Cog):
             logger.warning("处理反应移除事件失败", exc_info=True)
 
     async def _update_activity(
-        self, thread: discord.Thread, last_active_time: datetime = None
+        self,
+        thread: discord.Thread,
+        last_active_time: Optional[datetime.datetime] = None,
     ):
         """(协程) 更新帖子的活跃度和回复数"""
         if last_active_time is None:

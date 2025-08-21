@@ -1,7 +1,7 @@
 import discord
 from typing import List, TYPE_CHECKING
 
-from shared.discord_utils import safe_defer
+from shared.safe_defer import safe_defer
 from .generic_search_view import GenericSearchView
 
 if TYPE_CHECKING:
@@ -93,8 +93,15 @@ class ChannelSelectionView(discord.ui.View):
             await interaction.followup.send("请至少选择一个频道。", ephemeral=True)
             return
 
+        # 获取用户偏好
+        async with self.cog.session_factory() as session:
+            from ..repository import SearchRepository
+
+            repo = SearchRepository(session, self.cog.tag_service)
+            user_prefs = await repo.get_user_preferences(interaction.user.id)
+
         # 切换到通用搜索视图
         generic_view = GenericSearchView(
-            self.cog, interaction, self.selected_channel_ids
+            self.cog, interaction, self.selected_channel_ids, user_prefs
         )
         await generic_view.start()

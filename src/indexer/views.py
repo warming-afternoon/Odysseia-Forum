@@ -2,7 +2,7 @@ import discord
 import asyncio
 import logging
 
-from shared.discord_utils import safe_defer
+from shared.safe_defer import safe_defer
 
 
 class IndexerDashboard(discord.ui.View):

@@ -1,6 +1,6 @@
 import discord
 import logging
-from shared.discord_utils import safe_defer
+from shared.safe_defer import safe_defer
 
 from ..repository import TagSystemRepository
 from .components.vote_button import TagVoteButton
@@ -67,11 +67,12 @@ class TagVoteView(discord.ui.View):
     async def handle_vote(
         self, button: TagVoteButton, interaction: discord.Interaction
     ):
-        """处理按钮点击的核心逻辑"""
+        """处理按钮点击"""
+        await safe_defer(interaction)
         try:
             async with self.session_factory() as session:
                 repo = TagSystemRepository(session)
-                # 调用repo方法，现在它会返回更新后的统计数据
+                # 调用repo方法，返回更新后的统计数据
                 updated_stats = await repo.record_tag_vote(
                     user_id=interaction.user.id,
                     thread_id=self.thread_id,
@@ -84,24 +85,22 @@ class TagVoteView(discord.ui.View):
             await self.update_view(interaction, updated_stats)
 
         except Exception as e:
-            print(f"记录标签投票时出错: {e}")
-            # 遵循指南，使用 followup 发送错误信息
+            logger.error(f"记录标签投票时出错: {e}")
+
             error_coro = interaction.followup.send(
                 "处理您的评价时发生错误，请稍后再试。", ephemeral=True
             )
             await self.api_scheduler.submit(coro=error_coro, priority=1)
 
     async def update_view(self, interaction: discord.Interaction, stats: dict):
-        """统一的视图更新入口，现在接收统计数据作为参数"""
-        await safe_defer(interaction)
-        embed = self.create_embed(stats)  # 直接将统计数据传递给embed创建函数
+        """视图更新入口，接收统计数据作为参数"""
+        embed = self.create_embed(stats)
         edit_coro = interaction.edit_original_response(embed=embed, view=self)
         await self.api_scheduler.submit(coro=edit_coro, priority=1)
 
     def create_embed(self, stats: dict) -> discord.Embed:
         """
-        创建或更新嵌入。
-        此方法现在是同步的，并直接使用传入的统计数据，不再进行数据库查询。
+        使用传入的统计数据创建embed
         """
         embed = discord.Embed(
             title=f"帖子 “{self.thread_name}” 的标签评价", color=discord.Color.blue()

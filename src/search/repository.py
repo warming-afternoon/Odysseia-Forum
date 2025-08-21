@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 from shared.models.thread import Thread
 from shared.models.tag import Tag
 from shared.models.user_search_preferences import UserSearchPreferences
+from .dto.user_search_preferences import UserSearchPreferencesDTO
 from search.qo.thread_search import ThreadSearchQuery
 from ranking_config import RankingConfig
 from tag_system.tagService import TagService
@@ -325,16 +326,18 @@ class SearchRepository:
 
     async def get_user_preferences(
         self, user_id: int
-    ) -> Optional[UserSearchPreferences]:
-        """获取用户的搜索偏好设置。"""
-        result = await self.session.get(UserSearchPreferences, user_id)
-        return result
+    ) -> Optional[UserSearchPreferencesDTO]:
+        """获取用户的搜索偏好设置"""
+        prefs_orm = await self.session.get(UserSearchPreferences, user_id)
+        if not prefs_orm:
+            return None
+        return UserSearchPreferencesDTO.model_validate(prefs_orm)
 
     async def save_user_preferences(
         self, user_id: int, prefs_data: dict
-    ) -> UserSearchPreferences:
+    ) -> UserSearchPreferencesDTO:
         """创建或更新用户的搜索偏好设置。"""
-        prefs = await self.get_user_preferences(user_id)
+        prefs = await self.session.get(UserSearchPreferences, user_id)
         if prefs:
             for key, value in prefs_data.items():
                 setattr(prefs, key, value)
@@ -344,7 +347,7 @@ class SearchRepository:
         self.session.add(prefs)
         await self.session.commit()
         await self.session.refresh(prefs)
-        return prefs
+        return UserSearchPreferencesDTO.model_validate(prefs)
 
     async def get_tags_for_author(self, author_id: int) -> Sequence[Tag]:
         """获取指定作者使用过的所有标签。"""

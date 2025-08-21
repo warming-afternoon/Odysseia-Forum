@@ -41,9 +41,8 @@ class MyBot(commands.Bot):
         await init_db()
 
         # 初始化并缓存 TagService
-        async with AsyncSessionFactory() as session:
-            self.tag_service = TagService(session)
-            await self.tag_service.build_cache()
+        self.tag_service = TagService(AsyncSessionFactory)
+        await self.tag_service.build_cache()
 
         # 加载 Cogs 并注入依赖
         await self.add_cog(

@@ -6,35 +6,35 @@ class RankingConfig:
     """搜索结果排序算法配置"""
 
     # =====  权重分配 =====
-    TIME_WEIGHT_FACTOR = 0.5  # 时间权重因子 (0-1)
-    TAG_WEIGHT_FACTOR = 0.3  # 标签权重因子 (0-1)
-    REACTION_WEIGHT_FACTOR = 0.2  # 反应权重因子 (0-1)
+    TIME_WEIGHT_FACTOR: float = 0.5  # 时间权重因子 (0-1)
+    TAG_WEIGHT_FACTOR: float = 0.3  # 标签权重因子 (0-1)
+    REACTION_WEIGHT_FACTOR: float = 0.2  # 反应权重因子 (0-1)
 
     # =====  时间衰减参数 =====
-    TIME_DECAY_RATE = 0.1  # 时间衰减率，越大衰减越快
+    TIME_DECAY_RATE: float = 0.1  # 时间衰减率，越大衰减越快
     # 说明：0.1对应约7天半衰期，0.05对应约14天半衰期
 
     # =====  标签评分参数 =====
-    WILSON_CONFIDENCE_LEVEL = 1.96  # Wilson Score置信水平 (1.96 = 95%)
-    DEFAULT_TAG_SCORE = 0.5  # 无评价时的默认标签评分
+    WILSON_CONFIDENCE_LEVEL: float = 1.96  # Wilson Score置信水平 (1.96 = 95%)
+    DEFAULT_TAG_SCORE: float = 0.5  # 无评价时的默认标签评分
 
     # =====  反应数归一化参数 =====
-    REACTION_LOG_BASE = 50  # 反应数对数归一化基数
-    MAX_REACTION_SCORE = 1.0  # 反应权重最大值
+    REACTION_LOG_BASE: int = 50  # 反应数对数归一化基数
+    MAX_REACTION_SCORE: float = 1.0  # 反应权重最大值
     # 说明：reaction_weight = min(1.0, log(reactions + 1) / log(base + 1))
 
     # =====  惩罚机制参数 =====
-    SEVERE_PENALTY_THRESHOLD = 0.2  # 严重差评阈值
-    SEVERE_PENALTY_MIN_VOTES = 5  # 严重惩罚最少评价数
-    SEVERE_PENALTY_FACTOR = 0.1  # 严重惩罚系数
+    SEVERE_PENALTY_THRESHOLD: float = 0.2  # 严重差评阈值
+    SEVERE_PENALTY_MIN_VOTES: int = 5  # 严重惩罚最少评价数
+    SEVERE_PENALTY_FACTOR: float = 0.1  # 严重惩罚系数
 
-    MILD_PENALTY_THRESHOLD = 0.35  # 轻度差评阈值
-    MILD_PENALTY_MIN_VOTES = 10  # 轻度惩罚最少评价数
-    MILD_PENALTY_FACTOR = 0.5  # 轻度惩罚系数
+    MILD_PENALTY_THRESHOLD: float = 0.35  # 轻度差评阈值
+    MILD_PENALTY_MIN_VOTES: int = 10  # 轻度惩罚最少评价数
+    MILD_PENALTY_FACTOR: float = 0.5  # 轻度惩罚系数
 
     # =====  显示配置 =====
-    SHOW_RANKING_INFO = True  # 是否在搜索结果中显示排序信息
-    RANKING_PRECISION = 0  # 排序权重显示精度 (小数位数)
+    SHOW_RANKING_INFO: bool = True  # 是否在搜索结果中显示排序信息
+    RANKING_PRECISION: int = 0  # 排序权重显示精度 (小数位数)
 
     @classmethod
     def validate(cls):

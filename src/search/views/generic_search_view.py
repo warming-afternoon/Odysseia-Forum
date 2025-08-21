@@ -1,7 +1,8 @@
 import discord
-from typing import List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING, Optional
 
-from shared.discord_utils import safe_defer
+from search.dto.user_search_preferences import UserSearchPreferencesDTO
+from shared.safe_defer import safe_defer
 from ..qo.thread_search import ThreadSearchQuery
 from .results_view import NewSearchResultsView
 from .components.keyword_button import KeywordButton, KeywordModal
@@ -20,7 +21,11 @@ class GenericSearchView(discord.ui.View):
     """筛选逻辑的核心视图，管理所有搜索参数和UI状态。"""
 
     def __init__(
-        self, cog: "Search", interaction: discord.Interaction, channel_ids: List[int]
+        self,
+        cog: "Search",
+        interaction: discord.Interaction,
+        channel_ids: List[int],
+        user_prefs: Optional[UserSearchPreferencesDTO] = None,
     ):
         super().__init__(timeout=900)
         self.cog = cog
@@ -33,11 +38,21 @@ class GenericSearchView(discord.ui.View):
         merged_tags = self.cog.get_merged_tags(self.channel_ids)
         self.all_unique_tags: List[str] = [tag.name for tag in merged_tags]
 
-        self.include_tags: set[str] = set()
-        self.exclude_tags: set[str] = set()
-        self.author_ids: set[int] = set()
-        self.keywords = ""
-        self.exclude_keywords = ""
+        # 从用户偏好加载初始值，否则使用默认值
+        if user_prefs:
+            self.include_tags: set[str] = set(user_prefs.include_tags or [])
+            self.exclude_tags: set[str] = set(user_prefs.exclude_tags or [])
+            # 注意：快捷搜索的作者ID不应被偏好覆盖，所以这里不加载作者偏好
+            self.author_ids: set[int] = set()
+            self.keywords = user_prefs.include_keywords or ""
+            self.exclude_keywords = user_prefs.exclude_keywords or ""
+        else:
+            self.include_tags: set[str] = set()
+            self.exclude_tags: set[str] = set()
+            self.author_ids: set[int] = set()
+            self.keywords = ""
+            self.exclude_keywords = ""
+
         self.tag_logic = "or"
         self.sort_method = "comprehensive"
         self.sort_order = "desc"

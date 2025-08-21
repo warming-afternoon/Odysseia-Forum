@@ -2,21 +2,27 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
+from typing import TYPE_CHECKING, Optional, Sequence
 
 from ranking_config import RankingConfig
-from shared.discord_utils import safe_defer
+from shared.safe_defer import safe_defer
 from .dto.tag import TagDTO
 from .views.global_search_view import GlobalSearchView
 from sqlalchemy.orm import sessionmaker
 from .repository import SearchRepository
 from tag_system.repository import TagSystemRepository
 from tag_system.tagService import TagService
-from shared.models.thread import Thread as ThreadModel
 from search.qo.thread_search import ThreadSearchQuery
 from .views.channel_selection_view import ChannelSelectionView
 from .views.generic_search_view import GenericSearchView
 from .views.persistent_channel_search_view import PersistentChannelSearchView
 from .prefs_handler import SearchPreferencesHandler
+from .views.preferences_view import PreferencesView
+from .embed_builder import ThreadEmbedBuilder
+
+
+if TYPE_CHECKING:
+    from bot_main import MyBot
 
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
@@ -27,7 +33,7 @@ class Search(commands.Cog):
 
     def __init__(
         self,
-        bot: commands.Bot,
+        bot: "MyBot",
         session_factory: sessionmaker,
         config: dict,
         tag_service: TagService,
@@ -162,44 +168,26 @@ class Search(commands.Cog):
         self,
         interaction: discord.Interaction,
         action: app_commands.Choice[str],
-        user: discord.User = None,
+        user: Optional[discord.User] = None,
     ):
         await self.prefs_handler.search_preferences_author(interaction, action, user)
 
-    @search_prefs.command(name="时间", description="设置搜索时间范围偏好")
-    @app_commands.describe(
-        after_date="开始日期 (YYYY-MM-DD)", before_date="结束日期 (YYYY-MM-DD)"
-    )
-    async def search_preferences_time(
-        self,
-        interaction: discord.Interaction,
-        after_date: str = None,
-        before_date: str = None,
-    ):
-        await self.prefs_handler.search_preferences_time(
-            interaction, after_date, before_date
-        )
+    @search_prefs.command(name="设置", description="打开交互式偏好设置面板")
+    async def open_search_preferences_panel(self, interaction: discord.Interaction):
+        """打开一个新的交互式视图来管理搜索偏好"""
+        try:
+            await safe_defer(interaction, ephemeral=True)
 
-    @search_prefs.command(name="预览图", description="设置搜索结果预览图显示方式")
-    @app_commands.describe(mode="预览图显示方式")
-    @app_commands.choices(
-        mode=[
-            app_commands.Choice(name="缩略图（右侧小图）", value="thumbnail"),
-            app_commands.Choice(name="大图（下方大图）", value="image"),
-        ]
-    )
-    async def search_preferences_preview(
-        self, interaction: discord.Interaction, mode: app_commands.Choice[str]
-    ):
-        await self.prefs_handler.search_preferences_preview(interaction, mode)
+            view = PreferencesView(self.prefs_handler, interaction)
+            await view.start()
 
-    @search_prefs.command(name="查看", description="查看当前搜索偏好设置")
-    async def search_preferences_view(self, interaction: discord.Interaction):
-        await self.prefs_handler.search_preferences_view(interaction)
-
-    @search_prefs.command(name="清空", description="清空所有搜索偏好设置")
-    async def search_preferences_clear(self, interaction: discord.Interaction):
-        await self.prefs_handler.search_preferences_clear(interaction)
+        except Exception as e:
+            logger.error(f"打开偏好设置面板时出错: {e}", exc_info=True)
+            if not interaction.response.is_done():
+                await safe_defer(interaction, ephemeral=True)
+            await interaction.followup.send(
+                f"❌ 打开设置面板时发生错误: {e}", ephemeral=True
+            )
 
     # ----- 排序算法管理 -----
     @app_commands.command(name="排序算法配置", description="管理员设置搜索排序算法参数")
@@ -225,17 +213,18 @@ class Search(commands.Cog):
     async def configure_ranking(
         self,
         interaction: discord.Interaction,
-        preset: app_commands.Choice[str] = None,
-        time_weight: float = None,
-        tag_weight: float = None,
-        reaction_weight: float = None,
-        time_decay: float = None,
-        reaction_log_base: int = None,
-        severe_penalty: float = None,
-        mild_penalty: float = None,
+        preset: Optional[app_commands.Choice[str]] = None,
+        time_weight: Optional[float] = None,
+        tag_weight: Optional[float] = None,
+        reaction_weight: Optional[float] = None,
+        time_decay: Optional[float] = None,
+        reaction_log_base: Optional[int] = None,
+        severe_penalty: Optional[float] = None,
+        mild_penalty: Optional[float] = None,
     ):
         # 检查权限 (需要管理员权限)
         await safe_defer(interaction)
+        assert isinstance(interaction.user, discord.Member)
         if not interaction.user.guild_permissions.administrator:
             await self.bot.api_scheduler.submit(
                 coro=interaction.followup.send(
@@ -435,7 +424,10 @@ class Search(commands.Cog):
         """在一个帖子内创建一个持久化的搜索按钮，该按钮将启动一个仅限于该频道的搜索流程。"""
         await safe_defer(interaction)
         try:
-            if not isinstance(interaction.channel, discord.Thread):
+            if (
+                not isinstance(interaction.channel, discord.Thread)
+                or not interaction.channel.parent
+            ):
                 await self.bot.api_scheduler.submit(
                     coro=interaction.followup.send(
                         "请在帖子内使用此命令。", ephemeral=True
@@ -477,7 +469,9 @@ class Search(commands.Cog):
                 priority=1,
             )
 
-    @app_commands.command(name="创建全局搜索", description="在当前频道创建全局搜索按钮")
+    @app_commands.command(
+        name="创建公开全局搜索", description="在当前频道创建全局搜索按钮"
+    )
     async def create_global_search(self, interaction: discord.Interaction):
         """在当前频道创建一个持久化的全局搜索按钮。"""
         await safe_defer(interaction)
@@ -493,12 +487,13 @@ class Search(commands.Cog):
                 inline=False,
             )
             view = GlobalSearchView(self)
-            await self.bot.api_scheduler.submit(
-                coro=interaction.channel.send(embed=embed, view=view), priority=1
-            )
+            if isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
+                await self.bot.api_scheduler.submit(
+                    coro=interaction.channel.send(embed=embed, view=view), priority=1
+                )
             await self.bot.api_scheduler.submit(
                 coro=interaction.followup.send(
-                    "✅ 已创建全局搜索按钮。", ephemeral=True
+                    "✅ 已创建全局搜索面板。", ephemeral=True
                 ),
                 priority=1,
             )
@@ -539,7 +534,7 @@ class Search(commands.Cog):
                 "❌ 启动搜索时发生严重错误，请联系管理员。", ephemeral=True
             )
 
-    @app_commands.command(name="快捷搜索", description="快速搜索指定作者的所有帖子")
+    @app_commands.command(name="搜索作者", description="快速搜索指定作者的所有帖子")
     @app_commands.describe(author="要搜索的作者（@用户 或 用户ID）")
     async def quick_author_search(
         self, interaction: discord.Interaction, author: discord.User
@@ -558,21 +553,28 @@ class Search(commands.Cog):
                 )
                 return
 
-            # 创建通用搜索视图
-            view = GenericSearchView(self, interaction, list(all_channel_ids))
+            # 获取用户偏好 DTO
+            async with self.session_factory() as session:
+                repo = SearchRepository(session, self.tag_service)
+                user_prefs_dto = await repo.get_user_preferences(interaction.user.id)
 
-            # 预设作者
+            # 创建通用搜索视图，并传入用户偏好
+            view = GenericSearchView(
+                self, interaction, list(all_channel_ids), user_prefs_dto
+            )
+
+            # 预设作者（这将覆盖偏好中的作者设置）
             view.author_ids = {author.id}
 
             # 启动视图
             await view.start()
 
         except Exception as e:
-            logger.error(f"启动快捷搜索时出错: {e}", exc_info=True)
+            logger.error(f"启动搜索作者时出错: {e}", exc_info=True)
             # 确保即使有异常，也能给用户一个反馈
             if not interaction.response.is_done():
                 await safe_defer(interaction, ephemeral=True)
-            await interaction.followup.send(f"❌ 启动快捷搜索失败: {e}", ephemeral=True)
+            await interaction.followup.send(f"❌ 启动搜索作者失败: {e}", ephemeral=True)
 
     async def get_tags_for_author(self, author_id: int):
         """Gets all unique tags for a given author's posts."""
@@ -580,61 +582,11 @@ class Search(commands.Cog):
             repo = self.tag_system_repo(session)
             return await repo.get_tags_for_author(author_id)
 
-    async def get_indexed_channel_ids(self) -> list[int]:
+    async def get_indexed_channel_ids(self) -> Sequence[int]:
         """Gets all indexed channel IDs."""
         async with self.session_factory() as session:
             repo = self.tag_system_repo(session)
             return await repo.get_indexed_channel_ids()
-
-    # ----- Embed 构造 -----
-    async def _build_thread_embed(
-        self,
-        thread: "ThreadModel",
-        guild: discord.Guild,
-        preview_mode: str = "thumbnail",
-    ) -> discord.Embed:
-        """根据Thread ORM对象构建嵌入消息"""
-
-        author_display = f"作者 <@{thread.author_id}>"
-
-        embed = discord.Embed(
-            title=thread.title,
-            description=author_display,
-            url=f"https://discord.com/channels/{guild.id}/{thread.thread_id}",
-        )
-
-        # 标签信息通过 relationship 加载
-        tag_names = [tag.name for tag in thread.tags]
-
-        # 基础统计信息
-        basic_stats = (
-            f"发帖日期: **{thread.created_at.strftime('%Y-%m-%d %H:%M:%S')}** | "
-            f"最近活跃: **{thread.last_active_at.strftime('%Y-%m-%d %H:%M:%S')}**\n"
-            f"最高反应数: **{thread.reaction_count}** | 总回复数: **{thread.reply_count}**\n"
-            f"标签: **{', '.join(tag_names) if tag_names else '无'}**"
-        )
-
-        embed.add_field(
-            name="统计",
-            value=basic_stats,
-            inline=False,
-        )
-
-        # 首楼摘要
-        excerpt = thread.first_message_excerpt or ""
-        excerpt_display = (
-            excerpt[:200] + "..." if len(excerpt) > 200 else (excerpt or "无内容")
-        )
-        embed.add_field(name="首楼摘要", value=excerpt_display, inline=False)
-
-        # 根据用户偏好设置预览图显示方式
-        if thread.thumbnail_url:
-            if preview_mode == "image":
-                embed.set_image(url=thread.thumbnail_url)
-            else:  # thumbnail
-                embed.set_thumbnail(url=thread.thumbnail_url)
-
-        return embed
 
     async def _search_and_display(
         self,
@@ -675,9 +627,6 @@ class Search(commands.Cog):
                     if search_qo.before_ts is None:
                         search_qo.before_ts = user_prefs.before_date
 
-                    # 标签逻辑总是以用户偏好为准，除非视图有特殊覆盖
-                    # 在这个场景下，我们让偏好覆盖默认值
-
                 logger.debug(f"合并后QO: {search_qo}")
 
                 # 设置分页
@@ -694,11 +643,14 @@ class Search(commands.Cog):
 
             # 构建 embeds
             embeds = []
-            for thread in threads:
-                embed = await self._build_thread_embed(
-                    thread, interaction.guild, preview_mode
-                )
-                embeds.append(embed)
+            if not interaction.guild:
+                logger.warning("搜索时，无法获取 guild 对象，无法构建结果 embeds。")
+            else:
+                for thread in threads:
+                    embed = await ThreadEmbedBuilder.build(
+                        thread, interaction.guild, preview_mode
+                    )
+                    embeds.append(embed)
 
             return {
                 "has_results": True,

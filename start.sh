@@ -82,7 +82,7 @@ check_and_prepare_dependencies() {
     fi
 }
 
-# 2. 设置 Python 虚拟环境并安装依赖包
+# 2. 设置 Python 虚拟环境并将项目以可编辑模式安装
 setup_environment() {
     log_info "正在使用 uv 设置 Python 环境..."
     if [ ! -d ".venv" ]; then
@@ -93,12 +93,13 @@ setup_environment() {
         log_info "检测到已存在的虚拟环境。"
     fi
 
-    if [ -f "requirements.txt" ]; then
-        log_info "正在从 requirements.txt 安装依赖..."
-        uv pip install -r requirements.txt
-        log_success "依赖安装完成。"
+    if [ -f "pyproject.toml" ]; then
+        log_info "正在以可编辑模式安装项目及其依赖..."
+        uv pip install -e .
+        log_success "项目安装完成。"
     else
-        log_warning "未找到 requirements.txt，跳过依赖安装。"
+        log_error "关键文件 'pyproject.toml' 未找到。无法继续安装。"
+        exit 1
     fi
 }
 

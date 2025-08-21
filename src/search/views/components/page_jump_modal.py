@@ -1,7 +1,7 @@
 import discord
 from typing import Callable, Coroutine
 
-from shared.discord_utils import safe_defer
+from shared.safe_defer import safe_defer
 
 
 class PageJumpModal(discord.ui.Modal, title="跳转到页面"):
