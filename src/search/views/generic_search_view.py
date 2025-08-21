@@ -2,7 +2,7 @@ import discord
 from typing import List, TYPE_CHECKING
 
 from shared.discord_utils import safe_defer
-from ..models.qo.thread_search import ThreadSearchQuery
+from ..qo.thread_search import ThreadSearchQuery
 from .results_view import NewSearchResultsView
 from .components.keyword_button import KeywordButton, KeywordModal
 from .components.tag_logic_button import TagLogicButton

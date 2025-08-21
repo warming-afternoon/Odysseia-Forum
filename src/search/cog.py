@@ -5,14 +5,14 @@ import logging
 
 from ranking_config import RankingConfig
 from shared.discord_utils import safe_defer
-from .models.dto.tag import TagDTO
+from .dto.tag import TagDTO
 from .views.global_search_view import GlobalSearchView
 from sqlalchemy.orm import sessionmaker
 from .repository import SearchRepository
 from tag_system.repository import TagSystemRepository
 from tag_system.tagService import TagService
 from shared.models.thread import Thread as ThreadModel
-from search.models.qo.thread_search import ThreadSearchQuery
+from search.qo.thread_search import ThreadSearchQuery
 from .views.channel_selection_view import ChannelSelectionView
 from .views.generic_search_view import GenericSearchView
 from .views.persistent_channel_search_view import PersistentChannelSearchView

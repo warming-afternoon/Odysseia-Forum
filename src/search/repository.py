@@ -8,7 +8,7 @@ from sqlalchemy.orm import selectinload
 from shared.models.thread import Thread
 from shared.models.tag import Tag
 from shared.models.user_search_preferences import UserSearchPreferences
-from search.models.qo.thread_search import ThreadSearchQuery
+from search.qo.thread_search import ThreadSearchQuery
 from ranking_config import RankingConfig
 from tag_system.tagService import TagService
 

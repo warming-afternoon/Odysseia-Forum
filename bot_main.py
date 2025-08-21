@@ -13,7 +13,7 @@ from tag_system.cog import TagSystem
 from tag_system.tagService import TagService
 from indexer.cog import Indexer
 from search.cog import Search
-from shared.models.api_scheduler import APIScheduler
+from shared.api_scheduler import APIScheduler
 
 
 class MyBot(commands.Bot):

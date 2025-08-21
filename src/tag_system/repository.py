@@ -22,20 +22,18 @@ class TagSystemRepository:
     async def get_or_create_tags(self, tags_data: dict[int, str]) -> List[Tag]:
         """
         根据标签ID和名称的字典，获取或创建标签对象。
-        此操作是幂等的，并能安全地处理并发请求。
         """
         if not tags_data:
             return []
 
-        # 步骤 1: 使用 INSERT ... ON CONFLICT DO NOTHING 批量插入所有可能的标签。
-        # 这确保了所有标签在数据库中都存在，并且是原子操作，避免了并发冲突。
+        # 使用 INSERT ... ON CONFLICT DO NOTHING 批量插入所有可能的标签。
         insert_stmt = sqlite_insert(Tag).values(
             [{"id": id, "name": name} for id, name in tags_data.items()]
         )
         do_nothing_stmt = insert_stmt.on_conflict_do_nothing(index_elements=["id"])
         await self.session.execute(do_nothing_stmt)
 
-        # 步骤 2: 更新可能已更改名称的标签。
+        # 更新可能已更改名称的标签。
         # (这一步在实践中很少发生，因为Discord标签ID是唯一的，但为了健壮性而保留)
         tag_ids = list(tags_data.keys())
         statement = select(Tag).where(Tag.id.in_(tag_ids))
@@ -52,8 +50,7 @@ class TagSystemRepository:
         if updated:
             await self.session.flush()
 
-        # 步骤 3: 返回所有相关的标签对象。
-        # 此时，我们知道所有需要的标签都已在数据库中，并且名称是最新的。
+        # 返回所有相关的标签对象。
         # 重新查询以获取完整的对象列表。
         final_statement = select(Tag).where(Tag.id.in_(tag_ids))
         final_result = await self.session.execute(final_statement)
@@ -63,7 +60,7 @@ class TagSystemRepository:
         self, thread_data: dict, tags_data: dict[int, str]
     ):
         """
-        原子性地添加或更新一个帖子及其标签。
+        添加或更新一个帖子及其标签。
         """
         # 查找现有帖子
         statement = (

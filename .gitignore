@@ -182,6 +182,7 @@ cython_debug/
 
 # 忽略运行文件
 
+.roo/
 config.json
 *.db
 data/
