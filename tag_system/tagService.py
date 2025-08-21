@@ -1,13 +1,13 @@
 import logging
 from collections import defaultdict
-from typing import List, Dict, Sequence
+from typing import List, Dict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from shared.models.tag import Tag
 from tag_system.repository import TagSystemRepository
 
 logger = logging.getLogger(__name__)
+
 
 class TagService:
     """
@@ -34,17 +34,21 @@ class TagService:
         for tag in all_tags:
             self._id_to_name[tag.id] = tag.name
             temp_name_to_ids[tag.name].append(tag.id)
-        
+
         self._name_to_ids = dict(temp_name_to_ids)
         self._unique_tag_names = sorted(self._name_to_ids.keys())
-        logger.info(f"Tag cache built. Found {len(all_tags)} tags, {len(self._unique_tag_names)} unique names.")
+        logger.info(
+            f"Tag cache built. Found {len(all_tags)} tags, {len(self._unique_tag_names)} unique names."
+        )
 
     def update_cached_tag(self, tag_id: int, old_name: str, new_name: str):
         """
         精确地更新缓存中的单个标签信息。
         这应该在检测到标签名称变更后调用。
         """
-        logger.info(f"Updating cached tag: id={tag_id}, old_name='{old_name}', new_name='{new_name}'")
+        logger.info(
+            f"Updating cached tag: id={tag_id}, old_name='{old_name}', new_name='{new_name}'"
+        )
         # 更新 id -> name 映射
         self._id_to_name[tag_id] = new_name
 
@@ -60,7 +64,7 @@ class TagService:
         if new_name not in self._name_to_ids:
             self._name_to_ids[new_name] = []
         self._name_to_ids[new_name].append(tag_id)
-        
+
         # 重建唯一名称列表
         self._unique_tag_names = sorted(self._name_to_ids.keys())
         logger.info("Tag cache updated successfully.")

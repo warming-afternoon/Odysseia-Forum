@@ -1,13 +1,15 @@
 import discord
 from typing import Callable, Coroutine, Literal
 
+
 class TagPageButton(discord.ui.Button):
     """一个用于标签分页的按钮组件。"""
+
     def __init__(
-        self, 
+        self,
         action: Literal["prev", "next"],
         callback: Callable[[discord.Interaction, Literal["prev", "next"]], Coroutine],
-        **kwargs
+        **kwargs,
     ):
         label = "◀️ 上一页" if action == "prev" else "▶️ 下一页"
         super().__init__(label=label, style=discord.ButtonStyle.secondary, **kwargs)

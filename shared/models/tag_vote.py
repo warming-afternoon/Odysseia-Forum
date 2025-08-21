@@ -5,12 +5,15 @@ if TYPE_CHECKING:
     from .tag import Tag
     from .thread import Thread
 
+
 class TagVote(SQLModel, table=True):
     """标签投票模型，记录用户对特定帖子中特定标签的评价。"""
-    
+
     __tablename__ = "tag_vote"
     __table_args__ = (
-        UniqueConstraint("user_id", "tag_id", "thread_id", name="uq_user_tag_thread_vote"),
+        UniqueConstraint(
+            "user_id", "tag_id", "thread_id", name="uq_user_tag_thread_vote"
+        ),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)

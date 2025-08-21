@@ -3,14 +3,23 @@ import math
 from typing import TYPE_CHECKING
 
 from search.models.qo.thread_search import ThreadSearchQuery
-from shared.discord_utils import safe_defer
 from .components.page_jump_modal import PageJumpModal
 
 if TYPE_CHECKING:
     from ..cog import Search
 
+
 class NewSearchResultsView(discord.ui.View):
-    def __init__(self, cog: "Search", interaction: discord.Interaction, search_qo: "ThreadSearchQuery", total: int, page: int, per_page: int, page_callback):
+    def __init__(
+        self,
+        cog: "Search",
+        interaction: discord.Interaction,
+        search_qo: "ThreadSearchQuery",
+        total: int,
+        page: int,
+        per_page: int,
+        page_callback,
+    ):
         super().__init__(timeout=900)
         self.cog = cog
         self.interaction = interaction
@@ -25,24 +34,40 @@ class NewSearchResultsView(discord.ui.View):
 
     def update_buttons(self):
         self.clear_items()
-        
-        first_page = discord.ui.Button(label="⏮️", style=discord.ButtonStyle.secondary, disabled=(self.page == 1))
+
+        first_page = discord.ui.Button(
+            label="⏮️", style=discord.ButtonStyle.secondary, disabled=(self.page == 1)
+        )
         first_page.callback = self.go_to_first_page
         self.add_item(first_page)
 
-        prev_page = discord.ui.Button(label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page == 1))
+        prev_page = discord.ui.Button(
+            label="◀️", style=discord.ButtonStyle.secondary, disabled=(self.page == 1)
+        )
         prev_page.callback = self.go_to_previous_page
         self.add_item(prev_page)
 
-        current_page_button = discord.ui.Button(label=f"{self.page}/{self.max_page}", style=discord.ButtonStyle.primary, disabled=False)
+        current_page_button = discord.ui.Button(
+            label=f"{self.page}/{self.max_page}",
+            style=discord.ButtonStyle.primary,
+            disabled=False,
+        )
         current_page_button.callback = self.show_page_jump_modal
         self.add_item(current_page_button)
 
-        next_page = discord.ui.Button(label="▶️", style=discord.ButtonStyle.secondary, disabled=(self.page == self.max_page))
+        next_page = discord.ui.Button(
+            label="▶️",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.page == self.max_page),
+        )
         next_page.callback = self.go_to_next_page
         self.add_item(next_page)
 
-        last_page = discord.ui.Button(label="⏭️", style=discord.ButtonStyle.secondary, disabled=(self.page == self.max_page))
+        last_page = discord.ui.Button(
+            label="⏭️",
+            style=discord.ButtonStyle.secondary,
+            disabled=(self.page == self.max_page),
+        )
         last_page.callback = self.go_to_last_page
         self.add_item(last_page)
 
@@ -71,12 +96,11 @@ class NewSearchResultsView(discord.ui.View):
     async def on_timeout(self):
         for item in self.children:
             item.disabled = True
-        
+
         # 确保超时后禁用按钮的交互也能被调度
         try:
             await self.cog.bot.api_scheduler.submit(
-                coro=self.interaction.edit_original_response(view=self),
-                priority=1
+                coro=self.interaction.edit_original_response(view=self), priority=1
             )
         except discord.errors.NotFound:
             # 如果原始消息被删除，忽略错误

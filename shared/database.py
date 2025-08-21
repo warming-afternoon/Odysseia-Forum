@@ -3,14 +3,8 @@ from typing import AsyncGenerator
 from sqlmodel import SQLModel
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
 
 # 导入所有模型，以便 SQLModel 可以发现它们并创建表
-from .models.thread import Thread
-from .models.tag import Tag
-from .models.thread_tag_link import ThreadTagLink
-from .models.user_search_preferences import UserSearchPreferences
-from .models.tag_vote import TagVote
 
 DB_PATH = "data/database.db"
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
@@ -25,6 +19,7 @@ AsyncSessionFactory = sessionmaker(
     expire_on_commit=False,
 )
 
+
 async def init_db():
     """
     初始化数据库，创建所有在 SQLModel.metadata 中注册的表
@@ -36,7 +31,7 @@ async def init_db():
 
     async with async_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-        
+
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
@@ -45,6 +40,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
     async with AsyncSessionFactory() as session:
         yield session
+
 
 async def close_db():
     """

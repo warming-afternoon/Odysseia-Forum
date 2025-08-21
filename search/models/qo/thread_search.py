@@ -1,10 +1,12 @@
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict
+from typing import Optional, List
 import datetime
+
 
 @dataclass
 class ThreadSearchQuery:
     """封装所有搜索条件的查询对象"""
+
     channel_ids: Optional[List[int]] = None
     include_tags: List[str] = field(default_factory=list)
     exclude_tags: List[str] = field(default_factory=list)

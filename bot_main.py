@@ -3,6 +3,7 @@ import discord
 import logging
 from discord.ext import commands
 import asyncio
+
 # import uvloop
 import orjson
 
@@ -14,16 +15,21 @@ from indexer.cog import Indexer
 from search.cog import Search
 from shared.models.api_scheduler import APIScheduler
 
+
 class MyBot(commands.Bot):
     def __init__(self, *, intents: discord.Intents, config: dict):
         proxy = config.get("proxy")
-        super().__init__(command_prefix="/", intents=intents, proxy=proxy, json_impl=orjson)
+        super().__init__(
+            command_prefix="/", intents=intents, proxy=proxy, json_impl=orjson
+        )
         self.config = config
         self.db_url = config["db_url"]
         self.tag_service: TagService | None = None
-        
+
         # 从配置初始化API调度器
-        concurrency = self.config.get("performance", {}).get("api_scheduler_concurrency", 40)
+        concurrency = self.config.get("performance", {}).get(
+            "api_scheduler_concurrency", 40
+        )
         self.api_scheduler = APIScheduler(concurrent_requests=concurrency)
 
     async def setup_hook(self):
@@ -40,9 +46,25 @@ class MyBot(commands.Bot):
             await self.tag_service.build_cache()
 
         # 加载 Cogs 并注入依赖
-        await self.add_cog(TagSystem(bot=self, session_factory=AsyncSessionFactory, config=self.config))
-        await self.add_cog(Indexer(bot=self, session_factory=AsyncSessionFactory, config=self.config, tag_service=self.tag_service))
-        await self.add_cog(Search(bot=self, session_factory=AsyncSessionFactory, config=self.config, tag_service=self.tag_service))
+        await self.add_cog(
+            TagSystem(bot=self, session_factory=AsyncSessionFactory, config=self.config)
+        )
+        await self.add_cog(
+            Indexer(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                config=self.config,
+                tag_service=self.tag_service,
+            )
+        )
+        await self.add_cog(
+            Search(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                config=self.config,
+                tag_service=self.tag_service,
+            )
+        )
 
         # 同步应用程序命令
         try:
@@ -57,10 +79,13 @@ class MyBot(commands.Bot):
         await close_db()
         await super().close()
 
+
 async def main():
     # 配置日志记录
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+    )
+
     intents = discord.Intents.default()
     intents.message_content = True
     intents.guilds = True
@@ -78,6 +103,7 @@ async def main():
 
     async with bot:
         await bot.start(config["token"])
+
 
 if __name__ == "__main__":
     try:

@@ -2,6 +2,7 @@ import asyncio
 import logging
 from itertools import count
 from typing import Any, Coroutine, NamedTuple
+from aiohttp.client_exceptions import ClientConnectorError
 
 # 设置日志记录器
 logger = logging.getLogger(__name__)
@@ -79,40 +80,47 @@ class APIScheduler:
         max_retries = 3
         retry_delay = 1.0  # 初始延迟时间 (秒)
 
-        for attempt in range(max_retries):
-            try:
-                # 执行API调用协程
-                result = await request.coro
-                
-                # 成功后，设置结果并退出循环
-                if not request.future.done():
-                    request.future.set_result(result)
+        try:
+            for attempt in range(max_retries):
+                try:
+                    # 执行API调用协程
+                    result = await request.coro
 
-            except asyncio.TimeoutError as e:
-                if attempt < max_retries - 1:
-                    logger.warning(
-                        f"协程 (优先级: {request.priority}) 超时，将在 {retry_delay:.1f} 秒后进行重试 "
-                        f"({attempt + 1}/{max_retries-1})..."
-                    )
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2  # 指数退避
-                else:
-                    # 最后一次重试仍然失败，记录并抛出异常
-                    logger.error(
-                        f"协程 (优先级: {request.priority}) 在 {max_retries} 次尝试后仍然超时。"
+                    # 成功后，设置结果并退出循环
+                    if not request.future.done():
+                        request.future.set_result(result)
+                    return  # 任务成功，退出worker
+
+                except (asyncio.TimeoutError, ClientConnectorError) as e:
+                    # 可重试的瞬时错误：超时或网络连接问题
+                    if attempt < max_retries - 1:
+                        logger.debug(
+                            f"协程 (优先级: {request.priority}) 遇到可重试错误 ({type(e).__name__})，"
+                            f"将在 {retry_delay:.1f} 秒后进行重试 ({attempt + 2}/{max_retries})..."
+                        )
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # 指数退避
+                    else:
+                        # 最后一次重试仍然失败，记录并抛出异常
+                        logger.error(
+                            f"协程 (优先级: {request.priority}) 在 {max_retries} 次尝试后仍然失败。"
+                        )
+                        if not request.future.done():
+                            request.future.set_exception(e)
+                        return  # 任务最终失败，退出worker
+
+                except Exception as e:
+                    # 对于其他不可重试的异常，立即记录并抛出
+                    logger.exception(
+                        f"执行协程 (优先级: {request.priority}) 时发生错误: {e}"
                     )
                     if not request.future.done():
                         request.future.set_exception(e)
-            
-            except Exception as e:
-                # 对于其他异常，立即记录并抛出
-                logger.exception(f"执行协程 (优先级: {request.priority}) 时发生错误: {e}")
-                if not request.future.done():
-                    request.future.set_exception(e)
-            finally:
+                    return  # 任务最终失败，退出worker
+
+        finally:
             # 确保信号量总是被释放，无论成功还是失败
-                self._semaphore.release()
-                return
+            self._semaphore.release()
 
     async def submit(self, coro: Coroutine, priority: int) -> Any:
         """
