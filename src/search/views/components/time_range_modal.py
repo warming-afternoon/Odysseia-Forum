@@ -13,13 +13,13 @@ class TimeRangeModal(discord.ui.Modal, title="设置时间范围"):
 
     after_date_input = discord.ui.TextInput(
         label="开始日期 (YYYY-MM-DD)",
-        placeholder="例如: 2023-01-01。留空则不限制。",
+        placeholder="例如: 2020-01-01。留空则不限制。",
         required=False,
         max_length=10,
     )
     before_date_input = discord.ui.TextInput(
         label="结束日期 (YYYY-MM-DD)",
-        placeholder="例如: 2023-12-31。留空则不限制。",
+        placeholder="例如: 2050-12-31。留空则不限制。",
         required=False,
         max_length=10,
     )
@@ -44,7 +44,6 @@ class TimeRangeModal(discord.ui.Modal, title="设置时间范围"):
         before_str = self.before_date_input.value
 
         try:
-            # 调用纯业务逻辑方法
             await self.handler.update_user_time_range(
                 user_id=interaction.user.id,
                 after_date_str=after_str,

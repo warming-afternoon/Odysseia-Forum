@@ -8,7 +8,7 @@ from ranking_config import RankingConfig
 from shared.safe_defer import safe_defer
 from .dto.tag import TagDTO
 from .views.global_search_view import GlobalSearchView
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from .repository import SearchRepository
 from tag_system.repository import TagSystemRepository
 from tag_system.tagService import TagService
@@ -34,7 +34,7 @@ class Search(commands.Cog):
     def __init__(
         self,
         bot: "MyBot",
-        session_factory: sessionmaker,
+        session_factory: async_sessionmaker,
         config: dict,
         tag_service: TagService,
     ):
@@ -50,12 +50,13 @@ class Search(commands.Cog):
         self.global_search_view = GlobalSearchView(self)
         self.persistent_channel_search_view = PersistentChannelSearchView(self)
         self._has_cached_tags = False  # 用于确保 on_ready 只执行一次缓存
+        logger.info("Search 模块已加载")
 
     @commands.Cog.listener()
     async def on_ready(self):
         """当机器人准备就绪时，执行一次性的缓存任务"""
         if not self._has_cached_tags:
-            logger.info("机器人已准备就绪，开始缓存已索引的论坛频道...")
+            # logger.info("机器人已准备就绪，开始缓存已索引的论坛频道...")
             await self.cache_indexed_channels()
             self._has_cached_tags = True
 
@@ -82,8 +83,8 @@ class Search(commands.Cog):
         self.bot.add_view(self.persistent_channel_search_view)
 
     async def cache_indexed_channels(self):
-        """高效缓存所有已索引的论坛频道对象"""
-        logger.info("开始刷新频道缓存...")
+        """缓存所有已索引的论坛频道对象"""
+        # logger.info("开始刷新频道缓存...")
         try:
             async with self.session_factory() as session:
                 repo = self.tag_system_repo(session)
@@ -101,9 +102,9 @@ class Search(commands.Cog):
                     )
 
             self.channel_cache = new_cache
-            logger.info(
-                f"频道缓存刷新完毕，共缓存 {len(self.channel_cache)} 个论坛频道。"
-            )
+            # logger.info(
+            #     f"频道缓存刷新完毕，共缓存 {len(self.channel_cache)} 个论坛频道。"
+            # )
 
         except Exception as e:
             logger.error(f"缓存频道时出错: {e}", exc_info=True)

@@ -1,11 +1,13 @@
 import discord
 from typing import List, TYPE_CHECKING, Set
 
+from shared.safe_defer import safe_defer
 from ..dto.user_search_preferences import UserSearchPreferencesDTO
 from .components.tag_page_button import TagPageButton
 
 if TYPE_CHECKING:
     from ..prefs_handler import SearchPreferencesHandler
+    from .preferences_view import PreferencesView
 
 
 class TagPreferencesView(discord.ui.View):
@@ -15,12 +17,14 @@ class TagPreferencesView(discord.ui.View):
         self,
         handler: "SearchPreferencesHandler",
         interaction: discord.Interaction,
+        parent_view: "PreferencesView",
         preferences: "UserSearchPreferencesDTO",
         all_tags: List[str],
     ):
         super().__init__(timeout=900)
         self.handler = handler
         self.interaction = interaction
+        self.parent_view = parent_view
         self.all_tags = all_tags
 
         # 将数据库中的列表转换为集合，以便于操作
@@ -73,7 +77,7 @@ class TagPreferencesView(discord.ui.View):
         )
         self.add_item(
             discord.ui.Button(
-                label="取消", style=discord.ButtonStyle.grey, custom_id="cancel", row=3
+                label="关闭", style=discord.ButtonStyle.grey, custom_id="cancel", row=3
             )
         )
 
@@ -84,7 +88,10 @@ class TagPreferencesView(discord.ui.View):
     async def start(self):
         """发送包含视图的初始消息。"""
         embed = self.build_embed()
-        await self.interaction.followup.send(embed=embed, view=self, ephemeral=True)
+        await self.handler.bot.api_scheduler.submit(
+            coro=self.interaction.followup.send(embed=embed, view=self, ephemeral=True),
+            priority=1,
+        )
 
     def build_embed(self) -> discord.Embed:
         """构建显示当前偏好的Embed。"""
@@ -164,7 +171,10 @@ class TagPreferencesView(discord.ui.View):
 
             self.update_components()
             embed = self.build_embed()
-            await interaction.response.edit_message(embed=embed, view=self)
+            await self.handler.bot.api_scheduler.submit(
+                coro=interaction.response.edit_message(embed=embed, view=self),
+                priority=1,
+            )
 
         select.callback = select_callback
         return select
@@ -179,19 +189,44 @@ class TagPreferencesView(discord.ui.View):
 
         self.update_components()
         embed = self.build_embed()
-        await interaction.response.edit_message(embed=embed, view=self)
+        await self.handler.bot.api_scheduler.submit(
+            coro=interaction.response.edit_message(embed=embed, view=self),
+            priority=1,
+        )
 
     async def save_preferences(self, interaction: discord.Interaction):
-        """保存偏好到数据库并关闭视图。"""
+        """保存偏好，刷新父视图，然后关闭此视图。"""
+        await self.handler.bot.api_scheduler.submit(
+            coro=safe_defer(interaction), priority=1
+        )
+
+        # 1. 保存偏好到数据库
         await self.handler.save_tag_preferences(
             interaction, list(self.include_tags), list(self.exclude_tags)
         )
-        await interaction.response.edit_message(
-            content="✅ 标签偏好已保存。", view=None, embed=None
+
+        # 2. 删除当前的标签偏好视图消息
+        await self.handler.bot.api_scheduler.submit(
+            coro=interaction.delete_original_response(),
+            priority=2,
         )
+        
+        # 3. 刷新父视图 (PreferencesView)，使用创建本视图的交互
+        await self.parent_view.refresh(self.interaction)
+
 
     async def cancel_view(self, interaction: discord.Interaction):
-        """取消操作并关闭视图。"""
-        await interaction.response.edit_message(
-            content="操作已取消。", view=None, embed=None
+        """取消操作，删除此视图"""
+        await self.handler.bot.api_scheduler.submit(
+            coro=safe_defer(interaction), priority=1
         )
+
+        # 删除当前视图
+        await self.handler.bot.api_scheduler.submit(
+            coro=interaction.delete_original_response(),
+            priority=1,
+        )
+        
+        # # 刷新父视图
+        # await self.parent_view.refresh(self.interaction)
+

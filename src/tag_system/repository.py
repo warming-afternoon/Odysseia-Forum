@@ -4,6 +4,7 @@ from datetime import datetime
 from shared.models.tag_vote import TagVote
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import update
 from sqlalchemy.orm import selectinload, attributes
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -107,26 +108,38 @@ class TagSystemRepository:
         self, thread_id: int, last_active_at: datetime, reply_count: int
     ):
         """仅更新帖子的活跃时间和回复数"""
-        statement = select(Thread).where(Thread.thread_id == thread_id)
-        result = await self.session.execute(statement)
-        db_thread = result.scalars().first()
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)
+            .values(
+                last_active_at=last_active_at,
+                reply_count=reply_count,
+            )
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
 
-        if db_thread:
-            db_thread.last_active_at = last_active_at
-            db_thread.reply_count = reply_count
-            self.session.add(db_thread)
-            await self.session.commit()
+    async def update_thread_last_active_at(
+        self, thread_id: int, last_active_at: datetime
+    ):
+        """仅更新帖子的最后活跃时间"""
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)
+            .values(last_active_at=last_active_at)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
 
     async def update_thread_reaction_count(self, thread_id: int, reaction_count: int):
         """仅更新帖子的反应数"""
-        statement = select(Thread).where(Thread.thread_id == thread_id)
-        result = await self.session.execute(statement)
-        db_thread = result.scalars().first()
-
-        if db_thread:
-            db_thread.reaction_count = reaction_count
-            self.session.add(db_thread)
-            await self.session.commit()
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)
+            .values(reaction_count=reaction_count)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
 
     async def get_tags_for_author(self, author_id: int) -> Sequence[Tag]:
         """获取指定作者发布过的所有帖子的唯一标签列表"""
@@ -268,3 +281,31 @@ class TagSystemRepository:
                 stats[tag_name] = data
 
         return stats
+
+    async def increment_reply_count(self, thread_id: int, last_active_at: datetime):
+        """将帖子的回复数加一，并更新活跃时间。"""
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)
+            .values(
+                reply_count=Thread.reply_count + 1,
+                last_active_at=last_active_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+        # logger.debug(f"已递增帖子 {thread_id} 的回复数。")
+
+    async def decrement_reply_count(self, thread_id: int):
+        """将帖子的回复数减一，前提是回复数大于0。"""
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)
+            .where(Thread.reply_count > 0)
+            .values(reply_count=Thread.reply_count - 1)
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+        # logger.debug(f"已递减帖子 {thread_id} 的回复数。")

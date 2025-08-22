@@ -1,3 +1,4 @@
+import logging
 import discord
 from typing import TYPE_CHECKING, Optional
 
@@ -9,6 +10,8 @@ from .components.time_range_modal import TimeRangeModal
 if TYPE_CHECKING:
     from ..prefs_handler import SearchPreferencesHandler
 
+# 获取一个模块级别的 logger
+logger = logging.getLogger(__name__)
 
 class PreferencesView(discord.ui.View):
     """统一的搜索偏好设置面板"""
@@ -164,15 +167,17 @@ class PreferencesView(discord.ui.View):
                     label=preview_button_label,
                     style=discord.ButtonStyle.primary,
                     custom_id="prefs_preview",
+                    row=1,
                 )
             )
 
-        # 第三行
+        
         self.add_item(
             discord.ui.Button(
                 label="🗑️ 清空所有设置",
                 style=discord.ButtonStyle.danger,
                 custom_id="prefs_clear",
+                row=2,
             )
         )
 
@@ -186,19 +191,24 @@ class PreferencesView(discord.ui.View):
         await self.fetch_preferences()
         self.update_components()
         embed = self.build_embed()
-        await self.original_interaction.followup.send(
-            embed=embed, view=self, ephemeral=True
+        await self.handler.bot.api_scheduler.submit(
+            coro=self.original_interaction.followup.send(
+                embed=embed, view=self, ephemeral=True
+            ),
+            priority=1,
         )
 
     async def refresh(self, interaction: discord.Interaction):
         """
         使用最新的偏好设置刷新视图。
-        假定调用此方法的交互已经被响应过 (deferred)。
         """
         await self.fetch_preferences()
         self.update_components()
         embed = self.build_embed()
-        await interaction.edit_original_response(embed=embed, view=self)
+        await self.handler.bot.api_scheduler.submit(
+            coro=interaction.edit_original_response(embed=embed, view=self),
+            priority=1,
+        )
 
     async def button_callback(self, interaction: discord.Interaction):
         """统一处理所有按钮点击事件"""
@@ -206,16 +216,11 @@ class PreferencesView(discord.ui.View):
         custom_id = interaction.data.get("custom_id")
 
         if custom_id == "prefs_tags":
-            await self.handler.search_preferences_tags(interaction)
+            await self.handler.search_preferences_tags(interaction, self)
             return  # 标签视图是独立的流程
 
         elif custom_id == "prefs_keywords":
-            overwrite_action = discord.app_commands.Choice(
-                name="覆盖", value="overwrite"
-            )
-            await self.handler.search_preferences_keywords(
-                interaction, overwrite_action
-            )
+            await self.handler.search_preferences_keywords(interaction, self)
             return  # Modal流程自己处理响应，此处返回
 
         elif custom_id == "prefs_time":
@@ -231,17 +236,23 @@ class PreferencesView(discord.ui.View):
             )
 
             modal = TimeRangeModal(self.handler, self, current_after, current_before)
-            await interaction.response.send_modal(modal)
+            await self.handler.bot.api_scheduler.submit(
+                coro=interaction.response.send_modal(modal), priority=1
+            )
             return  # Modal 流程自己处理响应，此处返回
 
         elif custom_id == "prefs_preview":
-            await safe_defer(interaction)
+            await self.handler.bot.api_scheduler.submit(
+                coro=safe_defer(interaction), priority=1
+            )
             await self.handler.toggle_preview_mode(interaction.user.id)
             await self.refresh(interaction)
             return
 
         elif custom_id == "prefs_clear":
-            await safe_defer(interaction)
+            await self.handler.bot.api_scheduler.submit(
+                coro=safe_defer(interaction), priority=1
+            )
             await self.handler.clear_user_preferences(interaction.user.id)
             await self.refresh(interaction)
             return

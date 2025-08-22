@@ -24,15 +24,19 @@ class ThreadEmbedBuilder:
         # 标签信息通过 relationship 加载
         tag_names = [tag.name for tag in thread.tags]
 
-        # 基础统计信息
-        last_active_str = (
-            thread.last_active_at.strftime("%Y-%m-%d %H:%M:%S")
-            if thread.last_active_at
-            else "无"
-        )
+        # 将 datetime 对象转换为 Unix 时间戳
+        created_at_ts = int(thread.created_at.timestamp())
+
+        # 使用 Discord 动态时间戳格式
+        if thread.last_active_at:
+            last_active_ts = int(thread.last_active_at.timestamp())
+            last_active_str = f"<t:{last_active_ts}:F>"
+        else:
+            last_active_str = "无"
+
         basic_stats = (
-            f"发帖日期: **{thread.created_at.strftime('%Y-%m-%d %H:%M:%S')}** | "
-            f"最近活跃: **{last_active_str}**\n"
+            f"发帖日期: <t:{created_at_ts}:D> | "
+            f"最近活跃: {last_active_str}\n"
             f"最高反应数: **{thread.reaction_count}** | 总回复数: **{thread.reply_count}**\n"
             f"标签: **{', '.join(tag_names) if tag_names else '无'}**"
         )
@@ -58,3 +62,4 @@ class ThreadEmbedBuilder:
                 embed.set_thumbnail(url=thread.thumbnail_url)
 
         return embed
+

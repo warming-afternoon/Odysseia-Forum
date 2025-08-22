@@ -1,8 +1,7 @@
 import os
 from typing import AsyncGenerator
 from sqlmodel import SQLModel
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 
 # 导入所有模型，以便 SQLModel 可以发现它们并创建表
 
@@ -13,9 +12,8 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 async_engine = create_async_engine(DATABASE_URL, echo=False)
 
 # 创建异步会话工厂
-AsyncSessionFactory = sessionmaker(
+AsyncSessionFactory = async_sessionmaker(
     bind=async_engine,
-    class_=AsyncSession,
     expire_on_commit=False,
 )
 
@@ -31,16 +29,6 @@ async def init_db():
 
     async with async_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-
-
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    获取一个新的数据库会话。
-    这是一个依赖项，可以被 FastAPI 或其他框架注入。
-    """
-    async with AsyncSessionFactory() as session:
-        yield session
-
 
 async def close_db():
     """

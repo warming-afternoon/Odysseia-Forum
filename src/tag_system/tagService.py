@@ -1,7 +1,7 @@
 import logging
 from collections import defaultdict
 from typing import List, Dict
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from tag_system.repository import TagSystemRepository
 
@@ -13,7 +13,7 @@ class TagService:
     一个封装了标签数据访问和缓存的服务
     """
 
-    def __init__(self, session_factory: sessionmaker):
+    def __init__(self, session_factory: async_sessionmaker):
         self.session_factory = session_factory
         self._id_to_name: Dict[int, str] = {}
         self._name_to_ids: Dict[str, List[int]] = defaultdict(list)

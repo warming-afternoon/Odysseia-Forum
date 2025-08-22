@@ -2,8 +2,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import datetime
-from sqlalchemy.orm import sessionmaker
-from typing import Coroutine, TYPE_CHECKING, Optional
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from typing import Coroutine, TYPE_CHECKING, Union
 
 from shared.safe_defer import safe_defer
 
@@ -20,11 +20,12 @@ logger = logging.getLogger(__name__)
 class TagSystem(commands.Cog):
     """处理标签同步与评价"""
 
-    def __init__(self, bot: "MyBot", session_factory: sessionmaker, config: dict):
+    def __init__(self, bot: "MyBot", session_factory: async_sessionmaker, config: dict):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
         self.indexed_channel_ids = set()  # 缓存已索引的频道ID
+        logger.info("TagSystem 模块已加载")
 
     async def cog_load(self):
         """Cog加载时初始化缓存"""
@@ -72,12 +73,22 @@ class TagSystem(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if not message.guild or not isinstance(message.channel, discord.Thread):
+        if (
+            not message.guild
+            or not isinstance(message.channel, discord.Thread)
+            or message.author.bot
+        ):
             return
 
         thread = message.channel
+        # 如果是首楼消息，则忽略，因为 sync_thread 会处理
+        if thread.id == message.id:
+            return
+
         if self.is_channel_indexed(thread.parent_id):
-            self.bot.loop.create_task(self._update_activity(thread, message.created_at))
+            async with self.session_factory() as session:
+                repo = TagSystemRepository(session)
+                await repo.increment_reply_count(thread.id, message.created_at)
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
@@ -98,11 +109,12 @@ class TagSystem(commands.Cog):
                     )
                 else:
                     # 普通消息编辑只更新活跃时间
-                    self.bot.loop.create_task(
-                        self._update_activity(
-                            channel, datetime.datetime.now(datetime.timezone.utc)
+                    async with self.session_factory() as session:
+                        repo = TagSystemRepository(session)
+                        # payload 中没有编辑时间，所以我们用当前时间
+                        await repo.update_thread_last_active_at(
+                            channel.id, datetime.datetime.now(datetime.timezone.utc)
                         )
-                    )
         except Exception:
             logger.warning("处理消息编辑事件失败", exc_info=True)
 
@@ -123,8 +135,10 @@ class TagSystem(commands.Cog):
                         await repo.delete_thread_index(thread_id=channel.id)
                     await self.refresh_indexed_channels_cache()
                 else:
-                    # 普通消息删除，更新回复数和活跃时间
-                    self.bot.loop.create_task(self._update_activity(channel))
+                    # 普通消息删除，只更新回复数
+                    async with self.session_factory() as session:
+                        repo = TagSystemRepository(session)
+                        await repo.decrement_reply_count(channel.id)
         except Exception:
             logger.warning("处理消息删除事件失败", exc_info=True)
 
@@ -163,23 +177,6 @@ class TagSystem(commands.Cog):
                     )
         except Exception:
             logger.warning("处理反应移除事件失败", exc_info=True)
-
-    async def _update_activity(
-        self,
-        thread: discord.Thread,
-        last_active_time: Optional[datetime.datetime] = None,
-    ):
-        """(协程) 更新帖子的活跃度和回复数"""
-        if last_active_time is None:
-            # 如果没有提供时间，就用当前时间
-            last_active_time = datetime.datetime.now(datetime.timezone.utc)
-
-        # message_count 通常是准确的，除非有大量删除
-        reply_count = thread.message_count
-
-        async with self.session_factory() as session:
-            repo = TagSystemRepository(session)
-            await repo.update_thread_activity(thread.id, last_active_time, reply_count)
 
     async def _update_reaction_count(self, thread: discord.Thread):
         """(协程) 更新帖子的反应数"""
@@ -245,30 +242,64 @@ class TagSystem(commands.Cog):
 
     async def sync_thread(
         self,
-        thread: discord.Thread,
+        thread: Union[discord.Thread, int],
         priority: int = 10,
         *,
         fetch_if_incomplete: bool = False,
     ):
         """
         同步一个帖子的数据到数据库，包括其标签。
-        该方法由事件监听器和索引器调用。
-        :param thread: 要同步的帖子对象。
+        该方法可以接受一个完整的帖子对象，或者一个帖子ID。
+        :param thread: 要同步的帖子对象或帖子ID。
         :param priority: 此操作的API调用优先级。
         :param fetch_if_incomplete: 如果为True，则强制从API获取最新的帖子对象，用于处理可能不完整的对象。
         """
-        if fetch_if_incomplete:
+        # 如果传入的是帖子ID（来自审计员），则先通过API获取帖子对象
+        if isinstance(thread, int):
+            thread_id = thread
+            try:
+                fetched_channel = await self.bot.api_scheduler.submit(
+                    coro=self.bot.fetch_channel(thread_id), priority=priority
+                )
+                if not isinstance(fetched_channel, discord.Thread):
+                    logger.warning(
+                        f"sync_thread: 获取到的 channel {thread_id} 不是一个帖子，已将其从索引中删除。"
+                    )
+                    async with self.session_factory() as session:
+                        repo = TagSystemRepository(session=session)
+                        await repo.delete_thread_index(thread_id=thread_id)
+                    return
+                thread = fetched_channel
+            except discord.NotFound:
+                logger.warning(
+                    f"sync_thread (by ID): 无法找到帖子 {thread_id}，可能已被删除。将从数据库中移除。"
+                )
+                async with self.session_factory() as session:
+                    repo = TagSystemRepository(session=session)
+                    await repo.delete_thread_index(thread_id=thread_id)
+                return
+            except Exception as e:
+                logger.error(
+                    f"sync_thread (by ID): 通过ID {thread_id} 获取帖子时发生未知错误: {e}",
+                    exc_info=True,
+                )
+                return
+
+        # 如果需要，强制从API获取最新的帖子对象
+        elif fetch_if_incomplete:
             try:
                 thread = await self.bot.api_scheduler.submit(
                     coro=self.bot.fetch_channel(thread.id), priority=priority
                 )
             except discord.NotFound:
-                logger.warning(f"sync_thread: 无法找到帖子 {thread.id}，可能已被删除。")
-
+                logger.warning(
+                    f"sync_thread (fetch_if_incomplete): 无法找到帖子 {thread.id}，可能已被删除。"
+                )
                 async with self.session_factory() as session:
                     repo = TagSystemRepository(session=session)
                     await repo.delete_thread_index(thread_id=thread.id)
                 return
+        assert isinstance(thread, discord.Thread)
 
         # 将频道添加到已索引缓存中
         self.indexed_channel_ids.add(thread.parent_id)

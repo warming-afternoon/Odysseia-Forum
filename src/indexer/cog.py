@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, cast
 
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from shared.safe_defer import safe_defer
 from tag_system.cog import TagSystem
 from tag_system.tagService import TagService
@@ -15,6 +15,8 @@ from .views import IndexerDashboard
 if TYPE_CHECKING:
     from bot_main import MyBot
 
+# 获取一个模块级别的 logger
+logger = logging.getLogger(__name__)
 
 class Indexer(commands.Cog):
     """构建索引相关命令"""
@@ -22,7 +24,7 @@ class Indexer(commands.Cog):
     def __init__(
         self,
         bot: "MyBot",
-        session_factory: sessionmaker,
+        session_factory: async_sessionmaker,
         config: dict,
         tag_service: TagService,
     ):
@@ -30,6 +32,7 @@ class Indexer(commands.Cog):
         self.session_factory = session_factory
         self.config = config
         self.tag_service = tag_service
+        logger.info("Indexer 模块已加载")
 
     @app_commands.command(
         name="构建索引", description="对当前论坛频道的所有帖子进行索引"

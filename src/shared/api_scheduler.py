@@ -42,7 +42,7 @@ class APIScheduler:
 
     async def _dispatcher_loop(self):
         """调度器的主循环，从队列中拉取请求并派发给worker。"""
-        logger.info("API scheduler loop started.")
+        logger.debug("API scheduler loop started.")
         while self._is_running:
             await self._semaphore.acquire()
             try:
