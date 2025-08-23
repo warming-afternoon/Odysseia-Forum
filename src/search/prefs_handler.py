@@ -39,7 +39,7 @@ class SearchPreferencesHandler:
             user_id = interaction.user.id
             if action.value in ["include", "exclude", "unblock"] and not user:
                 await self.bot.api_scheduler.submit(
-                    coro=interaction.followup.send(
+                    coro_factory=lambda: interaction.followup.send(
                         "❌ 请指定要设置的用户。", ephemeral=True
                     ),
                     priority=1,
@@ -90,11 +90,11 @@ class SearchPreferencesHandler:
                 )
 
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(message, ephemeral=True), priority=1
+                coro_factory=lambda: interaction.followup.send(message, ephemeral=True), priority=1
             )
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(f"❌ 操作失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(f"❌ 操作失败: {e}", ephemeral=True),
                 priority=1,
             )
 
@@ -135,7 +135,7 @@ class SearchPreferencesHandler:
     ):
         """处理 /搜索偏好 标签 命令，启动标签偏好设置视图。"""
         await self.bot.api_scheduler.submit(
-            coro=safe_defer(interaction, ephemeral=True), priority=1
+            coro_factory=lambda: safe_defer(interaction, ephemeral=True), priority=1
         )
         try:
             async with self.session_factory() as session:
@@ -157,7 +157,7 @@ class SearchPreferencesHandler:
 
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     f"❌ 打开标签设置时出错: {e}", ephemeral=True
                 ),
                 priority=1,
@@ -243,21 +243,21 @@ class SearchPreferencesHandler:
                 submit_callback=handle_keyword_submit,
             )
             await self.bot.api_scheduler.submit(
-                coro=interaction.response.send_modal(modal), priority=1
+                coro_factory=lambda: interaction.response.send_modal(modal), priority=1
             )
 
         except Exception as e:
             # 检查交互是否已经被响应
             if not interaction.response.is_done():
                 await self.bot.api_scheduler.submit(
-                    coro=interaction.response.send_message(
+                    coro_factory=lambda: interaction.response.send_message(
                         f"❌ 打开关键词设置时出错: {e}", ephemeral=True
                     ),
                     priority=1,
                 )
             else:
                 await self.bot.api_scheduler.submit(
-                    coro=interaction.followup.send(
+                    coro_factory=lambda: interaction.followup.send(
                         f"❌ 打开关键词设置时出错: {e}", ephemeral=True
                     ),
                     priority=1,

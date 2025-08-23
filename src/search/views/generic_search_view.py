@@ -197,12 +197,12 @@ class GenericSearchView(discord.ui.View):
                 embeds=final_embeds_to_send,
                 ephemeral=True,
             )
-            await self.cog.bot.api_scheduler.submit(coro=send_coro, priority=1)
+            await self.cog.bot.api_scheduler.submit(coro_factory=lambda: send_coro, priority=1)
         else:
             edit_coro = interaction.edit_original_response(
                 content=content, view=final_view, embeds=final_embeds_to_send
             )
-            await self.cog.bot.api_scheduler.submit(coro=edit_coro, priority=1)
+            await self.cog.bot.api_scheduler.submit(coro_factory=lambda: edit_coro, priority=1)
 
     async def on_filter_change(self, interaction: discord.Interaction):
         """当任何筛选条件改变时调用此方法"""
@@ -417,6 +417,6 @@ class GenericSearchView(discord.ui.View):
                 view=timeout_view,
                 embeds=[],
             )
-            await self.cog.bot.api_scheduler.submit(coro=edit_coro, priority=1)
+            await self.cog.bot.api_scheduler.submit(coro_factory=lambda: edit_coro, priority=1)
         except (discord.errors.NotFound, discord.errors.HTTPException):
             pass

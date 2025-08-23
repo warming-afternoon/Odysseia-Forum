@@ -5,6 +5,7 @@ from sqlalchemy.sql import true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from shared.models.thread_tag_link import ThreadTagLink
 from shared.models.thread import Thread
 from shared.models.tag import Tag
 from shared.models.user_search_preferences import UserSearchPreferences
@@ -30,12 +31,12 @@ class SearchRepository:
     ):
         """将搜索查询对象中的过滤条件应用到查询语句上"""
         if query.channel_ids:
-            statement = statement.where(Thread.channel_id.in_(query.channel_ids))
+            statement = statement.where(Thread.channel_id.in_(query.channel_ids))  # type: ignore
 
         if query.include_authors:
-            statement = statement.where(Thread.author_id.in_(query.include_authors))
+            statement = statement.where(Thread.author_id.in_(query.include_authors))  # type: ignore
         if query.exclude_authors:
-            statement = statement.where(Thread.author_id.notin_(query.exclude_authors))
+            statement = statement.where(Thread.author_id.notin_(query.exclude_authors))  # type: ignore
 
         if query.after_ts:
             statement = statement.where(Thread.created_at >= query.after_ts)
@@ -50,16 +51,16 @@ class SearchRepository:
                     if ids_for_name:
                         # 帖子必须至少有这些ID中的一个
                         statement = statement.where(
-                            Thread.tags.any(Tag.id.in_(ids_for_name))
+                            Thread.tags.any(Tag.id.in_(ids_for_name))  # type: ignore
                         )
             else:  # OR 逻辑
                 statement = statement.where(
-                    Thread.tags.any(Tag.id.in_(resolved_include_tag_ids))
+                    Thread.tags.any(Tag.id.in_(resolved_include_tag_ids))  # type: ignore
                 )
 
         if resolved_exclude_tag_ids:
             statement = statement.where(
-                ~Thread.tags.any(Tag.id.in_(resolved_exclude_tag_ids))
+                ~Thread.tags.any(Tag.id.in_(resolved_exclude_tag_ids))  # type: ignore
             )
 
         if query.keywords:
@@ -78,9 +79,9 @@ class SearchRepository:
 
                 or_clauses = []
                 for keyword in or_keywords:
-                    or_clauses.append(Thread.title.ilike(f"%{keyword}%"))
+                    or_clauses.append(Thread.title.ilike(f"%{keyword}%"))  # type: ignore
                     or_clauses.append(
-                        Thread.first_message_excerpt.ilike(f"%{keyword}%")
+                        Thread.first_message_excerpt.ilike(f"%{keyword}%")  # type: ignore
                     )
 
                 if or_clauses:
@@ -99,84 +100,64 @@ class SearchRepository:
             ]
 
             for keyword in exclude_keywords_list:
-                statement = statement.where(~Thread.title.ilike(f"%{keyword}%"))
+                statement = statement.where(~Thread.title.ilike(f"%{keyword}%"))  # type: ignore
                 statement = statement.where(
-                    ~Thread.first_message_excerpt.ilike(f"%{keyword}%")
+                    ~Thread.first_message_excerpt.ilike(f"%{keyword}%")  # type: ignore
                 )
 
         return statement
 
-    def _get_comprehensive_ranking_expressions(
-        self, resolved_include_tag_ids: List[int]
-    ) -> dict:
-        """
-        计算综合排序的所有相关SQL表达式
-        """
+    def _apply_ranking(self, statement, resolved_include_tag_ids: List[int]):
+        """应用综合排序逻辑"""
+
+        # 优先 LEFT JOIN 到 ThreadTagLink 表
         if resolved_include_tag_ids:
-            # 动态构建一个 CASE 语句，以找到第一个匹配的标签ID并使用其投票数据
-            # (tag_votes_summary -> 'id' ->> 'upvotes')::int
-            upvotes_case_clauses = [
-                (
-                    func.json_extract(
-                        Thread.tag_votes_summary, f"$.{tag_id}.upvotes"
-                    ).isnot(None),
-                    cast(
-                        func.json_extract(
-                            Thread.tag_votes_summary, f"$.{tag_id}.upvotes"
-                        ),
-                        Float,
-                    ),
-                )
-                for tag_id in resolved_include_tag_ids
-            ]
-            total_upvotes_expr = case(*upvotes_case_clauses, else_=0.0)
+            statement = statement.outerjoin(
+                ThreadTagLink,
+                and_(
+                    Thread.id == ThreadTagLink.thread_id,
+                    ThreadTagLink.tag_id.in_(resolved_include_tag_ids),  # type: ignore
+                ),
+            )
 
-            downvotes_case_clauses = [
-                (
-                    func.json_extract(
-                        Thread.tag_votes_summary, f"$.{tag_id}.downvotes"
-                    ).isnot(None),
-                    cast(
-                        func.json_extract(
-                            Thread.tag_votes_summary, f"$.{tag_id}.downvotes"
-                        ),
-                        Float,
-                    ),
-                )
-                for tag_id in resolved_include_tag_ids
-            ]
-            total_downvotes_expr = case(*downvotes_case_clauses, else_=0.0)
+            # 直接从 JOIN 的表中提取投票数据
+            upvotes_expr = func.coalesce(cast(ThreadTagLink.upvotes, Float), 0.0)
+            downvotes_expr = func.coalesce(cast(ThreadTagLink.downvotes, Float), 0.0)
 
-            total_votes = cast(total_upvotes_expr + total_downvotes_expr, Float)
+            total_votes = upvotes_expr + downvotes_expr
 
+            # Wilson Score 计算
             z = RankingConfig.WILSON_CONFIDENCE_LEVEL
-
-            p_hat = case((total_votes > 0, total_upvotes_expr / total_votes), else_=0.0)
-
-            wilson_score = case(
+            z_squared = z * z  
+            p_hat = case((total_votes > 0, upvotes_expr / total_votes), else_=0.0)
+            # 威尔逊得分下限公式
+            wilson_score_expr = case(
                 (
                     total_votes > 0,
                     (
                         p_hat
-                        + func.pow(z, 2) / (2 * total_votes)
+                        + z_squared / (2 * total_votes)
                         - z
                         * func.sqrt(
-                            (p_hat * (1 - p_hat) / total_votes)
-                            + (func.pow(z, 2) / (4 * func.pow(total_votes, 2)))
+                            (p_hat * (1 - p_hat) + z_squared / (4 * total_votes))
+                            / total_votes
                         )
                     )
-                    / (1 + func.pow(z, 2) / total_votes),
+                    / (1 + z_squared / total_votes),
                 ),
                 else_=0.0,
             )
 
             tag_weight = case(
-                (total_votes > 0, wilson_score), else_=RankingConfig.DEFAULT_TAG_SCORE
+                (total_votes > 0, wilson_score_expr),
+                else_=RankingConfig.DEFAULT_TAG_SCORE,
             )
         else:
+            # 如果没有指定标签，则赋予默认分，且不进行 JOIN
             tag_weight = cast(RankingConfig.DEFAULT_TAG_SCORE, Float)
             total_votes = cast(0, Float)
 
+        # 时间和反应权重计算
         time_diff_days = func.julianday("now") - func.julianday(Thread.last_active_at)
         time_weight = func.exp(-RankingConfig.TIME_DECAY_RATE * time_diff_days)
 
@@ -184,13 +165,13 @@ class SearchRepository:
             RankingConfig.MAX_REACTION_SCORE,
             func.log(cast(Thread.reaction_count, Float) + 1)
             / func.log(RankingConfig.REACTION_LOG_BASE + 1),
-        )
+        ).label("reaction_weight")
 
         base_score = (
             time_weight * RankingConfig.TIME_WEIGHT_FACTOR
             + tag_weight * RankingConfig.TAG_WEIGHT_FACTOR
             + reaction_weight * RankingConfig.REACTION_WEIGHT_FACTOR
-        )
+        ).label("base_score")
 
         penalty_factor = case(
             (
@@ -208,19 +189,10 @@ class SearchRepository:
                 RankingConfig.MILD_PENALTY_FACTOR,
             ),
             else_=1.0,
-        )
+        ).label("penalty_factor")
 
-        final_score = base_score * penalty_factor
-
-        return {
-            "final_score": final_score,
-            "base_score": base_score,
-            "time_weight": time_weight,
-            "tag_weight": tag_weight,
-            "reaction_weight": reaction_weight,
-            "total_votes": total_votes,
-            "penalty_factor": penalty_factor,
-        }
+        final_score = (base_score * penalty_factor).label("final_score")
+        return statement, final_score
 
     async def search_threads_with_count(
         self, query: ThreadSearchQuery, offset: int, limit: int
@@ -247,7 +219,7 @@ class SearchRepository:
             # 2. 构建查询
             count_cte = self._apply_search_filters(
                 query,
-                select(func.count(Thread.id).label("total_count")),
+                select(func.count(Thread.id).label("total_count")),  # type: ignore
                 resolved_include_tag_ids,
                 resolved_exclude_tag_ids,
             ).cte("count_cte")
@@ -260,46 +232,46 @@ class SearchRepository:
             )
 
             # 3. 应用排序
+            order_by = None
             if query.sort_method == "comprehensive":
-                ranking_exprs = self._get_comprehensive_ranking_expressions(
-                    resolved_include_tag_ids
+                statement, final_score_expr = self._apply_ranking(
+                    statement, resolved_include_tag_ids
                 )
-
-                order_by_expr = ranking_exprs["final_score"]
                 order_by = (
-                    order_by_expr.desc()
+                    final_score_expr.desc()
                     if query.sort_order == "desc"
-                    else order_by_expr.asc()
+                    else final_score_expr.asc()
                 )
-
             elif query.sort_method == "created_time":
                 order_by = (
-                    Thread.created_at.desc()
+                    Thread.created_at.desc()  # type: ignore
                     if query.sort_order == "desc"
-                    else Thread.created_at.asc()
+                    else Thread.created_at.asc()  # type: ignore
                 )
             elif query.sort_method == "active_time":
                 order_by = (
-                    Thread.last_active_at.desc()
+                    Thread.last_active_at.desc()  # type: ignore
                     if query.sort_order == "desc"
-                    else Thread.last_active_at.asc()
+                    else Thread.last_active_at.asc()  # type: ignore
                 )
             elif query.sort_method == "reaction_count":
                 order_by = (
-                    Thread.reaction_count.desc()
+                    Thread.reaction_count.desc()  # type: ignore
                     if query.sort_order == "desc"
-                    else Thread.reaction_count.asc()
+                    else Thread.reaction_count.asc()  # type: ignore
                 )
             else:
                 order_by = (
-                    Thread.last_active_at.desc()
+                    Thread.last_active_at.desc()  # type: ignore
                     if query.sort_order == "desc"
-                    else Thread.last_active_at.asc()
+                    else Thread.last_active_at.asc()  # type: ignore
                 )
 
+            if order_by is not None:
+                statement = statement.order_by(order_by)
+
             statement = (
-                statement.order_by(order_by)
-                .options(selectinload(Thread.tags))
+                statement.options(selectinload(Thread.tags))  # type: ignore
                 .offset(offset)
                 .limit(limit)
             )
@@ -353,7 +325,7 @@ class SearchRepository:
         """获取指定作者使用过的所有标签。"""
         statement = (
             select(Tag)
-            .join(Thread.tags)
+            .join(Thread.tags)  # type: ignore
             .where(Thread.author_id == author_id)
             .distinct()
         )

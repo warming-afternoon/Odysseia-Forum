@@ -4,6 +4,7 @@ from discord.ext import commands
 import asyncio
 import logging
 from typing import TYPE_CHECKING, cast
+from discord import TextChannel
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from shared.safe_defer import safe_defer
@@ -41,7 +42,7 @@ class Indexer(commands.Cog):
         await safe_defer(interaction)
         if not isinstance(interaction.channel, discord.Thread):
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     "请在论坛频道的帖子内使用此命令", ephemeral=True
                 ),
                 priority=1,
@@ -51,7 +52,7 @@ class Indexer(commands.Cog):
         channel = interaction.channel.parent
         if not isinstance(channel, discord.ForumChannel):
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     "此命令仅适用于论坛频道。", ephemeral=True
                 ),
                 priority=1,
@@ -118,7 +119,30 @@ class Indexer(commands.Cog):
             # 标记完成并更新UI
             if not dashboard.progress.get("error"):
                 dashboard.progress["finished"] = True
-            await dashboard.update_embed()
+            
+            # 检查令牌是否已过期来决定如何发送最终状态
+            if dashboard.is_token_expired:
+                # 令牌已过期，发送一条新消息
+                # logging.info(f"[{dashboard.channel.id}] Token expired. Sending a new message for final status.")
+                final_embed = dashboard.create_embed()
+                if not dashboard.interaction:
+                    logging.error(f"[{dashboard.channel.id}] Dashboard interaction is None, cannot send final message.")
+                    return
+
+                interaction = dashboard.interaction
+                user_mention = interaction.user.mention
+                await dashboard.cog.bot.api_scheduler.submit(
+                    coro_factory=lambda: interaction.followup.send(
+                        content=f"{user_mention}，索引任务已完成。",
+                        embed=final_embed,
+                        ephemeral=True
+                    ),
+                    priority=2 # 中等优先级
+                )
+            else:
+                # 令牌仍然有效，安全地编辑原始消息
+                # logging.info(f"[{dashboard.channel.id}] Token is still valid. Performing final UI update.")
+                await dashboard.update_embed()
 
             # 分发全局事件
             if not dashboard.progress.get("error"):

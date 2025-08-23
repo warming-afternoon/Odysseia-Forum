@@ -1,5 +1,5 @@
 import discord
-from typing import List, TYPE_CHECKING
+from typing import List, TYPE_CHECKING, Sequence
 
 from shared.safe_defer import safe_defer
 from .generic_search_view import GenericSearchView
@@ -15,8 +15,8 @@ class ChannelSelectionView(discord.ui.View):
         self,
         cog: "Search",
         original_interaction: discord.Interaction,
-        channels: List[discord.ForumChannel],
-        all_channel_ids: List[int],
+        channels: Sequence[discord.ForumChannel],
+        all_channel_ids: Sequence[int],
     ):
         super().__init__(timeout=900)
         self.cog = cog
@@ -85,7 +85,7 @@ class ChannelSelectionView(discord.ui.View):
 
         if "all" in selected_values:
             # 如果选择了 "all"，则使用所有可用的频道ID
-            self.selected_channel_ids = self.all_channel_ids
+            self.selected_channel_ids = list(self.all_channel_ids)
         else:
             self.selected_channel_ids = [int(v) for v in selected_values]
 

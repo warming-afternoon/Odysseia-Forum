@@ -1,15 +1,16 @@
 import logging
-from typing import List, Sequence
+from typing import List, Sequence, cast
 from datetime import datetime
 from shared.models.tag_vote import TagVote
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update
+from sqlalchemy import delete, update, ColumnElement
 from sqlalchemy.orm import selectinload, attributes
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from shared.models.thread import Thread
 from shared.models.tag import Tag
+from shared.models.thread_tag_link import ThreadTagLink
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ class TagSystemRepository:
         # 更新可能已更改名称的标签。
         # (这一步在实践中很少发生，因为Discord标签ID是唯一的，但为了健壮性而保留)
         tag_ids = list(tags_data.keys())
-        statement = select(Tag).where(Tag.id.in_(tag_ids))
+        statement = select(Tag).where(cast(ColumnElement, Tag.id).in_(tag_ids))
         result = await self.session.execute(statement)
         existing_tags_map = {tag.id: tag for tag in result.scalars().all()}
 
@@ -53,9 +54,9 @@ class TagSystemRepository:
 
         # 返回所有相关的标签对象。
         # 重新查询以获取完整的对象列表。
-        final_statement = select(Tag).where(Tag.id.in_(tag_ids))
+        final_statement = select(Tag).where(cast(ColumnElement, Tag.id).in_(tag_ids))
         final_result = await self.session.execute(final_statement)
-        return final_result.scalars().all()
+        return list(final_result.scalars().all())
 
     async def add_or_update_thread_with_tags(
         self, thread_data: dict, tags_data: dict[int, str]
@@ -67,7 +68,7 @@ class TagSystemRepository:
         statement = (
             select(Thread)
             .where(Thread.thread_id == thread_data["thread_id"])
-            .options(selectinload(Thread.tags))
+            .options(selectinload(Thread.tags)) # type: ignore
         )
         result = await self.session.execute(statement)
         db_thread = result.scalars().first()
@@ -79,14 +80,29 @@ class TagSystemRepository:
             # 更新帖子
             for key, value in thread_data.items():
                 setattr(db_thread, key, value)
-            db_thread.tags = tags
+
+            # 非破坏性地更新标签，以保留 ThreadTagLink 中的投票数据
+            current_tag_ids = {tag.id for tag in db_thread.tags}
+            new_tag_ids = set(tags_data.keys())
+
+            tags_to_add_ids = new_tag_ids - current_tag_ids
+            tags_to_remove_ids = current_tag_ids - new_tag_ids
+
+            # 移除不再需要的标签关联
+            if tags_to_remove_ids:
+                db_thread.tags = [t for t in db_thread.tags if t.id not in tags_to_remove_ids]
+
+            # 添加新的标签关联
+            if tags_to_add_ids:
+                tags_to_add = [t for t in tags if t.id in tags_to_add_ids]
+                db_thread.tags.extend(tags_to_add)
+
             self.session.add(db_thread)
         else:
             # 创建新帖子
             new_thread = Thread(**thread_data)
             new_thread.tags = tags
             self.session.add(new_thread)
-
         await self.session.commit()
 
     async def get_indexed_channel_ids(self) -> Sequence[int]:
@@ -97,7 +113,7 @@ class TagSystemRepository:
 
     async def delete_thread_index(self, thread_id: int):
         """删除帖子的所有相关索引数据"""
-        statement = select(Thread).where(Thread.thread_id == thread_id)
+        statement = select(Thread).where(Thread.thread_id == thread_id) # type: ignore
         result = await self.session.execute(statement)
         db_thread = result.scalars().first()
         if db_thread:
@@ -110,7 +126,7 @@ class TagSystemRepository:
         """仅更新帖子的活跃时间和回复数"""
         stmt = (
             update(Thread)
-            .where(Thread.thread_id == thread_id)
+            .where(Thread.thread_id == thread_id) # type: ignore
             .values(
                 last_active_at=last_active_at,
                 reply_count=reply_count,
@@ -125,7 +141,7 @@ class TagSystemRepository:
         """仅更新帖子的最后活跃时间"""
         stmt = (
             update(Thread)
-            .where(Thread.thread_id == thread_id)
+            .where(Thread.thread_id == thread_id) # type: ignore
             .values(last_active_at=last_active_at)
         )
         await self.session.execute(stmt)
@@ -135,7 +151,7 @@ class TagSystemRepository:
         """仅更新帖子的反应数"""
         stmt = (
             update(Thread)
-            .where(Thread.thread_id == thread_id)
+            .where(Thread.thread_id == thread_id) # type: ignore
             .values(reaction_count=reaction_count)
         )
         await self.session.execute(stmt)
@@ -145,8 +161,8 @@ class TagSystemRepository:
         """获取指定作者发布过的所有帖子的唯一标签列表"""
         statement = (
             select(Tag)
-            .join(Thread, Tag.threads)
-            .where(Thread.author_id == author_id)
+            .join(Thread, Tag.threads) # type: ignore
+            .where(Thread.author_id == author_id) # type: ignore
             .distinct()
         )
         result = await self.session.execute(statement)
@@ -156,8 +172,8 @@ class TagSystemRepository:
         """获取指定频道列表内的所有唯一标签"""
         statement = (
             select(Tag)
-            .join(Thread, Tag.threads)
-            .where(Thread.channel_id.in_(channel_ids))
+            .join(Thread, Tag.threads) # type: ignore
+            .where(cast(ColumnElement, Thread.channel_id).in_(channel_ids))
             .distinct()
         )
         result = await self.session.execute(statement)
@@ -171,7 +187,7 @@ class TagSystemRepository:
 
     async def update_tag_name(self, tag_id: int, new_name: str):
         """更新指定ID的标签的名称。"""
-        statement = select(Tag).where(Tag.id == tag_id)
+        statement = select(Tag).where(Tag.id == tag_id) # type: ignore
         result = await self.session.execute(statement)
         tag = result.scalars().first()
         if tag:
@@ -188,97 +204,97 @@ class TagSystemRepository:
         tag_map: dict[int, str],
     ) -> dict:
         """
-        记录一次标签投票，并更新帖子的投票摘要。
+        记录一次标签投票，并更新 ThreadTagLink 表中的 upvotes 和 downvotes。
         """
-        # 查找帖子对象
-        thread_statement = select(Thread).where(Thread.thread_id == thread_id)
+        # 查找帖子对象以获取其内部ID
+        thread_statement = select(Thread).where(Thread.thread_id == thread_id) # type: ignore
         thread_result = await self.session.execute(thread_statement)
         db_thread = thread_result.scalars().first()
-        if not db_thread:
+        if not db_thread or not db_thread.id:
             logger.warning(f"record_tag_vote: 未找到 thread_id={thread_id} 的帖子。")
             return {}
 
-        # 初始化摘要字典
-        if db_thread.tag_votes_summary is None:
-            db_thread.tag_votes_summary = {}
-
-        summary = db_thread.tag_votes_summary.copy()
-        tag_id_str = str(tag_id)
+        # 查找对应的 ThreadTagLink 记录
+        link_stmt = select(ThreadTagLink).where(
+            ThreadTagLink.thread_id == db_thread.id, ThreadTagLink.tag_id == tag_id # type: ignore
+        )
+        link_result = await self.session.execute(link_stmt)
+        link_record = link_result.scalars().first()
+        if not link_record:
+            logger.warning(f"record_tag_vote: 帖子 {thread_id} 并未应用标签 {tag_id}。")
+            return await self.get_tag_vote_stats(thread_id, tag_map)
 
         # 查找现有投票
-        statement = select(TagVote).where(
-            TagVote.user_id == user_id,
-            TagVote.thread_id == db_thread.id,
-            TagVote.tag_id == tag_id,
+        vote_stmt = select(TagVote).where(
+            TagVote.user_id == user_id, # type: ignore
+            TagVote.thread_id == db_thread.id, # type: ignore
+            TagVote.tag_id == tag_id, # type: ignore
         )
-        result = await self.session.execute(statement)
-        existing_vote = result.scalars().first()
-
-        # 在内存中更新摘要
-        if tag_id_str not in summary:
-            summary[tag_id_str] = {"upvotes": 0, "downvotes": 0, "score": 0}
+        vote_result = await self.session.execute(vote_stmt)
+        existing_vote = vote_result.scalars().first()
 
         if existing_vote:
             previous_vote = existing_vote.vote
-            if previous_vote == vote_value:
-                summary[tag_id_str][
-                    "upvotes" if previous_vote == 1 else "downvotes"
-                ] -= 1
-                summary[tag_id_str]["score"] -= previous_vote
+            if previous_vote == vote_value:  # 取消投票
+                if previous_vote == 1:
+                    link_record.upvotes -= 1
+                else:
+                    link_record.downvotes -= 1
                 await self.session.delete(existing_vote)
-            else:
-                summary[tag_id_str][
-                    "upvotes" if previous_vote == 1 else "downvotes"
-                ] -= 1
-                summary[tag_id_str]["upvotes" if vote_value == 1 else "downvotes"] += 1
-                summary[tag_id_str]["score"] -= previous_vote
-                summary[tag_id_str]["score"] += vote_value
+            else:  # 更改投票
+                if previous_vote == 1:
+                    link_record.upvotes -= 1
+                else:
+                    link_record.downvotes -= 1
+
+                if vote_value == 1:
+                    link_record.upvotes += 1
+                else:
+                    link_record.downvotes += 1
                 existing_vote.vote = vote_value
                 self.session.add(existing_vote)
-        else:
-            summary[tag_id_str]["upvotes" if vote_value == 1 else "downvotes"] += 1
-            summary[tag_id_str]["score"] += vote_value
+        else:  # 新投票
+            if vote_value == 1:
+                link_record.upvotes += 1
+            else:
+                link_record.downvotes += 1
             new_vote = TagVote(
                 user_id=user_id, thread_id=db_thread.id, tag_id=tag_id, vote=vote_value
             )
             self.session.add(new_vote)
 
-        db_thread.tag_votes_summary = summary
-        attributes.flag_modified(db_thread, "tag_votes_summary")
-        self.session.add(db_thread)
-
+        self.session.add(link_record)
         await self.session.commit()
 
-        # 使用传入的 tag_map 来构建完整的统计数据
-        stats = {}
-        for sid_str, data in summary.items():
-            sid_int = int(sid_str)
-            tag_name = tag_map.get(sid_int)
-            if tag_name:
-                stats[tag_name] = data
-
-        return stats
+        # 返回该帖子的最新完整统计数据
+        return await self.get_tag_vote_stats(thread_id, tag_map)
 
     async def get_tag_vote_stats(self, thread_id: int, tag_map: dict[int, str]) -> dict:
         """
         获取一个帖子的标签投票统计。
-        直接从帖子的摘要字段读取
+        从与该帖子关联的 ThreadTagLink 记录中聚合数据。
         """
-        statement = select(Thread).where(Thread.thread_id == thread_id)
-        result = await self.session.execute(statement)
+        thread_stmt = select(Thread).where(Thread.thread_id == thread_id) # type: ignore
+        result = await self.session.execute(thread_stmt)
         db_thread = result.scalars().first()
 
-        if not db_thread or not db_thread.tag_votes_summary:
+        if not db_thread:
             return {}
 
-        # 使用传入的、可靠的 tag_map 将 tag_id 键转换为 tag_name 键
-        summary = db_thread.tag_votes_summary
+        # 查询所有与该帖子相关的 ThreadTagLink 记录
+        link_stmt = select(ThreadTagLink).where(ThreadTagLink.thread_id == db_thread.id) # type: ignore
+        link_results = await self.session.execute(link_stmt)
+        link_records = link_results.scalars().all()
 
         stats = {}
-        for tag_id, data in summary.items():
-            tag_name = tag_map.get(int(tag_id))
+        for record in link_records:
+            tag_name = tag_map.get(record.tag_id)
             if tag_name:
-                stats[tag_name] = data
+                stats[tag_name] = {
+                    "upvotes": record.upvotes,
+                    "downvotes": record.downvotes,
+                    "score": record.upvotes - record.downvotes,
+                }
 
         return stats
 
@@ -286,7 +302,7 @@ class TagSystemRepository:
         """将帖子的回复数加一，并更新活跃时间。"""
         stmt = (
             update(Thread)
-            .where(Thread.thread_id == thread_id)
+            .where(Thread.thread_id == thread_id) # type: ignore
             .values(
                 reply_count=Thread.reply_count + 1,
                 last_active_at=last_active_at,
@@ -301,8 +317,8 @@ class TagSystemRepository:
         """将帖子的回复数减一，前提是回复数大于0。"""
         stmt = (
             update(Thread)
-            .where(Thread.thread_id == thread_id)
-            .where(Thread.reply_count > 0)
+            .where(Thread.thread_id == thread_id) # type: ignore
+            .where(Thread.reply_count > 0) # type: ignore
             .values(reply_count=Thread.reply_count - 1)
             .execution_options(synchronize_session=False)
         )

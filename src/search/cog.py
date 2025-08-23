@@ -141,14 +141,14 @@ class Search(commands.Cog):
                 )
 
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     f"已将每页结果数量设置为 {num}", ephemeral=True
                 ),
                 priority=1,
             )
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(f"❌ 设置失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(f"❌ 设置失败: {e}", ephemeral=True),
                 priority=1,
             )
 
@@ -228,7 +228,7 @@ class Search(commands.Cog):
         assert isinstance(interaction.user, discord.Member)
         if not interaction.user.guild_permissions.administrator:
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     "此命令需要管理员权限。", ephemeral=True
                 ),
                 priority=1,
@@ -360,17 +360,17 @@ class Search(commands.Cog):
             )
 
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(embed=embed, ephemeral=True), priority=1
+                coro_factory=lambda: interaction.followup.send(embed=embed, ephemeral=True), priority=1
             )
 
         except ValueError as e:
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(f"❌ 配置错误：{e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(f"❌ 配置错误：{e}", ephemeral=True),
                 priority=1,
             )
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(f"❌ 配置失败：{e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(f"❌ 配置失败：{e}", ephemeral=True),
                 priority=1,
             )
 
@@ -414,7 +414,7 @@ class Search(commands.Cog):
         embed.set_footer(text="管理员可使用 /排序算法配置 命令调整参数")
 
         await self.bot.api_scheduler.submit(
-            coro=interaction.followup.send(embed=embed, ephemeral=True), priority=1
+            coro_factory=lambda: interaction.followup.send(embed=embed, ephemeral=True), priority=1
         )
 
     @app_commands.command(
@@ -430,7 +430,7 @@ class Search(commands.Cog):
                 or not interaction.channel.parent
             ):
                 await self.bot.api_scheduler.submit(
-                    coro=interaction.followup.send(
+                    coro_factory=lambda: interaction.followup.send(
                         "请在帖子内使用此命令。", ephemeral=True
                     ),
                     priority=1,
@@ -452,21 +452,23 @@ class Search(commands.Cog):
             )
 
             # 发送带有持久化视图的消息
+            channel = interaction.channel
+            if isinstance(channel, discord.Thread):
+                await self.bot.api_scheduler.submit(
+                    coro_factory=lambda: channel.send(
+                        embed=embed, view=self.persistent_channel_search_view
+                    ),
+                    priority=1,
+                )
             await self.bot.api_scheduler.submit(
-                coro=interaction.channel.send(
-                    embed=embed, view=self.persistent_channel_search_view
-                ),
-                priority=1,
-            )
-            await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     "✅ 已成功创建频道内搜索按钮。", ephemeral=True
                 ),
                 priority=1,
             )
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(f"❌ 创建失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(f"❌ 创建失败: {e}", ephemeral=True),
                 priority=1,
             )
 
@@ -488,19 +490,20 @@ class Search(commands.Cog):
                 inline=False,
             )
             view = GlobalSearchView(self)
-            if isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
+            channel = interaction.channel
+            if isinstance(channel, (discord.TextChannel, discord.Thread)):
                 await self.bot.api_scheduler.submit(
-                    coro=interaction.channel.send(embed=embed, view=view), priority=1
+                    coro_factory=lambda: channel.send(embed=embed, view=view), priority=1
                 )
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     "✅ 已创建全局搜索面板。", ephemeral=True
                 ),
                 priority=1,
             )
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro=interaction.followup.send(f"❌ 创建失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(f"❌ 创建失败: {e}", ephemeral=True),
                 priority=1,
             )
 

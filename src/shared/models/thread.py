@@ -26,8 +26,5 @@ class Thread(SQLModel, table=True):
     first_message_excerpt: Optional[str] = Field(default=None)
     thumbnail_url: Optional[str] = Field(default=None)
 
-    # 用于存标签投票统计的 JSON 字段，提高查询性能
-    tag_votes_summary: Any = Field(sa_column=Column(JSON), default={})
-
     tags: List["Tag"] = Relationship(back_populates="threads", link_model=ThreadTagLink)
     votes: List["TagVote"] = Relationship(back_populates="thread")

@@ -192,7 +192,7 @@ class PreferencesView(discord.ui.View):
         self.update_components()
         embed = self.build_embed()
         await self.handler.bot.api_scheduler.submit(
-            coro=self.original_interaction.followup.send(
+            coro_factory=lambda: self.original_interaction.followup.send(
                 embed=embed, view=self, ephemeral=True
             ),
             priority=1,
@@ -206,7 +206,7 @@ class PreferencesView(discord.ui.View):
         self.update_components()
         embed = self.build_embed()
         await self.handler.bot.api_scheduler.submit(
-            coro=interaction.edit_original_response(embed=embed, view=self),
+            coro_factory=lambda: interaction.edit_original_response(embed=embed, view=self),
             priority=1,
         )
 
@@ -237,13 +237,13 @@ class PreferencesView(discord.ui.View):
 
             modal = TimeRangeModal(self.handler, self, current_after, current_before)
             await self.handler.bot.api_scheduler.submit(
-                coro=interaction.response.send_modal(modal), priority=1
+                coro_factory=lambda: interaction.response.send_modal(modal), priority=1
             )
             return  # Modal 流程自己处理响应，此处返回
 
         elif custom_id == "prefs_preview":
             await self.handler.bot.api_scheduler.submit(
-                coro=safe_defer(interaction), priority=1
+                coro_factory=lambda: safe_defer(interaction), priority=1
             )
             await self.handler.toggle_preview_mode(interaction.user.id)
             await self.refresh(interaction)
@@ -251,7 +251,7 @@ class PreferencesView(discord.ui.View):
 
         elif custom_id == "prefs_clear":
             await self.handler.bot.api_scheduler.submit(
-                coro=safe_defer(interaction), priority=1
+                coro_factory=lambda: safe_defer(interaction), priority=1
             )
             await self.handler.clear_user_preferences(interaction.user.id)
             await self.refresh(interaction)

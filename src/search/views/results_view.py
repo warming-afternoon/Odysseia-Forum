@@ -95,12 +95,13 @@ class NewSearchResultsView(discord.ui.View):
 
     async def on_timeout(self):
         for item in self.children:
-            item.disabled = True
+            if isinstance(item, (discord.ui.Button, discord.ui.Select)):
+                item.disabled = True
 
         # 确保超时后禁用按钮的交互也能被调度
         try:
             await self.cog.bot.api_scheduler.submit(
-                coro=self.interaction.edit_original_response(view=self), priority=1
+                coro_factory=lambda: self.interaction.edit_original_response(view=self), priority=1
             )
         except discord.errors.NotFound:
             # 如果原始消息被删除，忽略错误

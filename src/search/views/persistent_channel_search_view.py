@@ -32,9 +32,18 @@ class PersistentChannelSearchView(discord.ui.View):
         """
         await safe_defer(interaction, ephemeral=True)
 
+        if not interaction.message or not interaction.guild:
+            await self.cog.bot.api_scheduler.submit(
+                coro_factory=lambda: interaction.followup.send(
+                    "❌ 搜索交互信息不完整，无法继续。", ephemeral=True
+                ),
+                priority=1,
+            )
+            return
+
         if not interaction.message.embeds:
             await self.cog.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     "❌ 搜索按钮配置错误：找不到关联的 embed 信息。", ephemeral=True
                 ),
                 priority=1,
@@ -46,7 +55,7 @@ class PersistentChannelSearchView(discord.ui.View):
 
         if not match:
             await self.cog.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     "❌ 搜索按钮配置错误：无法从消息中解析频道ID。", ephemeral=True
                 ),
                 priority=1,
@@ -59,7 +68,7 @@ class PersistentChannelSearchView(discord.ui.View):
         channel = interaction.guild.get_channel(channel_id)
         if not channel or not isinstance(channel, discord.ForumChannel):
             await self.cog.bot.api_scheduler.submit(
-                coro=interaction.followup.send(
+                coro_factory=lambda: interaction.followup.send(
                     "❌ 目标频道不存在或已不是论坛频道。", ephemeral=True
                 ),
                 priority=1,

@@ -1,24 +1,27 @@
 import discord
 import asyncio
 import logging
-
+from typing import Optional
+from datetime import datetime, timedelta, timezone
 from shared.safe_defer import safe_defer
 
 
 class IndexerDashboard(discord.ui.View):
     """索引器仪表板视图，用于控制和显示索引过程。"""
-
     def __init__(self, cog, channel: discord.ForumChannel, config: dict):
         super().__init__(timeout=None)
         self.cog = cog
         self.channel = channel
-        self.interaction: discord.Interaction = None
+        self.interaction: Optional[discord.Interaction] = None
         self.config = config
+        
+        # 新增属性
+        self.start_time: Optional[datetime] = None
+        # 将令牌有效期设置为14.5分钟（870秒），留出一些缓冲时间
+        self.token_expiry_duration = timedelta(seconds=870)
 
         # 从配置初始化消费者并发数和信号量
-        self.consumer_concurrency = self.config.get("performance", {}).get(
-            "indexer_concurrency", 5
-        )
+        self.consumer_concurrency = self.config.get("performance", {}).get( "indexer_concurrency", 5 )
         self.consumer_semaphore = asyncio.Semaphore(self.consumer_concurrency)
 
         self.queue = asyncio.Queue()
@@ -37,14 +40,24 @@ class IndexerDashboard(discord.ui.View):
         self._update_lock = asyncio.Lock()
         self.ui_updater_task = None
 
+    # 新增一个属性来判断令牌是否已过期
+    @property
+    def is_token_expired(self) -> bool:
+        if not self.start_time:
+            return True
+        return datetime.now(timezone.utc) > self.start_time + self.token_expiry_duration
+
     async def start(self, interaction: discord.Interaction):
         """启动仪表板并发送初始消息。"""
         logging.info(f"[{self.channel.id}] Dashboard.start() called.")
         self.interaction = interaction
+        self.start_time = interaction.created_at # 记录交互创建时间
+
         embed = self.create_embed()
         # build_index 中已经 defer，这里使用 edit_original_response 更新占位符
         await self.cog.bot.api_scheduler.submit(
-            coro=interaction.edit_original_response(embed=embed, view=self), priority=1
+            coro_factory=lambda: interaction.edit_original_response(embed=embed, view=self),
+            priority=1
         )
         self.cog.bot.loop.create_task(self.cog.run_indexer(self))
         self.ui_updater_task = self.cog.bot.loop.create_task(self.updater_loop())
@@ -112,14 +125,23 @@ class IndexerDashboard(discord.ui.View):
         """独立的UI更新循环"""
         logging.info(f"[{self.channel.id}] UI updater_loop started.")
         while not self.get_progress()["finished"] and not self.is_cancelled():
+            # 在每次更新前检查令牌是否已过期
+            if self.is_token_expired:
+                logging.warning(
+                    f"[{self.channel.id}] Interaction token is likely expired. "
+                    "Stopping periodic UI updates to avoid errors."
+                )
+                break # 退出循环，停止更新UI
+
             logging.debug(f"[{self.channel.id}] UI updater_loop tick.")
             await self.update_embed()
-            await asyncio.sleep(2)  # 每2秒更新一次
+            await asyncio.sleep(2) # 每2秒更新一次
 
         logging.info(
-            f"[{self.channel.id}] UI updater_loop finished. Performing final update."
+            f"[{self.channel.id}] UI updater_loop finished or was stopped. "
+            "Waiting for final update signal from indexer."
         )
-        await self.update_embed()
+        # 循环结束后，不再调用 update_embed，等待 run_indexer 发出最终的更新指令
 
     async def update_embed(self):
         """更新嵌入消息"""
@@ -137,7 +159,7 @@ class IndexerDashboard(discord.ui.View):
             # 使用中等优先级更新进度，以免阻塞高优任务
             # logging.info(f"正在为频道 {self.channel.id} 更新UI...")
             await self.cog.bot.api_scheduler.submit(
-                coro=self.interaction.edit_original_response(embed=embed, view=self),
+                coro_factory=lambda: self.interaction.edit_original_response(embed=embed, view=self),
                 priority=5,
             )
 

@@ -89,7 +89,7 @@ class TagPreferencesView(discord.ui.View):
         """发送包含视图的初始消息。"""
         embed = self.build_embed()
         await self.handler.bot.api_scheduler.submit(
-            coro=self.interaction.followup.send(embed=embed, view=self, ephemeral=True),
+            coro_factory=lambda: self.interaction.followup.send(embed=embed, view=self, ephemeral=True),
             priority=1,
         )
 
@@ -172,7 +172,7 @@ class TagPreferencesView(discord.ui.View):
             self.update_components()
             embed = self.build_embed()
             await self.handler.bot.api_scheduler.submit(
-                coro=interaction.response.edit_message(embed=embed, view=self),
+                coro_factory=lambda: interaction.response.edit_message(embed=embed, view=self),
                 priority=1,
             )
 
@@ -190,14 +190,14 @@ class TagPreferencesView(discord.ui.View):
         self.update_components()
         embed = self.build_embed()
         await self.handler.bot.api_scheduler.submit(
-            coro=interaction.response.edit_message(embed=embed, view=self),
+            coro_factory=lambda: interaction.response.edit_message(embed=embed, view=self),
             priority=1,
         )
 
     async def save_preferences(self, interaction: discord.Interaction):
         """保存偏好，刷新父视图，然后关闭此视图。"""
         await self.handler.bot.api_scheduler.submit(
-            coro=safe_defer(interaction), priority=1
+            coro_factory=lambda: safe_defer(interaction), priority=1
         )
 
         # 1. 保存偏好到数据库
@@ -207,7 +207,7 @@ class TagPreferencesView(discord.ui.View):
 
         # 2. 删除当前的标签偏好视图消息
         await self.handler.bot.api_scheduler.submit(
-            coro=interaction.delete_original_response(),
+            coro_factory=lambda: interaction.delete_original_response(),
             priority=2,
         )
         
@@ -218,12 +218,12 @@ class TagPreferencesView(discord.ui.View):
     async def cancel_view(self, interaction: discord.Interaction):
         """取消操作，删除此视图"""
         await self.handler.bot.api_scheduler.submit(
-            coro=safe_defer(interaction), priority=1
+            coro_factory=lambda: safe_defer(interaction), priority=1
         )
 
         # 删除当前视图
         await self.handler.bot.api_scheduler.submit(
-            coro=interaction.delete_original_response(),
+            coro_factory=lambda: interaction.delete_original_response(),
             priority=1,
         )
         

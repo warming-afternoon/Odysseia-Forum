@@ -34,22 +34,22 @@ class GlobalSearchView(discord.ui.View):
             indexed_channel_ids = await repo.get_indexed_channel_ids()
         if not indexed_channel_ids:
             await self.cog.bot.api_scheduler.submit(
-                coro=interaction.followup.send("没有已索引的频道。", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send("没有已索引的频道。", ephemeral=True),
                 priority=1,
             )
             return
 
         channels = [
-            self.cog.bot.get_channel(ch_id)
+            ch
             for ch_id in indexed_channel_ids
-            if isinstance(self.cog.bot.get_channel(ch_id), discord.ForumChannel)
+            if (ch := self.cog.bot.get_channel(ch_id)) and isinstance(ch, discord.ForumChannel)
         ]
 
         view = ChannelSelectionView(
             self.cog, interaction, channels, indexed_channel_ids
         )
         await self.cog.bot.api_scheduler.submit(
-            coro=interaction.followup.send(
+            coro_factory=lambda: interaction.followup.send(
                 "请选择要搜索的频道：", view=view, ephemeral=True
             ),
             priority=1,

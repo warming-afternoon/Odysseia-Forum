@@ -9,3 +9,5 @@ class ThreadTagLink(SQLModel, table=True):
         default=None, foreign_key="thread.id", primary_key=True
     )
     tag_id: int = Field(foreign_key="tag.id", primary_key=True)
+    upvotes: int = Field(default=0)
+    downvotes: int = Field(default=0)

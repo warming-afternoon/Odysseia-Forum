@@ -90,13 +90,13 @@ class TagVoteView(discord.ui.View):
             error_coro = interaction.followup.send(
                 "处理您的评价时发生错误，请稍后再试。", ephemeral=True
             )
-            await self.api_scheduler.submit(coro=error_coro, priority=1)
+            await self.api_scheduler.submit(coro_factory=lambda: error_coro, priority=1)
 
     async def update_view(self, interaction: discord.Interaction, stats: dict):
         """视图更新入口，接收统计数据作为参数"""
         embed = self.create_embed(stats)
         edit_coro = interaction.edit_original_response(embed=embed, view=self)
-        await self.api_scheduler.submit(coro=edit_coro, priority=1)
+        await self.api_scheduler.submit(coro_factory=lambda: edit_coro, priority=1)
 
     def create_embed(self, stats: dict) -> discord.Embed:
         """
