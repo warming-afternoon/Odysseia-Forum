@@ -1,6 +1,5 @@
-from typing import List, Optional, TYPE_CHECKING, Any
+from typing import List, Optional, TYPE_CHECKING
 from sqlmodel import Field, SQLModel, Relationship
-from sqlalchemy import JSON, Column
 from datetime import datetime
 
 from .thread_tag_link import ThreadTagLink

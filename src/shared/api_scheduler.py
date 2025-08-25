@@ -13,9 +13,10 @@ class APIRequest(NamedTuple):
     定义一个API请求的结构...
     - coro_factory: 一个返回需要被执行的协程对象的可调用对象。
     """
+
     priority: int
     count: int
-    coro_factory: Callable[[], Coroutine[Any, Any, Any]] # 将 coro 改为 coro_factory
+    coro_factory: Callable[[], Coroutine[Any, Any, Any]]  # 将 coro 改为 coro_factory
     future: asyncio.Future
 
 
@@ -73,7 +74,7 @@ class APIScheduler:
     async def _worker(self, request: APIRequest):
         """处理单个API请求的完整生命周期"""
         max_retries = 3
-        retry_delay = 1.0 # 初始延迟时间 (秒)
+        retry_delay = 1.0  # 初始延迟时间 (秒)
         try:
             for attempt in range(max_retries):
                 try:
@@ -93,19 +94,25 @@ class APIScheduler:
                         await asyncio.sleep(retry_delay)
                         retry_delay *= 2
                     else:
-                        logger.error(f"协程 (优先级: {request.priority}) 在 {max_retries} 次尝试后仍然失败。")
+                        logger.error(
+                            f"协程 (优先级: {request.priority}) 在 {max_retries} 次尝试后仍然失败。"
+                        )
                         if not request.future.done():
                             request.future.set_exception(e)
                         return
                 except Exception as e:
-                    logger.exception(f"执行协程 (优先级: {request.priority}) 时发生错误: {e}")
+                    logger.exception(
+                        f"执行协程 (优先级: {request.priority}) 时发生错误: {e}"
+                    )
                     if not request.future.done():
                         request.future.set_exception(e)
                     return
         finally:
             self._semaphore.release()
 
-    async def submit(self, *, coro_factory: Callable[[], Coroutine], priority: int) -> Any:
+    async def submit(
+        self, *, coro_factory: Callable[[], Coroutine], priority: int
+    ) -> Any:
         """
         向调度器提交一个API请求。
         :param coro_factory: 一个返回API调用协程的函数。
@@ -116,7 +123,9 @@ class APIScheduler:
             raise RuntimeError("API 调度器没有在运行")
         future = asyncio.get_running_loop().create_future()
         count = next(self._counter)
-        request = APIRequest(priority=priority, count=count, coro_factory=coro_factory, future=future)
+        request = APIRequest(
+            priority=priority, count=count, coro_factory=coro_factory, future=future
+        )
         await self._queue.put(request)
         return await future
 

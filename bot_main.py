@@ -3,11 +3,11 @@ import sys
 if sys.platform != "win32":
     try:
         import uvloop
+
         uvloop.install()
         print("uvloop 已启用。")
     except ImportError:
         print("未找到 uvloop，将使用默认的 asyncio 事件循环。")
-
 
 
 import json

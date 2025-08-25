@@ -20,10 +20,13 @@ if TYPE_CHECKING:
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
+
 class SearchPreferencesHandler:
     """处理用户搜索偏好设置"""
 
-    def __init__(self, bot, session_factory: async_sessionmaker, tag_service: TagService):
+    def __init__(
+        self, bot, session_factory: async_sessionmaker, tag_service: TagService
+    ):
         self.bot = bot
         self.session_factory = session_factory
         self.tag_service = tag_service
@@ -90,11 +93,14 @@ class SearchPreferencesHandler:
                 )
 
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(message, ephemeral=True), priority=1
+                coro_factory=lambda: interaction.followup.send(message, ephemeral=True),
+                priority=1,
             )
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(f"❌ 操作失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 操作失败: {e}", ephemeral=True
+                ),
                 priority=1,
             )
 
@@ -152,7 +158,9 @@ class SearchPreferencesHandler:
                     prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
 
             # 3. 启动视图
-            view = TagPreferencesView(self, interaction, parent_view, prefs_dto, all_tags)
+            view = TagPreferencesView(
+                self, interaction, parent_view, prefs_dto, all_tags
+            )
             await view.start()
 
         except Exception as e:

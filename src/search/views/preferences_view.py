@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
+
 class PreferencesView(discord.ui.View):
     """统一的搜索偏好设置面板"""
 
@@ -178,7 +179,6 @@ class PreferencesView(discord.ui.View):
                 )
             )
 
-        
         self.add_item(
             discord.ui.Button(
                 label="🗑️ 清空所有设置",
@@ -213,7 +213,9 @@ class PreferencesView(discord.ui.View):
         self.update_components()
         embed = self.build_embed()
         await self.handler.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.edit_original_response(embed=embed, view=self),
+            coro_factory=lambda: interaction.edit_original_response(
+                embed=embed, view=self
+            ),
             priority=1,
         )
 

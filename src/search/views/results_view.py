@@ -101,7 +101,8 @@ class NewSearchResultsView(discord.ui.View):
         # 确保超时后禁用按钮的交互也能被调度
         try:
             await self.cog.bot.api_scheduler.submit(
-                coro_factory=lambda: self.interaction.edit_original_response(view=self), priority=1
+                coro_factory=lambda: self.interaction.edit_original_response(view=self),
+                priority=1,
             )
         except discord.errors.NotFound:
             # 如果原始消息被删除，忽略错误

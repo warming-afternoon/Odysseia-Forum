@@ -89,7 +89,9 @@ class TagPreferencesView(discord.ui.View):
         """发送包含视图的初始消息。"""
         embed = self.build_embed()
         await self.handler.bot.api_scheduler.submit(
-            coro_factory=lambda: self.interaction.followup.send(embed=embed, view=self, ephemeral=True),
+            coro_factory=lambda: self.interaction.followup.send(
+                embed=embed, view=self, ephemeral=True
+            ),
             priority=1,
         )
 
@@ -172,7 +174,9 @@ class TagPreferencesView(discord.ui.View):
             self.update_components()
             embed = self.build_embed()
             await self.handler.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.response.edit_message(embed=embed, view=self),
+                coro_factory=lambda: interaction.response.edit_message(
+                    embed=embed, view=self
+                ),
                 priority=1,
             )
 
@@ -190,7 +194,9 @@ class TagPreferencesView(discord.ui.View):
         self.update_components()
         embed = self.build_embed()
         await self.handler.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.response.edit_message(embed=embed, view=self),
+            coro_factory=lambda: interaction.response.edit_message(
+                embed=embed, view=self
+            ),
             priority=1,
         )
 
@@ -210,10 +216,9 @@ class TagPreferencesView(discord.ui.View):
             coro_factory=lambda: interaction.delete_original_response(),
             priority=2,
         )
-        
+
         # 3. 刷新父视图 (PreferencesView)，使用创建本视图的交互
         await self.parent_view.refresh(self.interaction)
-
 
     async def cancel_view(self, interaction: discord.Interaction):
         """取消操作，删除此视图"""
@@ -226,7 +231,6 @@ class TagPreferencesView(discord.ui.View):
             coro_factory=lambda: interaction.delete_original_response(),
             priority=1,
         )
-        
+
         # # 刷新父视图
         # await self.parent_view.refresh(self.interaction)
-

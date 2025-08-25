@@ -4,7 +4,6 @@ from discord.ext import commands
 import asyncio
 import logging
 from typing import TYPE_CHECKING, cast
-from discord import TextChannel
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from shared.safe_defer import safe_defer
@@ -18,6 +17,7 @@ if TYPE_CHECKING:
 
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
+
 
 class Indexer(commands.Cog):
     """构建索引相关命令"""
@@ -119,14 +119,16 @@ class Indexer(commands.Cog):
             # 标记完成并更新UI
             if not dashboard.progress.get("error"):
                 dashboard.progress["finished"] = True
-            
+
             # 检查令牌是否已过期来决定如何发送最终状态
             if dashboard.is_token_expired:
                 # 令牌已过期，发送一条新消息
                 # logging.info(f"[{dashboard.channel.id}] Token expired. Sending a new message for final status.")
                 final_embed = dashboard.create_embed()
                 if not dashboard.interaction:
-                    logging.error(f"[{dashboard.channel.id}] Dashboard interaction is None, cannot send final message.")
+                    logging.error(
+                        f"[{dashboard.channel.id}] Dashboard interaction is None, cannot send final message."
+                    )
                     return
 
                 interaction = dashboard.interaction
@@ -135,9 +137,9 @@ class Indexer(commands.Cog):
                     coro_factory=lambda: interaction.followup.send(
                         content=f"{user_mention}，索引任务已完成。",
                         embed=final_embed,
-                        ephemeral=True
+                        ephemeral=True,
                     ),
-                    priority=2 # 中等优先级
+                    priority=2,  # 中等优先级
                 )
             else:
                 # 令牌仍然有效，安全地编辑原始消息

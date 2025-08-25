@@ -20,5 +20,11 @@ dependencies = [
     "uvloop; platform_system != 'Windows'"
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio"
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -4,7 +4,7 @@ from discord.ext import commands
 import logging
 from typing import TYPE_CHECKING, Optional, Sequence
 
-from ranking_config import RankingConfig
+from shared.ranking_config import RankingConfig
 from shared.safe_defer import safe_defer
 from .dto.tag import TagDTO
 from .views.global_search_view import GlobalSearchView
@@ -146,9 +146,11 @@ class Search(commands.Cog):
                 ),
                 priority=1,
             )
-        except Exception as e:
+        except Exception:
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(f"❌ 设置失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 设置失败: {e}", ephemeral=True
+                ),
                 priority=1,
             )
 
@@ -238,7 +240,7 @@ class Search(commands.Cog):
         try:
             # 应用预设配置
             if preset:
-                from ranking_config import PresetConfigs
+                from shared.ranking_config import PresetConfigs
 
                 if preset.value == "balanced":
                     PresetConfigs.balanced()
@@ -360,17 +362,24 @@ class Search(commands.Cog):
             )
 
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(embed=embed, ephemeral=True), priority=1
-            )
-
-        except ValueError as e:
-            await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(f"❌ 配置错误：{e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    embed=embed, ephemeral=True
+                ),
                 priority=1,
             )
-        except Exception as e:
+
+        except ValueError:
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(f"❌ 配置失败：{e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 配置错误：{e}", ephemeral=True
+                ),
+                priority=1,
+            )
+        except Exception:
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 配置失败：{e}", ephemeral=True
+                ),
                 priority=1,
             )
 
@@ -414,7 +423,8 @@ class Search(commands.Cog):
         embed.set_footer(text="管理员可使用 /排序算法配置 命令调整参数")
 
         await self.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.followup.send(embed=embed, ephemeral=True), priority=1
+            coro_factory=lambda: interaction.followup.send(embed=embed, ephemeral=True),
+            priority=1,
         )
 
     @app_commands.command(
@@ -466,9 +476,11 @@ class Search(commands.Cog):
                 ),
                 priority=1,
             )
-        except Exception as e:
+        except Exception:
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(f"❌ 创建失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 创建失败: {e}", ephemeral=True
+                ),
                 priority=1,
             )
 
@@ -493,7 +505,8 @@ class Search(commands.Cog):
             channel = interaction.channel
             if isinstance(channel, (discord.TextChannel, discord.Thread)):
                 await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: channel.send(embed=embed, view=view), priority=1
+                    coro_factory=lambda: channel.send(embed=embed, view=view),
+                    priority=1,
                 )
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
@@ -501,9 +514,11 @@ class Search(commands.Cog):
                 ),
                 priority=1,
             )
-        except Exception as e:
+        except Exception:
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(f"❌ 创建失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 创建失败: {e}", ephemeral=True
+                ),
                 priority=1,
             )
 

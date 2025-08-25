@@ -1,18 +1,28 @@
 import os
-import asyncio
 from sqlalchemy import event
-from sqlmodel import SQLModel, text
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlmodel import Integer, SQLModel, Column, MetaData, Table, Text, text
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncEngine, AsyncSession
 
 from .fts5_tokenizer import register_jieba_tokenizer
 
-# 确保型被导入，以便 SQLModel.metadata.create_all 能够工作
+# 确保表被导入，以便 SQLModel.metadata.create_all 能够工作
 from shared.models import tag, tag_vote, thread, thread_tag_link, user_search_preferences
 
 DB_PATH = "data/database.db"
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
 async_engine = create_async_engine(DATABASE_URL, echo=False)
+
+metadata_obj = MetaData()
+thread_fts_table = Table(
+    "thread_fts",
+    metadata_obj,
+    Column("rowid", Integer, primary_key=True),
+    Column("title", Text),
+    Column("first_message_excerpt", Text),
+    Column("thread_fts", Text),
+)
+
 
 @event.listens_for(async_engine.sync_engine, "connect")
 def _setup_tokenizer_on_connect(dbapi_connection, connection_record):
@@ -24,10 +34,10 @@ def _setup_tokenizer_on_connect(dbapi_connection, connection_record):
         # dbapi_connection 是 SQLAlchemy 的异步包装器 (AsyncAdapt_...)
         # 访问其 ._connection 属性，获取原始的 aiosqlite.Connection
         aiosqlite_conn = dbapi_connection._connection
-        
+
         # 访问 aiosqlite.Connection 的内部 ._conn 属性，获取最终的标准 sqlite3.Connection
         underlying_sqlite3_conn = aiosqlite_conn._conn
-        
+
         register_jieba_tokenizer(underlying_sqlite3_conn)
 
     except Exception as e:
@@ -40,40 +50,121 @@ AsyncSessionFactory = async_sessionmaker(
     expire_on_commit=False,
 )
 
+
 async def init_db():
-    """
-    初始化数据库，创建所有在 SQLModel.metadata 中注册的表
-    """
     db_dir = os.path.dirname(DB_PATH)
     if not os.path.exists(db_dir):
         os.makedirs(db_dir)
     async with async_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
-        await conn.execute(text(
-            """
-            CREATE VIRTUAL TABLE IF NOT EXISTS thread_fts USING fts5(
-                title, first_message_excerpt, content='thread',
-                content_rowid='id', tokenize = 'jieba'
-            );
-            """
-        ))
-        await conn.execute(text(
-            """CREATE TRIGGER IF NOT EXISTS thread_ai AFTER INSERT ON thread BEGIN
-                INSERT INTO thread_fts(rowid, title, first_message_excerpt)
-                VALUES (new.id, new.title, new.first_message_excerpt);
-            END;"""))
-        await conn.execute(text(
-            """CREATE TRIGGER IF NOT EXISTS thread_ad AFTER DELETE ON thread BEGIN
-                INSERT INTO thread_fts(thread_fts, rowid, title, first_message_excerpt)
-                VALUES ('delete', old.id, old.title, old.first_message_excerpt);
-            END;"""))
-        await conn.execute(text(
-            """CREATE TRIGGER IF NOT EXISTS thread_au AFTER UPDATE ON thread BEGIN
-                INSERT INTO thread_fts(thread_fts, rowid, title, first_message_excerpt)
-                VALUES ('delete', old.id, old.title, old.first_message_excerpt);
-                INSERT INTO thread_fts(rowid, title, first_message_excerpt)
-                VALUES (new.id, new.title, new.first_message_excerpt);
-            END;"""))
+        await conn.execute(
+            text(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS thread_fts USING fts5(
+                    title,
+                    first_message_excerpt,
+                    content='thread',
+                    content_rowid='id',
+                    tokenize = 'jieba'
+                );
+                """
+            )
+        )
+        
+        await conn.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS thread_after_insert
+                AFTER INSERT ON thread BEGIN
+                    INSERT INTO thread_fts(rowid, title, first_message_excerpt)
+                    VALUES (new.id, new.title, new.first_message_excerpt);
+                END;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS thread_after_delete
+                AFTER DELETE ON thread BEGIN
+                    INSERT INTO thread_fts(thread_fts, rowid, title, first_message_excerpt)
+                    VALUES ('delete', old.id, old.title, old.first_message_excerpt);
+                END;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS thread_after_update
+                AFTER UPDATE ON thread BEGIN
+                    INSERT INTO thread_fts(thread_fts, rowid, title, first_message_excerpt)
+                    VALUES ('delete', old.id, old.title, old.first_message_excerpt);
+                    INSERT INTO thread_fts(rowid, title, first_message_excerpt)
+                    VALUES (new.id, new.title, new.first_message_excerpt);
+                END;
+                """
+            )
+        )
+
+
+async def init_db_for_test(engine_instance: AsyncEngine):
+    @event.listens_for(engine_instance.sync_engine, "connect")
+    def on_connect(dbapi_conn, connection_record):
+        register_jieba_tokenizer(dbapi_conn)
+
+    async with engine_instance.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+        
+        await conn.execute(
+            text(
+                """
+                CREATE VIRTUAL TABLE IF NOT EXISTS thread_fts USING fts5(
+                    title,
+                    first_message_excerpt,
+                    content='thread',
+                    content_rowid='id',
+                    tokenize = 'jieba'
+                );
+                """
+            )
+        )
+        
+        await conn.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS thread_after_insert
+                AFTER INSERT ON thread BEGIN
+                    INSERT INTO thread_fts(rowid, title, first_message_excerpt)
+                    VALUES (new.id, new.title, new.first_message_excerpt);
+                END;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS thread_after_delete
+                AFTER DELETE ON thread BEGIN
+                    INSERT INTO thread_fts(thread_fts, rowid, title, first_message_excerpt)
+                    VALUES ('delete', old.id, old.title, old.first_message_excerpt);
+                END;
+                """
+            )
+        )
+        await conn.execute(
+            text(
+                """
+                CREATE TRIGGER IF NOT EXISTS thread_after_update
+                AFTER UPDATE ON thread BEGIN
+                    INSERT INTO thread_fts(thread_fts, rowid, title, first_message_excerpt)
+                    VALUES ('delete', old.id, old.title, old.first_message_excerpt);
+                    INSERT INTO thread_fts(rowid, title, first_message_excerpt)
+                    VALUES (new.id, new.title, new.first_message_excerpt);
+                END;
+                """
+            )
+        )
 
 
 async def close_db():
