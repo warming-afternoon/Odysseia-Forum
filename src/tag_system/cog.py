@@ -155,7 +155,8 @@ class TagSystem(commands.Cog):
                 # 只有对首楼消息的反应才更新统计
                 if payload.message_id == channel.id:
                     await self.bot.api_scheduler.submit(
-                        coro_factory=lambda: self._update_reaction_count(channel), priority=5
+                        coro_factory=lambda: self._update_reaction_count(channel),
+                        priority=5,
                     )
         except Exception:
             logger.warning("处理反应添加事件失败", exc_info=True)
@@ -173,7 +174,8 @@ class TagSystem(commands.Cog):
                 # 只有对首楼消息的反应才更新统计
                 if payload.message_id == channel.id:
                     await self.bot.api_scheduler.submit(
-                        coro_factory=lambda: self._update_reaction_count(channel), priority=5
+                        coro_factory=lambda: self._update_reaction_count(channel),
+                        priority=5,
                     )
         except Exception:
             logger.warning("处理反应移除事件失败", exc_info=True)
@@ -259,7 +261,8 @@ class TagSystem(commands.Cog):
             thread_id = thread
             try:
                 fetched_channel = await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: self.bot.fetch_channel(thread_id), priority=priority
+                    coro_factory=lambda: self.bot.fetch_channel(thread_id),
+                    priority=priority,
                 )
                 if not isinstance(fetched_channel, discord.Thread):
                     logger.warning(
@@ -291,7 +294,8 @@ class TagSystem(commands.Cog):
                 # 确保 thread 是对象而不是 int
                 thread_id = thread.id if isinstance(thread, discord.Thread) else thread
                 thread = await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: self.bot.fetch_channel(thread_id), priority=priority
+                    coro_factory=lambda: self.bot.fetch_channel(thread_id),
+                    priority=priority,
                 )
             except discord.NotFound:
                 logger.warning(
@@ -315,7 +319,8 @@ class TagSystem(commands.Cog):
         # 创建原始的获取消息的协程，并用包装器包裹它
         fetch_coro = thread.fetch_message(thread.id)
         first_msg = await self.bot.api_scheduler.submit(
-            coro_factory=lambda: self._fetch_message_wrapper(fetch_coro), priority=priority
+            coro_factory=lambda: self._fetch_message_wrapper(fetch_coro),
+            priority=priority,
         )
 
         # 如果返回 None，说明帖子已被删除，记录日志并从数据库删除
@@ -407,11 +412,15 @@ class TagSystem(commands.Cog):
             embed = view.create_embed(initial_stats)
 
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(embed=embed, view=view, ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    embed=embed, view=view, ephemeral=True
+                ),
                 priority=1,
             )
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(f"❌ 命令执行失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 命令执行失败: {e}", ephemeral=True
+                ),
                 priority=1,
             )

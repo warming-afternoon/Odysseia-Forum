@@ -23,6 +23,9 @@ class UserSearchPreferences(SQLModel, table=True):
     # 关键词偏好
     include_keywords: str = Field(default="")
     exclude_keywords: str = Field(default="")
+    exclude_keyword_exemption_markers: List[str] = Field(
+        default=["禁", "🈲"], sa_column=Column(JSON)
+    )
 
     # 显示偏好
     preview_image_mode: str = Field(default="thumbnail")

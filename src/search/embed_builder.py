@@ -62,4 +62,3 @@ class ThreadEmbedBuilder:
                 embed.set_thumbnail(url=thread.thumbnail_url)
 
         return embed
-

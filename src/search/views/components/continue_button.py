@@ -31,6 +31,7 @@ class ContinueButton(discord.ui.Button):
         view.author_ids = self.state.get("author_ids", set())
         view.keywords = self.state.get("keywords", "")
         view.exclude_keywords = self.state.get("exclude_keywords", "")
+        view.exemption_markers = self.state.get("exemption_markers", ["禁", "🈲"])
         view.tag_logic = self.state.get("tag_logic", "and")
         view.sort_method = self.state.get("sort_method", "comprehensive")
         view.sort_order = self.state.get("sort_order", "desc")

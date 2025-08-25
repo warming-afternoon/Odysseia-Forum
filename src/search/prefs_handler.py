@@ -20,10 +20,13 @@ if TYPE_CHECKING:
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
+
 class SearchPreferencesHandler:
     """处理用户搜索偏好设置"""
 
-    def __init__(self, bot, session_factory: async_sessionmaker, tag_service: TagService):
+    def __init__(
+        self, bot, session_factory: async_sessionmaker, tag_service: TagService
+    ):
         self.bot = bot
         self.session_factory = session_factory
         self.tag_service = tag_service
@@ -90,11 +93,14 @@ class SearchPreferencesHandler:
                 )
 
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(message, ephemeral=True), priority=1
+                coro_factory=lambda: interaction.followup.send(message, ephemeral=True),
+                priority=1,
             )
         except Exception as e:
             await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(f"❌ 操作失败: {e}", ephemeral=True),
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 操作失败: {e}", ephemeral=True
+                ),
                 priority=1,
             )
 
@@ -152,7 +158,9 @@ class SearchPreferencesHandler:
                     prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
 
             # 3. 启动视图
-            view = TagPreferencesView(self, interaction, parent_view, prefs_dto, all_tags)
+            view = TagPreferencesView(
+                self, interaction, parent_view, prefs_dto, all_tags
+            )
             await view.start()
 
         except Exception as e:
@@ -193,18 +201,23 @@ class SearchPreferencesHandler:
             async with self.session_factory() as session:
                 repo = SearchRepository(session, self.tag_service)
                 prefs = await repo.get_user_preferences(interaction.user.id)
-                initial_include = (
-                    prefs.include_keywords if prefs and prefs.include_keywords else ""
-                )
-                initial_exclude = (
-                    prefs.exclude_keywords if prefs and prefs.exclude_keywords else ""
-                )
+                initial_include = ""
+                initial_exclude = ""
+                initial_exemption_markers = "禁, 🈲"
+                if prefs:
+                    initial_include = prefs.include_keywords or ""
+                    initial_exclude = prefs.exclude_keywords or ""
+                    if prefs.exclude_keyword_exemption_markers:
+                        initial_exemption_markers = ", ".join(
+                            prefs.exclude_keyword_exemption_markers
+                        )
 
             # 2. 定义模态框提交后的回调函数
             async def handle_keyword_submit(
                 modal_interaction: discord.Interaction,
                 submitted_include: str,
                 submitted_exclude: str,
+                submitted_exemption_markers: str,
             ):
                 # 响应Modal提交后的交互
                 await safe_defer(modal_interaction)
@@ -218,6 +231,9 @@ class SearchPreferencesHandler:
 
                 final_include_set = process_keywords(submitted_include)
                 final_exclude_set = process_keywords(submitted_exclude)
+                final_exemption_markers_list = sorted(
+                    list(process_keywords(submitted_exemption_markers))
+                )
 
                 final_include_str = ", ".join(sorted(list(final_include_set)))
                 final_exclude_str = ", ".join(sorted(list(final_exclude_set)))
@@ -230,6 +246,7 @@ class SearchPreferencesHandler:
                         {
                             "include_keywords": final_include_str,
                             "exclude_keywords": final_exclude_str,
+                            "exclude_keyword_exemption_markers": final_exemption_markers_list,
                         },
                     )
 
@@ -240,6 +257,7 @@ class SearchPreferencesHandler:
             modal = KeywordModal(
                 initial_keywords=initial_include,
                 initial_exclude_keywords=initial_exclude,
+                initial_exemption_markers=initial_exemption_markers,
                 submit_callback=handle_keyword_submit,
             )
             await self.bot.api_scheduler.submit(

@@ -19,6 +19,7 @@ class UserSearchPreferencesDTO(BaseModel):
     # 关键词偏好
     include_keywords: str = ""
     exclude_keywords: str = ""
+    exclude_keyword_exemption_markers: List[str] = ["禁", "🈲"]
 
     # 时间偏好
     after_date: Optional[datetime] = None

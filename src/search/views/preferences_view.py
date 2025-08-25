@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
+
 class PreferencesView(discord.ui.View):
     """统一的搜索偏好设置面板"""
 
@@ -88,6 +89,13 @@ class PreferencesView(discord.ui.View):
             keyword_info.append(f"**✅ 包含关键词：** {prefs.include_keywords}")
         if prefs.exclude_keywords:
             keyword_info.append(f"**❌ 排除关键词：** {prefs.exclude_keywords}")
+        if (
+            prefs.exclude_keyword_exemption_markers
+            and prefs.exclude_keyword_exemption_markers != ["禁", "🈲"]
+        ):
+            markers_str = ", ".join(prefs.exclude_keyword_exemption_markers)
+            keyword_info.append(f"**豁免标记：** {markers_str}")
+
         embed.add_field(
             name="📝 关键词设置",
             value="\n".join(keyword_info) if keyword_info else "无限制",
@@ -171,7 +179,6 @@ class PreferencesView(discord.ui.View):
                 )
             )
 
-        
         self.add_item(
             discord.ui.Button(
                 label="🗑️ 清空所有设置",
@@ -206,7 +213,9 @@ class PreferencesView(discord.ui.View):
         self.update_components()
         embed = self.build_embed()
         await self.handler.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.edit_original_response(embed=embed, view=self),
+            coro_factory=lambda: interaction.edit_original_response(
+                embed=embed, view=self
+            ),
             priority=1,
         )
 

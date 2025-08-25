@@ -3,30 +3,48 @@ import discord
 
 class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
     def __init__(
-        self, initial_keywords: str, initial_exclude_keywords: str, submit_callback
+        self,
+        initial_keywords: str,
+        initial_exclude_keywords: str,
+        initial_exemption_markers: str,
+        submit_callback,
     ):
         super().__init__()
         self.submit_callback = submit_callback
 
         self.include_input = discord.ui.TextInput(
             label="包含关键词（逗号或斜杠分隔）",
-            placeholder="在标题或首楼中必须包含的关键词",
+            placeholder="必须包含的关键词",
             required=False,
             default=initial_keywords,
+            row=0,
         )
         self.add_item(self.include_input)
 
         self.exclude_input = discord.ui.TextInput(
             label="排除关键词（逗号分隔）",
-            placeholder="在标题或首楼中不能包含的关键词",
+            placeholder="不能包含的关键词",
             required=False,
             default=initial_exclude_keywords,
+            row=1,
         )
         self.add_item(self.exclude_input)
 
+        self.exemption_markers_input = discord.ui.TextInput(
+            label="排除关键词的豁免标记（逗号分隔）",
+            placeholder="例如：禁, 🈲",
+            required=False,
+            default=initial_exemption_markers,
+            row=2,
+        )
+        self.add_item(self.exemption_markers_input)
+
     async def on_submit(self, interaction: discord.Interaction):
         await self.submit_callback(
-            interaction, self.include_input.value, self.exclude_input.value
+            interaction,
+            self.include_input.value,
+            self.exclude_input.value,
+            self.exemption_markers_input.value,
         )
 
 
