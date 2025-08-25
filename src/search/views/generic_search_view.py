@@ -46,12 +46,18 @@ class GenericSearchView(discord.ui.View):
             self.author_ids: set[int] = set()
             self.keywords = user_prefs.include_keywords or ""
             self.exclude_keywords = user_prefs.exclude_keywords or ""
+            self.exemption_markers: List[str] = (
+                user_prefs.exclude_keyword_exemption_markers
+                if user_prefs.exclude_keyword_exemption_markers is not None
+                else ["禁", "🈲"]
+            )
         else:
             self.include_tags: set[str] = set()
             self.exclude_tags: set[str] = set()
             self.author_ids: set[int] = set()
             self.keywords = ""
             self.exclude_keywords = ""
+            self.exemption_markers: List[str] = ["禁", "🈲"]
 
         self.tag_logic = "or"
         self.sort_method = "comprehensive"
@@ -242,12 +248,21 @@ class GenericSearchView(discord.ui.View):
         await self.update_view(interaction, self.page, rerun_search=False)
 
     async def handle_keyword_update(
-        self, interaction: discord.Interaction, keywords: str, exclude_keywords: str
+        self,
+        interaction: discord.Interaction,
+        keywords: str,
+        exclude_keywords: str,
+        exemption_markers: str,
     ):
         """处理来自KeywordModal的数据回传"""
+        import re
+
         self.last_interaction = interaction
         self.keywords = keywords
         self.exclude_keywords = exclude_keywords
+        self.exemption_markers = sorted(
+            list({p.strip() for p in re.split(r"[，,/\s]+", exemption_markers) if p.strip()})
+        )
         await self.update_view(interaction, page=1)
 
     async def show_keyword_modal(self, interaction: discord.Interaction):
@@ -256,6 +271,7 @@ class GenericSearchView(discord.ui.View):
         modal = KeywordModal(
             initial_keywords=self.keywords,
             initial_exclude_keywords=self.exclude_keywords,
+            initial_exemption_markers=", ".join(self.exemption_markers),
             submit_callback=self.handle_keyword_update,
         )
         await interaction.response.send_modal(modal)
@@ -353,6 +369,7 @@ class GenericSearchView(discord.ui.View):
             exclude_tags=list(self.exclude_tags),
             keywords=self.keywords,
             exclude_keywords=self.exclude_keywords,
+            exclude_keyword_exemption_markers=self.exemption_markers,
             tag_logic=self.tag_logic,
             sort_method=self.sort_method,
             sort_order=self.sort_order,
@@ -374,6 +391,8 @@ class GenericSearchView(discord.ui.View):
             filters.append(f"包含关键词: {self.keywords}")
         if self.exclude_keywords:
             filters.append(f"排除关键词: {self.exclude_keywords}")
+        # if self.exemption_markers:
+        #     filters.append(f"豁免标记: {', '.join(self.exemption_markers)}")
 
         if filters:
             description_parts.append("\n".join(filters))
@@ -399,6 +418,7 @@ class GenericSearchView(discord.ui.View):
             "author_ids": list(self.author_ids),
             "keywords": self.keywords,
             "exclude_keywords": self.exclude_keywords,
+            "exemption_markers": self.exemption_markers,
             "tag_logic": self.tag_logic,
             "sort_method": self.sort_method,
             "sort_order": self.sort_order,

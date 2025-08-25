@@ -1,7 +1,7 @@
 import os
 import asyncio
 from sqlalchemy import event
-from sqlmodel import SQLModel, text
+from sqlmodel import Integer, SQLModel, Column, MetaData, Table, Text, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 
 from .fts5_tokenizer import register_jieba_tokenizer
@@ -13,6 +13,16 @@ DB_PATH = "data/database.db"
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
 async_engine = create_async_engine(DATABASE_URL, echo=False)
+
+metadata_obj = MetaData()
+thread_fts_table = Table(
+    'thread_fts',
+    metadata_obj,
+    Column('rowid', Integer, primary_key=True),
+    Column('title', Text),
+    Column('first_message_excerpt', Text),
+    Column('thread_fts', Text),
+)
 
 @event.listens_for(async_engine.sync_engine, "connect")
 def _setup_tokenizer_on_connect(dbapi_connection, connection_record):
