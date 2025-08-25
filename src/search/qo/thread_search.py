@@ -12,6 +12,7 @@ class ThreadSearchQuery:
     exclude_tags: List[str] = field(default_factory=list)
     keywords: Optional[str] = None
     exclude_keywords: Optional[str] = None
+    exclude_keyword_exemption_markers: Optional[List[str]] = None
     include_authors: Optional[List[int]] = None
     exclude_authors: Optional[List[int]] = None
     after_ts: Optional[datetime.datetime] = None

@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import List, Optional, Sequence
 from sqlmodel import select, func, or_, and_, case, cast, Float
 from sqlalchemy.sql import true
@@ -63,46 +64,65 @@ class SearchRepository:
                 ~Thread.tags.any(Tag.id.in_(resolved_exclude_tag_ids))  # type: ignore
             )
 
+        fts_table_joined = False
+        # FTS 表 JOIN 函数
+        def join_fts_table(stmt):
+            nonlocal fts_table_joined
+            if not fts_table_joined:
+                stmt = stmt.join(
+                    "thread_fts", "thread_fts.rowid == thread.id", isouter=True
+                )
+                fts_table_joined = True
+            return stmt
+
         if query.keywords:
+            statement = join_fts_table(statement)
             # 替换中文逗号和斜杠
             keywords_str = query.keywords.replace("，", ",").replace("／", "/")
-
             # 按逗号分割成 AND 组
             and_groups = [
                 group.strip() for group in keywords_str.split(",") if group.strip()
             ]
 
-            final_keyword_clause = []
             for group in and_groups:
                 # 按斜杠分割成 OR 组
-                or_keywords = [kw.strip() for kw in group.split("/") if kw.strip()]
-
-                or_clauses = []
-                for keyword in or_keywords:
-                    or_clauses.append(Thread.title.ilike(f"%{keyword}%"))  # type: ignore
-                    or_clauses.append(
-                        Thread.first_message_excerpt.ilike(f"%{keyword}%")  # type: ignore
+                or_keywords = [f'"{kw.strip()}"' for kw in group.split("/") if kw.strip()]
+                if or_keywords:
+                    or_group_str = " OR ".join(or_keywords)
+                    statement = statement.where(
+                        func.match(
+                            "thread_fts",
+                            or_group_str,
+                        )
                     )
 
-                if or_clauses:
-                    final_keyword_clause.append(or_(*or_clauses))
-
-            if final_keyword_clause:
-                statement = statement.where(and_(*final_keyword_clause))
-
         if query.exclude_keywords:
-            # 排除关键词使用 OR 逻辑：包含任何一个排除关键词就排除该帖子
-            exclude_keywords_str = query.exclude_keywords.replace("，", ",").replace(
-                "／", "/"
+            statement = join_fts_table(statement)
+            exemption_markers = (
+                query.exclude_keyword_exemption_markers
+                if query.exclude_keyword_exemption_markers is not None
+                else ["禁", "🈲"]
             )
             exclude_keywords_list = [
-                kw.strip() for kw in exclude_keywords_str.split(",") if kw.strip()
+                kw.strip()
+                for kw in re.split(r"[,，/\s]+", query.exclude_keywords)
+                if kw.strip()
             ]
 
             for keyword in exclude_keywords_list:
-                statement = statement.where(~Thread.title.ilike(f"%{keyword}%"))  # type: ignore
+                # 豁免子句: NEAR("关键词" "标记", 5)
+                exemption_clauses = [
+                    f'NEAR("{keyword}" "{marker}", 5)' for marker in exemption_markers
+                ]
+                exemption_match_str = " OR ".join(exemption_clauses)
+
+                # 最终条件: NOT (thread_fts MATCH 'keyword' AND NOT thread_fts MATCH 'exemption_query')
+                # 这意味着：排除那些“匹配了关键词”并且“不满足豁免条件”的帖子
                 statement = statement.where(
-                    ~Thread.first_message_excerpt.ilike(f"%{keyword}%")  # type: ignore
+                    ~(
+                        func.match("thread_fts", f'"{keyword}"')
+                        & ~func.match("thread_fts", exemption_match_str)
+                    )
                 )
 
         return statement

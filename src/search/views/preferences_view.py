@@ -88,6 +88,13 @@ class PreferencesView(discord.ui.View):
             keyword_info.append(f"**✅ 包含关键词：** {prefs.include_keywords}")
         if prefs.exclude_keywords:
             keyword_info.append(f"**❌ 排除关键词：** {prefs.exclude_keywords}")
+        if (
+            prefs.exclude_keyword_exemption_markers
+            and prefs.exclude_keyword_exemption_markers != ["禁", "🈲"]
+        ):
+            markers_str = ", ".join(prefs.exclude_keyword_exemption_markers)
+            keyword_info.append(f"**豁免标记：** {markers_str}")
+
         embed.add_field(
             name="📝 关键词设置",
             value="\n".join(keyword_info) if keyword_info else "无限制",

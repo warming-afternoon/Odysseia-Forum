@@ -630,6 +630,10 @@ class Search(commands.Cog):
                         search_qo.after_ts = user_prefs.after_date
                     if search_qo.before_ts is None:
                         search_qo.before_ts = user_prefs.before_date
+                    if search_qo.exclude_keyword_exemption_markers is None:
+                        search_qo.exclude_keyword_exemption_markers = (
+                            user_prefs.exclude_keyword_exemption_markers
+                        )
 
                 logger.debug(f"合并后QO: {search_qo}")
 
