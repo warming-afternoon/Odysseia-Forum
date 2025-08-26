@@ -48,12 +48,23 @@ class GlobalSearchView(discord.ui.View):
             and isinstance(ch, discord.ForumChannel)
         ]
 
+        # 获取用户偏好 DTO
+        async with self.cog.session_factory() as session:
+            from ..repository import SearchRepository
+            repo = SearchRepository(session, self.cog.tag_service)
+            user_prefs = await repo.get_user_preferences(interaction.user.id)
+
         view = ChannelSelectionView(
-            self.cog, interaction, channels, indexed_channel_ids
+            self.cog, interaction, channels, indexed_channel_ids, user_prefs
         )
+
+        message_content = "请选择要搜索的论坛频道（可多选）："
+        if user_prefs and user_prefs.preferred_channels:
+            message_content = "已根据偏好预选了频道，可以直接点击“确定搜索”继续或进行修改"
+
         await self.cog.bot.api_scheduler.submit(
             coro_factory=lambda: interaction.followup.send(
-                "请选择要搜索的频道：", view=view, ephemeral=True
+                message_content, view=view, ephemeral=True
             ),
             priority=1,
         )

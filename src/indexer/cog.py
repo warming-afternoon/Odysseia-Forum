@@ -39,7 +39,7 @@ class Indexer(commands.Cog):
         name="构建索引", description="对当前论坛频道的所有帖子进行索引"
     )
     async def build_index(self, interaction: discord.Interaction):
-        await safe_defer(interaction)
+        await safe_defer(interaction, ephemeral=True)
         if not isinstance(interaction.channel, discord.Thread):
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(

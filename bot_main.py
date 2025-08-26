@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 class MyBot(commands.Bot):
     def __init__(self, *, intents: discord.Intents, config: dict):
         proxy = config.get("proxy")
-        bot_kwargs = {"command_prefix": "/", "intents": intents}
+        bot_kwargs = {"command_prefix": "!", "intents": intents}
         if proxy:
             bot_kwargs["proxy"] = proxy
         super().__init__(**bot_kwargs)
@@ -45,6 +45,13 @@ class MyBot(commands.Bot):
             "api_scheduler_concurrency", 40
         )
         self.api_scheduler = APIScheduler(concurrent_requests=concurrency)
+
+    async def process_commands(self, message: discord.Message):
+        """
+        重写此方法以阻止机器人处理任何文本命令。
+        这可以防止因其他机器人的命令而产生 CommandNotFound 错误。
+        """
+        return  # 什么都不做
 
     async def setup_hook(self):
         """在机器人登录前执行的异步初始化。"""

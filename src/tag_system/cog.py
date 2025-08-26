@@ -317,9 +317,8 @@ class TagSystem(commands.Cog):
         reaction_count = 0
 
         # 创建原始的获取消息的协程，并用包装器包裹它
-        fetch_coro = thread.fetch_message(thread.id)
         first_msg = await self.bot.api_scheduler.submit(
-            coro_factory=lambda: self._fetch_message_wrapper(fetch_coro),
+            coro_factory=lambda: self._fetch_message_wrapper(thread.fetch_message(thread.id)),
             priority=priority,
         )
 

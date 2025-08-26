@@ -1,6 +1,6 @@
 import discord
 from shared.models.thread import Thread as ThreadModel
-
+from datetime import datetime, timezone 
 
 class ThreadEmbedBuilder:
     """负责构建帖子搜索结果的 Embed"""
@@ -25,11 +25,11 @@ class ThreadEmbedBuilder:
         tag_names = [tag.name for tag in thread.tags]
 
         # 将 datetime 对象转换为 Unix 时间戳
-        created_at_ts = int(thread.created_at.timestamp())
+        created_at_ts = int(thread.created_at.replace(tzinfo=timezone.utc).timestamp())
 
         # 使用 Discord 动态时间戳格式
         if thread.last_active_at:
-            last_active_ts = int(thread.last_active_at.timestamp())
+            last_active_ts = int(thread.last_active_at.replace(tzinfo=timezone.utc).timestamp())
             last_active_str = f"<t:{last_active_ts}:F>"
         else:
             last_active_str = "无"

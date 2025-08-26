@@ -27,7 +27,7 @@ class GenericSearchView(discord.ui.View):
         channel_ids: List[int],
         user_prefs: Optional[UserSearchPreferencesDTO] = None,
     ):
-        super().__init__(timeout=900)
+        super().__init__(timeout=885)
         self.cog = cog
         self.original_interaction = interaction
         self.last_interaction = interaction
@@ -436,7 +436,7 @@ class GenericSearchView(discord.ui.View):
             "tag_page": self.tag_page,
         }
 
-        timeout_view = TimeoutView(self.cog, self.original_interaction, state)
+        timeout_view = TimeoutView(self.cog, self.last_interaction, state)
 
         try:
             if not self.last_interaction:

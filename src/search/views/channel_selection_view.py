@@ -1,11 +1,12 @@
 import discord
-from typing import List, TYPE_CHECKING, Sequence
+from typing import List, TYPE_CHECKING, Sequence, Optional
 
 from shared.safe_defer import safe_defer
 from .generic_search_view import GenericSearchView
 
 if TYPE_CHECKING:
     from ..cog import Search
+    from ..dto.user_search_preferences import UserSearchPreferencesDTO
 
 
 class ChannelSelectionView(discord.ui.View):
@@ -17,23 +18,40 @@ class ChannelSelectionView(discord.ui.View):
         original_interaction: discord.Interaction,
         channels: Sequence[discord.ForumChannel],
         all_channel_ids: Sequence[int],
+        user_prefs: Optional["UserSearchPreferencesDTO"],
     ):
         super().__init__(timeout=900)
         self.cog = cog
         self.original_interaction = original_interaction
         self.channels = channels
         self.all_channel_ids = all_channel_ids
+        self.user_prefs = user_prefs
         self.selected_channel_ids: List[int] = []
 
+        preselected_ids = set(user_prefs.preferred_channels) if user_prefs and user_prefs.preferred_channels else set()
+
         # 构建选项
-        options = [discord.SelectOption(label="所有已索引频道", value="all")]
+        options = [
+            discord.SelectOption(
+                label="所有已索引频道",
+                value="all",
+                default="all" in preselected_ids, # "all" 理论上不应该被预设，但做个兼容
+            )
+        ]
         # Discord限制25个选项，为"all"选项留一个位置
         options.extend(
             [
-                discord.SelectOption(label=ch.name, value=str(ch.id))
+                discord.SelectOption(
+                    label=ch.name,
+                    value=str(ch.id),
+                    default=ch.id in preselected_ids,
+                )
                 for ch in channels[:24]
             ]
         )
+        
+        # 如果有预设值，确定按钮初始就可点击
+        initial_disabled = not bool(preselected_ids)
 
         self.channel_select = discord.ui.Select(
             placeholder="选择论坛频道（可多选）...",
@@ -47,7 +65,7 @@ class ChannelSelectionView(discord.ui.View):
         self.confirm_button = discord.ui.Button(
             label="✅ 确定搜索",
             style=discord.ButtonStyle.success,
-            disabled=True,  # 初始为禁用
+            disabled=initial_disabled,
         )
         self.confirm_button.callback = self.on_confirm
         self.add_item(self.confirm_button)
@@ -83,25 +101,21 @@ class ChannelSelectionView(discord.ui.View):
 
         selected_values = self.channel_select.values
 
-        if "all" in selected_values:
-            # 如果选择了 "all"，则使用所有可用的频道ID
-            self.selected_channel_ids = list(self.all_channel_ids)
+        # 如果用户没有进行任何新的选择，但存在偏好设置，则使用偏好设置
+        if not selected_values and self.user_prefs and self.user_prefs.preferred_channels:
+            self.selected_channel_ids = self.user_prefs.preferred_channels
         else:
-            self.selected_channel_ids = [int(v) for v in selected_values]
+            if "all" in selected_values:
+                # 如果选择了 "all"，则使用所有可用的频道ID
+                self.selected_channel_ids = list(self.all_channel_ids)
+            else:
+                self.selected_channel_ids = [int(v) for v in selected_values]
 
         if not self.selected_channel_ids:
             await interaction.followup.send("请至少选择一个频道。", ephemeral=True)
             return
 
-        # 获取用户偏好
-        async with self.cog.session_factory() as session:
-            from ..repository import SearchRepository
-
-            repo = SearchRepository(session, self.cog.tag_service)
-            user_prefs = await repo.get_user_preferences(interaction.user.id)
-
-        # 切换到通用搜索视图
         generic_view = GenericSearchView(
-            self.cog, interaction, self.selected_channel_ids, user_prefs
+            self.cog, interaction, self.selected_channel_ids, self.user_prefs
         )
         await generic_view.start()

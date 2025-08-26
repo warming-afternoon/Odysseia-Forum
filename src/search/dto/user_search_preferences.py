@@ -7,6 +7,8 @@ class UserSearchPreferencesDTO(BaseModel):
     """用于传输用户搜索偏好设置的数据传输对象。"""
 
     user_id: int
+    # 频道偏好
+    preferred_channels: Optional[List[int]] = None
 
     # 作者偏好
     include_authors: Optional[List[int]] = None

@@ -1,3 +1,4 @@
+from __future__ import annotations
 import logging
 from venv import logger
 import discord
@@ -13,9 +14,11 @@ from tag_system.tagService import TagService
 from .views.components.keyword_button import KeywordModal
 from .dto.user_search_preferences import UserSearchPreferencesDTO
 from .views.tag_preferences_view import TagPreferencesView
+from .views.channel_preferences_view import ChannelPreferencesView
 
 if TYPE_CHECKING:
     from .views.preferences_view import PreferencesView
+    from .cog import Search
 
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
@@ -25,8 +28,13 @@ class SearchPreferencesHandler:
     """处理用户搜索偏好设置"""
 
     def __init__(
-        self, bot, session_factory: async_sessionmaker, tag_service: TagService
+        self,
+        cog: Search,
+        bot,
+        session_factory: async_sessionmaker,
+        tag_service: TagService,
     ):
+        self.cog = cog
         self.bot = bot
         self.session_factory = session_factory
         self.tag_service = tag_service
@@ -37,7 +45,7 @@ class SearchPreferencesHandler:
         action: app_commands.Choice[str],
         user: Optional[discord.User] = None,
     ):
-        await safe_defer(interaction)
+        await safe_defer(interaction, ephemeral=True)
         try:
             user_id = interaction.user.id
             if action.value in ["include", "exclude", "unblock"] and not user:
@@ -104,6 +112,44 @@ class SearchPreferencesHandler:
                 priority=1,
             )
 
+    async def search_preferences_channels(
+        self, interaction: discord.Interaction, parent_view: "PreferencesView"
+    ):
+        """处理 /搜索偏好 频道 命令，启动频道偏好设置视图。"""
+        await safe_defer(interaction, ephemeral=True)
+        try:
+            async with self.session_factory() as session:
+                repo = SearchRepository(session, self.tag_service)
+                prefs_dto = await repo.get_user_preferences(interaction.user.id)
+                if not prefs_dto:
+                    prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
+            
+            indexed_channels = list(self.cog.channel_cache.values())
+
+            view = ChannelPreferencesView(
+                self, interaction, parent_view, prefs_dto, indexed_channels
+            )
+            await view.start()
+
+        except Exception as e:
+            logger.error(f"打开频道偏好设置时出错: {e}", exc_info=True)
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 打开频道设置时出错: {e}", ephemeral=True
+                ),
+                priority=1,
+            )
+
+    async def save_preferred_channels(self, user_id: int, channel_ids: List[int]):
+        """保存用户的默认搜索频道列表"""
+        async with self.session_factory() as session:
+            repo = SearchRepository(session, self.tag_service)
+            await repo.save_user_preferences(
+                user_id,
+                {"preferred_channels": channel_ids},
+            )
+            # logger.info(f"用户 {user_id} 的默认搜索频道已保存: {channel_ids}")
+
     async def update_user_time_range(
         self,
         user_id: int,
@@ -140,9 +186,7 @@ class SearchPreferencesHandler:
         self, interaction: discord.Interaction, parent_view: "PreferencesView"
     ):
         """处理 /搜索偏好 标签 命令，启动标签偏好设置视图。"""
-        await self.bot.api_scheduler.submit(
-            coro_factory=lambda: safe_defer(interaction, ephemeral=True), priority=1
-        )
+        await safe_defer(interaction, ephemeral=True)
         try:
             async with self.session_factory() as session:
                 repo = SearchRepository(session, self.tag_service)
@@ -220,7 +264,7 @@ class SearchPreferencesHandler:
                 submitted_exemption_markers: str,
             ):
                 # 响应Modal提交后的交互
-                await safe_defer(modal_interaction)
+                await safe_defer(modal_interaction, ephemeral=True)
 
                 def process_keywords(s: str) -> set[str]:
                     """使用正则表达式分割字符串，并返回一个干净的集合"""
@@ -312,5 +356,6 @@ class SearchPreferencesHandler:
                     "exclude_tags": [],
                     "include_keywords": "",
                     "exclude_keywords": "",
+                    "preferred_channels": [], # 新增
                 },
             )

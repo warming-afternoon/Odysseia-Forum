@@ -44,7 +44,7 @@ class Search(commands.Cog):
         self.tag_service = tag_service
         self.tag_system_repo = TagSystemRepository
         self.prefs_handler = SearchPreferencesHandler(
-            bot, session_factory, self.tag_service
+            self, bot, session_factory, self.tag_service
         )
         self.channel_cache: dict[int, discord.ForumChannel] = {}  # 缓存频道对象
         self.global_search_view = GlobalSearchView(self)
@@ -132,7 +132,7 @@ class Search(commands.Cog):
     async def set_page_size(
         self, interaction: discord.Interaction, num: app_commands.Range[int, 3, 9]
     ):
-        await safe_defer(interaction)
+        await safe_defer(interaction, ephemeral=True)
         try:
             async with self.session_factory() as session:
                 repo = SearchRepository(session, self.tag_service)
@@ -226,7 +226,7 @@ class Search(commands.Cog):
         mild_penalty: Optional[float] = None,
     ):
         # 检查权限 (需要管理员权限)
-        await safe_defer(interaction)
+        await safe_defer(interaction, ephemeral=True)
         assert isinstance(interaction.user, discord.Member)
         if not interaction.user.guild_permissions.administrator:
             await self.bot.api_scheduler.submit(
@@ -385,7 +385,7 @@ class Search(commands.Cog):
 
     @app_commands.command(name="查看排序配置", description="查看当前搜索排序算法配置")
     async def view_ranking_config(self, interaction: discord.Interaction):
-        await safe_defer(interaction)
+        await safe_defer(interaction, ephemeral=True)
         embed = discord.Embed(
             title="🔧 当前排序算法配置",
             description="智能混合权重排序算法参数",
@@ -433,7 +433,7 @@ class Search(commands.Cog):
     @app_commands.guild_only()
     async def create_channel_search(self, interaction: discord.Interaction):
         """在一个帖子内创建一个持久化的搜索按钮，该按钮将启动一个仅限于该频道的搜索流程。"""
-        await safe_defer(interaction)
+        await safe_defer(interaction, ephemeral=True)
         try:
             if (
                 not isinstance(interaction.channel, discord.Thread)
@@ -489,7 +489,7 @@ class Search(commands.Cog):
     )
     async def create_global_search(self, interaction: discord.Interaction):
         """在当前频道创建一个持久化的全局搜索按钮。"""
-        await safe_defer(interaction)
+        await safe_defer(interaction, ephemeral=True)
         try:
             embed = discord.Embed(
                 title="🌐 全局搜索",
@@ -525,7 +525,7 @@ class Search(commands.Cog):
     @app_commands.command(name="全局搜索", description="开始一次仅自己可见的全局搜索")
     async def start_global_search_flow(self, interaction: discord.Interaction):
         """启动全局搜索流程的通用逻辑。"""
-        await safe_defer(interaction)
+        await safe_defer(interaction, ephemeral=True)
         try:
             # 直接从缓存中获取所有可搜索的频道
             channels = list(self.channel_cache.values())
@@ -540,15 +540,28 @@ class Search(commands.Cog):
                 return
 
             all_channel_ids = list(self.channel_cache.keys())
-            view = ChannelSelectionView(self, interaction, channels, all_channel_ids)
+
+            # 获取用户偏好 DTO
+            async with self.session_factory() as session:
+                repo = SearchRepository(session, self.tag_service)
+                user_prefs = await repo.get_user_preferences(interaction.user.id)
+
+            view = ChannelSelectionView(
+                self, interaction, channels, all_channel_ids, user_prefs
+            )
+
+            message_content = "请选择想搜索的论坛频道（可多选）："
+            if user_prefs and user_prefs.preferred_channels:
+                message_content = "已根据偏好预选了频道，可以直接点击“确定搜索”继续或进行修改。"
+
             await interaction.followup.send(
-                "请选择要搜索的频道：", view=view, ephemeral=True
+                message_content, view=view, ephemeral=True
             )
         except Exception:
             logger.error("在 start_global_search_flow 中发生严重错误", exc_info=True)
             # 确保即使有异常，也能给用户一个反馈
             if not interaction.response.is_done():
-                await safe_defer(interaction)
+                await safe_defer(interaction, ephemeral=True)
             await interaction.followup.send(
                 "❌ 启动搜索时发生严重错误，请联系管理员。", ephemeral=True
             )

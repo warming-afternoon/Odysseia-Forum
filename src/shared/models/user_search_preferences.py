@@ -8,6 +8,9 @@ class UserSearchPreferences(SQLModel, table=True):
 
     user_id: int = Field(primary_key=True)
 
+    # 频道选择
+    preferred_channels: Optional[List[int]] = Field(default=None, sa_column=Column(JSON))
+
     # 作者偏好
     include_authors: Optional[List[int]] = Field(default=None, sa_column=Column(JSON))
     exclude_authors: Optional[List[int]] = Field(default=None, sa_column=Column(JSON))

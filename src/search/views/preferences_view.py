@@ -1,6 +1,8 @@
 import logging
 import discord
 from typing import TYPE_CHECKING, Optional
+from discord.ui import ChannelSelect
+from discord.enums import ChannelType
 
 from shared.safe_defer import safe_defer
 from ..repository import SearchRepository
@@ -63,13 +65,10 @@ class PreferencesView(discord.ui.View):
                 prefs.exclude_keywords,
                 prefs.after_date,
                 prefs.before_date,
+                prefs.preferred_channels,
             ]
         )
 
-        if is_default:
-            embed.description = "您当前未设置任何偏好。"
-        else:
-            embed.description = "在这里统一管理您的搜索偏好。"
 
         # 标签偏好
         tag_info = []
@@ -99,6 +98,23 @@ class PreferencesView(discord.ui.View):
         embed.add_field(
             name="📝 关键词设置",
             value="\n".join(keyword_info) if keyword_info else "无限制",
+            inline=False,
+        )
+        
+        # 频道偏好
+        channel_info = "未设置"
+        if prefs.preferred_channels and self.original_interaction.guild:
+            channel_names = []
+            for channel_id in prefs.preferred_channels:
+                channel = self.original_interaction.guild.get_channel(channel_id)
+                if channel:
+                    channel_names.append(channel.mention)
+            if channel_names:
+                channel_info = ", ".join(channel_names)
+        
+        embed.add_field(
+            name="🔍 偏好频道",
+            value=channel_info,
             inline=False,
         )
 
@@ -132,8 +148,7 @@ class PreferencesView(discord.ui.View):
             value=f"**每页结果：** {prefs.results_per_page}",
             inline=False,
         )
-
-        embed.set_footer(text="点击下方按钮进行修改")
+        
         return embed
 
     def update_components(self):
@@ -157,7 +172,14 @@ class PreferencesView(discord.ui.View):
         )
         self.add_item(
             discord.ui.Button(
-                label="⏱️ 时间范围",
+                label="🔍 频道",
+                style=discord.ButtonStyle.secondary,
+                custom_id="prefs_channels",
+            )
+        )
+        self.add_item(
+            discord.ui.Button(
+                label="⏱️ 时间",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_time",
             )
@@ -232,6 +254,10 @@ class PreferencesView(discord.ui.View):
             await self.handler.search_preferences_keywords(interaction, self)
             return  # Modal流程自己处理响应，此处返回
 
+        elif custom_id == "prefs_channels":
+            await self.handler.search_preferences_channels(interaction, self)
+            return # 新流程自己处理响应
+            
         elif custom_id == "prefs_time":
             current_after = (
                 self.preferences.after_date.strftime("%Y-%m-%d")
