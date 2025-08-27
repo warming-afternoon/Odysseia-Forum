@@ -2,7 +2,6 @@ import discord
 from typing import TYPE_CHECKING
 
 from shared.safe_defer import safe_defer
-from .channel_selection_view import ChannelSelectionView
 from .preferences_view import PreferencesView
 
 
@@ -27,47 +26,7 @@ class GlobalSearchView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """处理按钮点击，启动全局搜索流程。"""
-        await safe_defer(interaction, ephemeral=True)
-
-        async with self.cog.session_factory() as session:
-            repo = self.cog.tag_system_repo(session)
-            indexed_channel_ids = await repo.get_indexed_channel_ids()
-        if not indexed_channel_ids:
-            await self.cog.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(
-                    "没有已索引的频道。", ephemeral=True
-                ),
-                priority=1,
-            )
-            return
-
-        channels = [
-            ch
-            for ch_id in indexed_channel_ids
-            if (ch := self.cog.bot.get_channel(ch_id))
-            and isinstance(ch, discord.ForumChannel)
-        ]
-
-        # 获取用户偏好 DTO
-        async with self.cog.session_factory() as session:
-            from ..repository import SearchRepository
-            repo = SearchRepository(session, self.cog.tag_service)
-            user_prefs = await repo.get_user_preferences(interaction.user.id)
-
-        view = ChannelSelectionView(
-            self.cog, interaction, channels, indexed_channel_ids, user_prefs
-        )
-
-        message_content = "请选择要搜索的论坛频道（可多选）："
-        if user_prefs and user_prefs.preferred_channels:
-            message_content = "已根据偏好预选了频道，可以直接点击“确定搜索”继续或进行修改"
-
-        await self.cog.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.followup.send(
-                message_content, view=view, ephemeral=True
-            ),
-            priority=1,
-        )
+        await self.cog._start_global_search(interaction)
 
     @discord.ui.button(
         label="⚙️ 偏好设置",

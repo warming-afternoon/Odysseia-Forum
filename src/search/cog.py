@@ -4,7 +4,6 @@ from discord.ext import commands
 import logging
 from typing import TYPE_CHECKING, Optional, Sequence
 
-from shared.ranking_config import RankingConfig
 from shared.safe_defer import safe_defer
 from .dto.tag import TagDTO
 from .views.global_search_view import GlobalSearchView
@@ -63,18 +62,17 @@ class Search(commands.Cog):
     @commands.Cog.listener()
     async def on_index_updated(self):
         """监听由 Indexer 发出的索引更新事件，并刷新所有相关缓存。"""
-        logger.info("接收到 'index_updated' 事件，开始刷新缓存...")
+        logger.debug("接收到 'index_updated' 事件，开始刷新缓存...")
 
         # 刷新频道缓存
         await self.cache_indexed_channels()
+        logger.debug("频道缓存已刷新")
 
         # 刷新 TagService 缓存
         if self.tag_service:
-            logger.info("正在刷新 TagService 缓存...")
+            
             await self.tag_service.build_cache()
-            logger.info("TagService 缓存已刷新。")
-
-        logger.info("所有缓存刷新完毕。")
+            logger.debug("TagService 缓存已刷新")
 
     async def cog_load(self):
         """在Cog加载时注册持久化View"""
@@ -192,241 +190,6 @@ class Search(commands.Cog):
                 f"❌ 打开设置面板时发生错误: {e}", ephemeral=True
             )
 
-    # ----- 排序算法管理 -----
-    @app_commands.command(name="排序算法配置", description="管理员设置搜索排序算法参数")
-    @app_commands.describe(
-        preset="预设配置方案",
-        time_weight="时间权重因子 (0.0-1.0)",
-        tag_weight="标签权重因子 (0.0-1.0)",
-        reaction_weight="反应权重因子 (0.0-1.0)",
-        time_decay="时间衰减率 (0.01-0.5)",
-        reaction_log_base="反应数对数基数 (10-200)",
-        severe_penalty="严重惩罚阈值 (0.0-1.0)",
-        mild_penalty="轻度惩罚阈值 (0.0-1.0)",
-    )
-    @app_commands.choices(
-        preset=[
-            app_commands.Choice(name="平衡配置 (默认)", value="balanced"),
-            app_commands.Choice(name="偏重时间新鲜度", value="time_focused"),
-            app_commands.Choice(name="偏重内容质量", value="quality_focused"),
-            app_commands.Choice(name="偏重受欢迎程度", value="popularity_focused"),
-            app_commands.Choice(name="严格质量控制", value="strict_quality"),
-        ]
-    )
-    async def configure_ranking(
-        self,
-        interaction: discord.Interaction,
-        preset: Optional[app_commands.Choice[str]] = None,
-        time_weight: Optional[float] = None,
-        tag_weight: Optional[float] = None,
-        reaction_weight: Optional[float] = None,
-        time_decay: Optional[float] = None,
-        reaction_log_base: Optional[int] = None,
-        severe_penalty: Optional[float] = None,
-        mild_penalty: Optional[float] = None,
-    ):
-        # 检查权限 (需要管理员权限)
-        await safe_defer(interaction, ephemeral=True)
-        assert isinstance(interaction.user, discord.Member)
-        if not interaction.user.guild_permissions.administrator:
-            await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(
-                    "此命令需要管理员权限。", ephemeral=True
-                ),
-                priority=1,
-            )
-            return
-
-        try:
-            # 应用预设配置
-            if preset:
-                from shared.ranking_config import PresetConfigs
-
-                if preset.value == "balanced":
-                    PresetConfigs.balanced()
-                elif preset.value == "time_focused":
-                    PresetConfigs.time_focused()
-                elif preset.value == "quality_focused":
-                    PresetConfigs.quality_focused()
-                elif preset.value == "popularity_focused":
-                    PresetConfigs.popularity_focused()
-                elif preset.value == "strict_quality":
-                    PresetConfigs.strict_quality()
-
-                config_name = preset.name
-            else:
-                # 手动配置参数
-                if time_weight is not None:
-                    if 0 <= time_weight <= 1:
-                        RankingConfig.TIME_WEIGHT_FACTOR = time_weight
-                    else:
-                        raise ValueError("时间权重必须在0-1之间")
-
-                if tag_weight is not None:
-                    if 0 <= tag_weight <= 1:
-                        RankingConfig.TAG_WEIGHT_FACTOR = tag_weight
-                    else:
-                        raise ValueError("标签权重必须在0-1之间")
-
-                if reaction_weight is not None:
-                    if 0 <= reaction_weight <= 1:
-                        RankingConfig.REACTION_WEIGHT_FACTOR = reaction_weight
-                    else:
-                        raise ValueError("反应权重必须在0-1之间")
-
-                # 确保权重和为1 (三个权重)
-                if (
-                    time_weight is not None
-                    or tag_weight is not None
-                    or reaction_weight is not None
-                ):
-                    # 计算当前权重总和
-                    current_total = (
-                        RankingConfig.TIME_WEIGHT_FACTOR
-                        + RankingConfig.TAG_WEIGHT_FACTOR
-                        + RankingConfig.REACTION_WEIGHT_FACTOR
-                    )
-
-                    # 如果权重和不为1，按比例重新分配
-                    if abs(current_total - 1.0) > 0.001:
-                        RankingConfig.TIME_WEIGHT_FACTOR = (
-                            RankingConfig.TIME_WEIGHT_FACTOR / current_total
-                        )
-                        RankingConfig.TAG_WEIGHT_FACTOR = (
-                            RankingConfig.TAG_WEIGHT_FACTOR / current_total
-                        )
-                        RankingConfig.REACTION_WEIGHT_FACTOR = (
-                            RankingConfig.REACTION_WEIGHT_FACTOR / current_total
-                        )
-
-                if time_decay is not None:
-                    if 0.01 <= time_decay <= 0.5:
-                        RankingConfig.TIME_DECAY_RATE = time_decay
-                    else:
-                        raise ValueError("时间衰减率必须在0.01-0.5之间")
-
-                if reaction_log_base is not None:
-                    if 10 <= reaction_log_base <= 200:
-                        RankingConfig.REACTION_LOG_BASE = reaction_log_base
-                    else:
-                        raise ValueError("反应数对数基数必须在10-200之间")
-
-                if severe_penalty is not None:
-                    if 0 <= severe_penalty <= 1:
-                        RankingConfig.SEVERE_PENALTY_THRESHOLD = severe_penalty
-                    else:
-                        raise ValueError("严重惩罚阈值必须在0-1之间")
-
-                if mild_penalty is not None:
-                    if 0 <= mild_penalty <= 1:
-                        RankingConfig.MILD_PENALTY_THRESHOLD = mild_penalty
-                    else:
-                        raise ValueError("轻度惩罚阈值必须在0-1之间")
-
-                config_name = "自定义配置"
-
-            # 验证配置
-            RankingConfig.validate()
-
-            # 构建响应消息
-            embed = discord.Embed(
-                title="✅ 排序算法配置已更新",
-                description=f"当前配置：**{config_name}**",
-                color=0x00FF00,
-            )
-
-            embed.add_field(
-                name="权重配置",
-                value=f"• 时间权重：**{RankingConfig.TIME_WEIGHT_FACTOR:.1%}**\n"
-                f"• 标签权重：**{RankingConfig.TAG_WEIGHT_FACTOR:.1%}**\n"
-                f"• 反应权重：**{RankingConfig.REACTION_WEIGHT_FACTOR:.1%}**\n"
-                f"• 时间衰减率：**{RankingConfig.TIME_DECAY_RATE}**\n"
-                f"• 反应对数基数：**{RankingConfig.REACTION_LOG_BASE}**",
-                inline=True,
-            )
-
-            embed.add_field(
-                name="惩罚机制",
-                value=f"• 严重惩罚阈值：**{RankingConfig.SEVERE_PENALTY_THRESHOLD}**\n"
-                f"• 轻度惩罚阈值：**{RankingConfig.MILD_PENALTY_THRESHOLD}**\n"
-                f"• 严重惩罚系数：**{RankingConfig.SEVERE_PENALTY_FACTOR}**",
-                inline=True,
-            )
-
-            # 添加算法说明
-            embed.add_field(
-                name="算法说明",
-                value="新的排序算法将立即生效，影响所有后续搜索结果。\n"
-                "时间权重基于指数衰减，标签权重基于Wilson Score算法。",
-                inline=False,
-            )
-
-            await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(
-                    embed=embed, ephemeral=True
-                ),
-                priority=1,
-            )
-
-        except ValueError as e:
-            await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(
-                    f"❌ 配置错误：{e}", ephemeral=True
-                ),
-                priority=1,
-            )
-        except Exception as e:
-            await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(
-                    f"❌ 配置失败：{e}", ephemeral=True
-                ),
-                priority=1,
-            )
-
-    @app_commands.command(name="查看排序配置", description="查看当前搜索排序算法配置")
-    async def view_ranking_config(self, interaction: discord.Interaction):
-        await safe_defer(interaction, ephemeral=True)
-        embed = discord.Embed(
-            title="🔧 当前排序算法配置",
-            description="智能混合权重排序算法参数",
-            color=0x3498DB,
-        )
-
-        embed.add_field(
-            name="权重配置",
-            value=f"• 时间权重：**{RankingConfig.TIME_WEIGHT_FACTOR:.1%}**\n"
-            f"• 标签权重：**{RankingConfig.TAG_WEIGHT_FACTOR:.1%}**\n"
-            f"• 反应权重：**{RankingConfig.REACTION_WEIGHT_FACTOR:.1%}**\n"
-            f"• 时间衰减率：**{RankingConfig.TIME_DECAY_RATE}**\n"
-            f"• 反应对数基数：**{RankingConfig.REACTION_LOG_BASE}**",
-            inline=True,
-        )
-
-        embed.add_field(
-            name="惩罚机制",
-            value=f"• 严重惩罚阈值：**{RankingConfig.SEVERE_PENALTY_THRESHOLD}**\n"
-            f"• 轻度惩罚阈值：**{RankingConfig.MILD_PENALTY_THRESHOLD}**\n"
-            f"• 严重惩罚系数：**{RankingConfig.SEVERE_PENALTY_FACTOR:.1%}**\n"
-            f"• 轻度惩罚系数：**{RankingConfig.MILD_PENALTY_FACTOR:.1%}**",
-            inline=True,
-        )
-
-        embed.add_field(
-            name="算法特性",
-            value="• **Wilson Score**：置信度评估标签质量\n"
-            "• **指数衰减**：时间新鲜度自然衰减\n"
-            "• **智能惩罚**：差评内容自动降权\n"
-            "• **可配置权重**：灵活调整排序偏好",
-            inline=False,
-        )
-
-        embed.set_footer(text="管理员可使用 /排序算法配置 命令调整参数")
-
-        await self.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.followup.send(embed=embed, ephemeral=True),
-            priority=1,
-        )
-
     @app_commands.command(
         name="创建频道搜索", description="在当前帖子内创建频道搜索按钮"
     )
@@ -485,7 +248,7 @@ class Search(commands.Cog):
             )
 
     @app_commands.command(
-        name="创建公开全局搜索", description="在当前频道创建全局搜索按钮"
+        name="创建公开全局搜索", description="在当前频道创建全局搜索面板"
     )
     async def create_global_search(self, interaction: discord.Interaction):
         """在当前频道创建一个持久化的全局搜索按钮。"""
@@ -498,7 +261,12 @@ class Search(commands.Cog):
             )
             embed.add_field(
                 name="使用方法",
-                value="1. 点击下方按钮选择要搜索的论坛频道\n2. 设置搜索条件（标签、关键词等）\n3. 查看搜索结果",
+                value="1. 点击下方左侧按钮选择要搜索的论坛频道\n2. 设置搜索条件（标签、关键词等）\n3. 查看搜索结果",
+                inline=False,
+            )
+            embed.add_field(
+                name="偏好配置",
+                value="1. 点击下方右侧按钮\n2. 修改搜索时的默认配置（标签、关键词、频道等）",
                 inline=False,
             )
             view = GlobalSearchView(self)
@@ -522,9 +290,11 @@ class Search(commands.Cog):
                 priority=1,
             )
 
-    @app_commands.command(name="全局搜索", description="开始一次仅自己可见的全局搜索")
-    async def start_global_search_flow(self, interaction: discord.Interaction):
-        """启动全局搜索流程的通用逻辑。"""
+    async def _start_global_search(self, interaction: discord.Interaction):
+        """
+        启动全局搜索流程的通用逻辑。
+        该函数会被 /全局搜索 命令和全局搜索按钮回调调用。
+        """
         await safe_defer(interaction, ephemeral=True)
         try:
             # 直接从缓存中获取所有可搜索的频道
@@ -558,13 +328,18 @@ class Search(commands.Cog):
                 message_content, view=view, ephemeral=True
             )
         except Exception:
-            logger.error("在 start_global_search_flow 中发生严重错误", exc_info=True)
+            logger.error("在启动全局搜索中发生严重错误", exc_info=True)
             # 确保即使有异常，也能给用户一个反馈
             if not interaction.response.is_done():
                 await safe_defer(interaction, ephemeral=True)
             await interaction.followup.send(
                 "❌ 启动搜索时发生严重错误，请联系管理员。", ephemeral=True
             )
+
+    @app_commands.command(name="全局搜索", description="开始一次仅自己可见的全局搜索")
+    async def start_global_search_flow(self, interaction: discord.Interaction):
+        """启动全局搜索流程的通用逻辑。"""
+        await self._start_global_search(interaction)
 
     @app_commands.command(name="搜索作者", description="快速搜索指定作者的所有帖子")
     @app_commands.describe(author="要搜索的作者（@用户 或 用户ID）")
@@ -635,12 +410,11 @@ class Search(commands.Cog):
         :return: 包含搜索结果信息的字典
         """
         try:
-            logger.debug(f"--- 搜索开始 (Page: {page}) ---")
-            logger.debug(f"初始QO: {search_qo}")
+            # logger.debug(f"搜索开始时QO: {search_qo}")
             async with self.session_factory() as session:
                 repo = SearchRepository(session, self.tag_service)
                 user_prefs = await repo.get_user_preferences(interaction.user.id)
-                logger.debug(f"用户偏好: {user_prefs}")
+                # logger.debug(f"用户偏好: {user_prefs}")
 
                 per_page = 5
                 preview_mode = "thumbnail"
@@ -663,7 +437,7 @@ class Search(commands.Cog):
                             user_prefs.exclude_keyword_exemption_markers
                         )
 
-                logger.debug(f"合并后QO: {search_qo}")
+                # logger.debug(f"合并后QO: {search_qo}")
 
                 # 设置分页
                 offset = (page - 1) * per_page
@@ -680,7 +454,7 @@ class Search(commands.Cog):
             # 构建 embeds
             embeds = []
             if not interaction.guild:
-                logger.warning("搜索时，无法获取 guild 对象，无法构建结果 embeds。")
+                logger.warning("搜索时，无法获取 guild 对象，无法构建结果 embeds")
             else:
                 for thread in threads:
                     embed = await ThreadEmbedBuilder.build(

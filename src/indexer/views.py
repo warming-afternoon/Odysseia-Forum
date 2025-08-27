@@ -52,7 +52,7 @@ class IndexerDashboard(discord.ui.View):
 
     async def start(self, interaction: discord.Interaction):
         """启动仪表板并发送初始消息。"""
-        logging.info(f"[{self.channel.id}] Dashboard.start() called.")
+        logging.debug(f"[{self.channel.id}] Dashboard.start() called.")
         self.interaction = interaction
         self.start_time = interaction.created_at  # 记录交互创建时间
 
@@ -66,7 +66,7 @@ class IndexerDashboard(discord.ui.View):
         )
         self.cog.bot.loop.create_task(self.cog.run_indexer(self))
         self.ui_updater_task = self.cog.bot.loop.create_task(self.updater_loop())
-        logging.info(f"[{self.channel.id}] Dashboard.start() finished, tasks created.")
+        logging.debug(f"[{self.channel.id}] Dashboard.start() finished, tasks created.")
 
     def get_progress(self):
         """获取此特定索引作业的进度"""

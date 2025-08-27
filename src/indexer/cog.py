@@ -64,7 +64,7 @@ class Indexer(commands.Cog):
 
     async def run_indexer(self, dashboard: IndexerDashboard):
         """运行生产者和消费者任务"""
-        logging.info(f"[{dashboard.channel.id}] run_indexer 开始")
+        logging.debug(f"[{dashboard.channel.id}] run_indexer 开始")
 
         # 步骤 1: 预同步该频道的所有可用标签，避免后续的并发冲突
         try:

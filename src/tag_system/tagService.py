@@ -24,7 +24,7 @@ class TagService:
         从数据库加载所有标签，并构建/重建缓存。
         这应该在机器人启动时以及索引更新后调用。
         """
-        logger.info("Building tag cache...")
+        logger.debug("Building tag cache...")
         async with self.session_factory() as session:
             repo = TagSystemRepository(session)
             all_tags = await repo.get_all_tags()

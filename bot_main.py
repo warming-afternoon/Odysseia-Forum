@@ -23,6 +23,7 @@ from tag_system.tagService import TagService
 from indexer.cog import Indexer
 from search.cog import Search
 from auditor.cog import Auditor
+from config.cog import Configuration
 from shared.api_scheduler import APIScheduler
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,7 @@ class MyBot(commands.Bot):
         return  # 什么都不做
 
     async def setup_hook(self):
-        """在机器人登录前执行的异步初始化。"""
+        """在机器人登录前执行的初始化。"""
         # 启动API调度器
         self.api_scheduler.start()
         await init_db()
@@ -88,6 +89,7 @@ class MyBot(commands.Bot):
                     api_scheduler=self.api_scheduler,
                     tag_system_cog=cast(TagSystem, retrieved_tag_system_cog),
                 ),
+                Configuration(bot=self),
             ]
             await asyncio.gather(*(self.add_cog(cog) for cog in dependent_cogs))
         else:

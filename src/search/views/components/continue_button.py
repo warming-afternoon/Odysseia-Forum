@@ -35,6 +35,7 @@ class ContinueButton(discord.ui.Button):
         view.tag_logic = self.state.get("tag_logic", "and")
         view.sort_method = self.state.get("sort_method", "comprehensive")
         view.sort_order = self.state.get("sort_order", "desc")
+        view.page = self.state.get("page", 1)
 
         # 使用恢复的状态更新视图
-        await view.update_view(interaction, page=self.state.get("page", 1))
+        await view.update_view(interaction, page=view.page)
