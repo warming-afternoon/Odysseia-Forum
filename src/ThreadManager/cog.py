@@ -3,13 +3,14 @@ from discord import app_commands
 from discord.ext import commands
 import datetime
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from typing import Coroutine, TYPE_CHECKING, Union
+from typing import Coroutine, TYPE_CHECKING, Union, List, Tuple, Any
 
 from shared.safe_defer import safe_defer
+from src.config.repository import ConfigRepository # 导入正确的Repository
 
 if TYPE_CHECKING:
     from bot_main import MyBot
-from .repository import TagSystemRepository
+from .repository import ThreadManagerRepository
 from .views.vote_view import TagVoteView
 
 import logging
@@ -17,42 +18,140 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class TagSystem(commands.Cog):
+from src.core.cache_service import CacheService
+
+
+class ThreadManager(commands.Cog):
     """处理标签同步与评价"""
 
-    def __init__(self, bot: "MyBot", session_factory: async_sessionmaker, config: dict):
+    def __init__(
+        self,
+        bot: "MyBot",
+        session_factory: async_sessionmaker,
+        config: dict,
+        cache_service: CacheService,
+    ):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
-        self.indexed_channel_ids = set()  # 缓存已索引的频道ID
-        logger.info("TagSystem 模块已加载")
-
-    async def cog_load(self):
-        """Cog加载时初始化缓存"""
-        await self.refresh_indexed_channels_cache()
-
-    @commands.Cog.listener()
-    async def on_index_updated(self):
-        """监听由 Indexer 发出的索引更新事件。"""
-        logger.info("接收到 'index_updated' 事件，正在刷新标签系统的频道缓存...")
-        await self.refresh_indexed_channels_cache()
-
-    async def refresh_indexed_channels_cache(self):
-        """刷新已索引频道的缓存"""
-        async with self.session_factory() as session:
-            repo = TagSystemRepository(session)
-            self.indexed_channel_ids = set(await repo.get_indexed_channel_ids())
-        logger.info(f"已缓存的索引频道: {self.indexed_channel_ids}")
+        self.cache_service = cache_service
+        logger.info("ThreadManager 模块已加载")
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道是否已索引"""
-        return channel_id in self.indexed_channel_ids
+        return self.cache_service.is_channel_indexed(channel_id)
+
+    async def _notify_user_of_mutex_removal(self, thread: discord.Thread, conflicts: List[Tuple[Any, set]]):
+        """通知用户他们的帖子因为互斥规则被修改了。"""
+        if not thread.owner:
+            logger.warning(f"无法获取帖子 {thread.id} 的作者，无法发送通知。")
+            return
+
+        author = thread.owner
+
+        parent_channel_str = '未知频道'
+        if thread.parent:
+            parent_channel_str = f"[{thread.parent.name}]({thread.parent.jump_url})"
+        
+        embed = discord.Embed(
+            title="🏷️ 帖子标签自动修改通知",
+            description=f"您发表在 {thread.guild.name} > {parent_channel_str} 的帖子 "
+                        f"[{thread.name}]({thread.jump_url})\n"
+                        f"其标签已被自动修改",
+            color=discord.Color.orange()
+        )
+        embed.add_field(name="原因", value="触发了互斥标签规则", inline=False)
+
+        for i, (group, removed_tags_for_group) in enumerate(conflicts):
+            sorted_rules = sorted(group.rules, key=lambda r: r.priority)
+            group_tags_list = [f"优先级 {j+1} : {rule.tag_name}" for j, rule in enumerate(sorted_rules)]
+            group_tags_str = "\n".join(group_tags_list)
+            
+            embed.add_field(
+                name=f"冲突组 {i+1}",
+                value=f"**规则**:\n{group_tags_str}\n**被移除的标签**:\n{', '.join(removed_tags_for_group)}",
+                inline=False
+            )
+        
+        embed.set_footer(text="系统自动保留了冲突组中优先级最高的标签\n请右键点击左侧频道列表中的帖子名，对标签进行修改\n选择其中一个标签进行保留")
+
+        async def send_dm():
+            try:
+                await author.send(embed=embed)
+                logger.info(f"已向用户 {author.id} 发送互斥标签移除私信通知。")
+            except discord.Forbidden:
+                logger.warning(f"无法向用户 {author.id} 发送私信，将在原帖中发送公开通知。")
+                # 发送备用公开通知
+                await self.bot.api_scheduler.submit(
+                    coro_factory=lambda: thread.send(content=f"{author.mention}，你的帖子标签已被修改，详情请见上方通知。", embed=embed),
+                    priority=3
+                )
+            except Exception as e:
+                logger.error(f"向用户 {author.id} 发送私信时发生未知错误。", exc_info=e)
+        
+        await self.bot.api_scheduler.submit(coro_factory=send_dm, priority=3)
+
+    async def apply_mutex_tag_rules(self, thread: discord.Thread) -> bool:
+        """检查并应用互斥标签规则。如果进行了修改，则返回 True。"""
+        applied_tags = thread.applied_tags
+        if not applied_tags or len(applied_tags) < 2:
+            return False
+
+        post_tag_name_to_id = {tag.name: tag.id for tag in applied_tags}
+        post_tag_names = set(post_tag_name_to_id.keys())
+
+        async with self.session_factory() as session:
+            repo = ConfigRepository(session) # 使用新的ConfigRepository
+            groups = await repo.get_all_mutex_groups_with_rules()
+
+        tags_to_remove_ids = set()
+        all_conflicts = [] # 收集所有冲突信息
+
+        for group in groups:
+            sorted_rules = sorted(group.rules, key=lambda r: r.priority)
+            conflicting_names = [rule.tag_name for rule in sorted_rules if rule.tag_name in post_tag_names]
+
+            # 如果帖子的标签中，有超过一个（含）的标签在本互斥组内
+            if len(conflicting_names) > 1:
+                group_tags_to_remove = set(conflicting_names[1:])
+                # 保留优先级最高的（第一个），移除其他的
+                for name_to_remove in group_tags_to_remove:
+                    tags_to_remove_ids.add(post_tag_name_to_id[name_to_remove])
+                
+                # 记录冲突信息
+                all_conflicts.append((group, group_tags_to_remove))
+
+        if tags_to_remove_ids:
+            # 发送通知 (一次性发送所有冲突)
+            if all_conflicts:
+                await self._notify_user_of_mutex_removal(thread, all_conflicts)
+
+            # 使用列表推导式创建新的标签列表
+            final_tags = [tag for tag in applied_tags if tag.id not in tags_to_remove_ids]
+            
+            # 使用集合推导式获取被移除的标签名称
+            removed_tag_names = {tag.name for tag in applied_tags if tag.id in tags_to_remove_ids}
+            logger.info(f"帖子 {thread.id} 发现互斥标签，将移除: {', '.join(removed_tag_names)}")
+
+            try:
+                await self.bot.api_scheduler.submit(
+                    coro_factory=lambda: thread.edit(applied_tags=final_tags),
+                    priority=2
+                )
+                return True
+            except Exception as e:
+                logger.error(f"自动修改帖子 {thread.id} 的标签时失败", exc_info=e)
+        
+        return False
 
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread):
         if self.is_channel_indexed(channel_id=thread.parent_id):
-            # 事件触发的同步是高优先级
-            await self.sync_thread(thread=thread, priority=1)
+            modified = await self.apply_mutex_tag_rules(thread)
+            if modified:
+                # 标签被修改，on_thread_update会被触发，届时再同步
+                return
+            await self.sync_thread(thread=thread)
 
     @commands.Cog.listener()
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
@@ -60,16 +159,19 @@ class TagSystem(commands.Cog):
             self.is_channel_indexed(channel_id=after.parent_id)
             and before.applied_tags != after.applied_tags
         ):
-            # 事件触发的同步是高优先级
-            await self.sync_thread(thread=after, priority=1)
+            modified = await self.apply_mutex_tag_rules(after)
+            if modified:
+                # 标签被修改，会再次触发 on_thread_update，届时再同步
+                return
+            await self.sync_thread(thread=after)
 
     @commands.Cog.listener()
     async def on_thread_delete(self, thread: discord.Thread):
         if self.is_channel_indexed(thread.parent_id):
             async with self.session_factory() as session:
-                repo = TagSystemRepository(session=session)
+                repo = ThreadManagerRepository(session=session)
                 await repo.delete_thread_index(thread_id=thread.id)
-            await self.refresh_indexed_channels_cache()
+            # 缓存现在由全局事件处理，此处不再需要手动刷新
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -87,7 +189,7 @@ class TagSystem(commands.Cog):
 
         if self.is_channel_indexed(thread.parent_id):
             async with self.session_factory() as session:
-                repo = TagSystemRepository(session)
+                repo = ThreadManagerRepository(session)
                 await repo.increment_reply_count(thread.id, message.created_at)
 
     @commands.Cog.listener()
@@ -105,12 +207,12 @@ class TagSystem(commands.Cog):
                     # 因为这是 raw 事件，缓存的 channel 对象可能不是最新的
                     # 我们需要确保同步的是最完整的数据
                     await self.sync_thread(
-                        thread=channel, priority=2, fetch_if_incomplete=True
+                        thread=channel, fetch_if_incomplete=True
                     )
                 else:
                     # 普通消息编辑只更新活跃时间
                     async with self.session_factory() as session:
-                        repo = TagSystemRepository(session)
+                        repo = ThreadManagerRepository(session)
                         # payload 中没有编辑时间，所以我们用当前时间
                         await repo.update_thread_last_active_at(
                             channel.id, datetime.datetime.now(datetime.timezone.utc)
@@ -131,13 +233,13 @@ class TagSystem(commands.Cog):
                 # 如果首楼被删除，删除整个索引
                 if payload.message_id == channel.id:
                     async with self.session_factory() as session:
-                        repo = TagSystemRepository(session=session)
+                        repo = ThreadManagerRepository(session=session)
                         await repo.delete_thread_index(thread_id=channel.id)
-                    await self.refresh_indexed_channels_cache()
+                    # 缓存现在由全局事件处理，此处不再需要手动刷新
                 else:
                     # 普通消息删除，只更新回复数
                     async with self.session_factory() as session:
-                        repo = TagSystemRepository(session)
+                        repo = ThreadManagerRepository(session)
                         await repo.decrement_reply_count(channel.id)
         except Exception:
             logger.warning("处理消息删除事件失败", exc_info=True)
@@ -194,7 +296,7 @@ class TagSystem(commands.Cog):
             )
 
             async with self.session_factory() as session:
-                repo = TagSystemRepository(session)
+                repo = ThreadManagerRepository(session)
                 await repo.update_thread_reaction_count(thread.id, reaction_count)
         except Exception:
             logger.warning(f"更新反应数失败 (帖子ID: {thread.id})", exc_info=True)
@@ -216,7 +318,7 @@ class TagSystem(commands.Cog):
 
         try:
             async with self.session_factory() as session:
-                repo = TagSystemRepository(session=session)
+                repo = ThreadManagerRepository(session=session)
                 await repo.get_or_create_tags(tags_data)
             logger.debug(
                 f"为频道 '{channel.name}' (ID: {channel.id}) 预同步了 {len(tags_data)} 个标签。"
@@ -256,7 +358,7 @@ class TagSystem(commands.Cog):
         :param priority: 此操作的API调用优先级。
         :param fetch_if_incomplete: 如果为True，则强制从API获取最新的帖子对象，用于处理可能不完整的对象。
         """
-        # 如果传入的是帖子ID（来自审计员），则先通过API获取帖子对象
+        # 如果传入的是帖子ID（来自审计模块），则先通过API获取帖子对象
         if isinstance(thread, int):
             thread_id = thread
             try:
@@ -269,21 +371,21 @@ class TagSystem(commands.Cog):
                         f"sync_thread: 获取到的 channel {thread_id} 不是一个帖子，已将其从索引中删除。"
                     )
                     async with self.session_factory() as session:
-                        repo = TagSystemRepository(session=session)
+                        repo = ThreadManagerRepository(session=session)
                         await repo.delete_thread_index(thread_id=thread_id)
                     return
                 thread = fetched_channel
             except discord.NotFound:
                 logger.warning(
-                    f"sync_thread (by ID): 无法找到帖子 {thread_id}，可能已被删除。将从数据库中移除。"
+                    f"sync_thread: 无法找到帖子 {thread_id}，可能已被删除。将从数据库中移除。"
                 )
                 async with self.session_factory() as session:
-                    repo = TagSystemRepository(session=session)
+                    repo = ThreadManagerRepository(session=session)
                     await repo.delete_thread_index(thread_id=thread_id)
                 return
             except Exception as e:
                 logger.error(
-                    f"sync_thread (by ID): 通过ID {thread_id} 获取帖子时发生未知错误: {e}",
+                    f"sync_thread: 通过ID {thread_id} 获取帖子时发生未知错误: {e}",
                     exc_info=True,
                 )
                 return
@@ -302,13 +404,10 @@ class TagSystem(commands.Cog):
                     f"sync_thread (fetch_if_incomplete): 无法找到帖子 {thread.id}，可能已被删除。"
                 )
                 async with self.session_factory() as session:
-                    repo = TagSystemRepository(session=session)
+                    repo = ThreadManagerRepository(session=session)
                     await repo.delete_thread_index(thread_id=thread.id)
                 return
         assert isinstance(thread, discord.Thread)
-
-        # 将频道添加到已索引缓存中
-        self.indexed_channel_ids.add(thread.parent_id)
 
         tags_data = {t.id: t.name for t in thread.applied_tags or []}
 
@@ -328,7 +427,7 @@ class TagSystem(commands.Cog):
                 f"无法获取帖子 {thread.id} 的首楼消息，其可能已被删除\n已将其从索引中删除"
             )
             async with self.session_factory() as session:
-                repo = TagSystemRepository(session=session)
+                repo = ThreadManagerRepository(session=session)
                 await repo.delete_thread_index(thread_id=thread.id)
             return
 
@@ -361,11 +460,10 @@ class TagSystem(commands.Cog):
         }
 
         async with self.session_factory() as session:
-            repo = TagSystemRepository(session=session)
+            repo = ThreadManagerRepository(session=session)
             await repo.add_or_update_thread_with_tags(
                 thread_data=thread_data, tags_data=tags_data
             )
-        # logger.info(f"已同步帖子: {thread.name} (ID: {thread.id})")
 
     @app_commands.command(
         name="标签评价", description="对当前帖子的标签进行评价（赞或踩）"
@@ -402,7 +500,7 @@ class TagSystem(commands.Cog):
             )
             # 获取初始统计数据
             async with self.session_factory() as session:
-                repo = TagSystemRepository(session)
+                repo = ThreadManagerRepository(session)
                 initial_stats = await repo.get_tag_vote_stats(
                     interaction.channel.id, tag_map
                 )

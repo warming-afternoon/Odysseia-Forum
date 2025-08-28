@@ -9,8 +9,9 @@ from .dto.tag import TagDTO
 from .views.global_search_view import GlobalSearchView
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from .repository import SearchRepository
-from tag_system.repository import TagSystemRepository
-from tag_system.tagService import TagService
+from ThreadManager.repository import ThreadManagerRepository
+from core.tagService import TagService
+from core.cache_service import CacheService
 from search.qo.thread_search import ThreadSearchQuery
 from .views.channel_selection_view import ChannelSelectionView
 from .views.generic_search_view import GenericSearchView
@@ -36,76 +37,27 @@ class Search(commands.Cog):
         session_factory: async_sessionmaker,
         config: dict,
         tag_service: TagService,
+        cache_service: CacheService,
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
         self.tag_service = tag_service
-        self.tag_system_repo = TagSystemRepository
+        self.cache_service = cache_service
+        self.tag_system_repo = ThreadManagerRepository
         self.prefs_handler = SearchPreferencesHandler(
             self, bot, session_factory, self.tag_service
         )
-        self.channel_cache: dict[int, discord.ForumChannel] = {}  # 缓存频道对象
         self.global_search_view = GlobalSearchView(self)
         self.persistent_channel_search_view = PersistentChannelSearchView(self)
         self._has_cached_tags = False  # 用于确保 on_ready 只执行一次缓存
         logger.info("Search 模块已加载")
-
-    @commands.Cog.listener()
-    async def on_ready(self):
-        """当机器人准备就绪时，执行一次性的缓存任务"""
-        if not self._has_cached_tags:
-            # logger.info("机器人已准备就绪，开始缓存已索引的论坛频道...")
-            await self.cache_indexed_channels()
-            self._has_cached_tags = True
-
-    @commands.Cog.listener()
-    async def on_index_updated(self):
-        """监听由 Indexer 发出的索引更新事件，并刷新所有相关缓存。"""
-        logger.debug("接收到 'index_updated' 事件，开始刷新缓存...")
-
-        # 刷新频道缓存
-        await self.cache_indexed_channels()
-        logger.debug("频道缓存已刷新")
-
-        # 刷新 TagService 缓存
-        if self.tag_service:
-            
-            await self.tag_service.build_cache()
-            logger.debug("TagService 缓存已刷新")
 
     async def cog_load(self):
         """在Cog加载时注册持久化View"""
         # 注册持久化view，使其在bot重启后仍能响应
         self.bot.add_view(self.global_search_view)
         self.bot.add_view(self.persistent_channel_search_view)
-
-    async def cache_indexed_channels(self):
-        """缓存所有已索引的论坛频道对象"""
-        # logger.info("开始刷新频道缓存...")
-        try:
-            async with self.session_factory() as session:
-                repo = self.tag_system_repo(session)
-                indexed_channel_ids = await repo.get_indexed_channel_ids()
-
-            new_cache = {}
-            for channel_id in indexed_channel_ids:
-                # bot.get_channel() 从内部缓存获取，无API调用
-                channel = self.bot.get_channel(channel_id)
-                if isinstance(channel, discord.ForumChannel):
-                    new_cache[channel_id] = channel
-                else:
-                    logger.warning(
-                        f"无法从机器人缓存中找到ID为 {channel_id} 的论坛频道，或该频道类型不正确。"
-                    )
-
-            self.channel_cache = new_cache
-            # logger.info(
-            #     f"频道缓存刷新完毕，共缓存 {len(self.channel_cache)} 个论坛频道。"
-            # )
-
-        except Exception as e:
-            logger.error(f"缓存频道时出错: {e}", exc_info=True)
 
     def get_merged_tags(self, channel_ids: list[int]) -> list[TagDTO]:
         """
@@ -115,7 +67,7 @@ class Search(commands.Cog):
         all_tags_names = set()
 
         for channel_id in channel_ids:
-            channel = self.channel_cache.get(channel_id)
+            channel = self.cache_service.indexed_channels.get(channel_id)
             if channel:
                 all_tags_names.update(tag.name for tag in channel.available_tags)
 
@@ -261,7 +213,7 @@ class Search(commands.Cog):
             )
             embed.add_field(
                 name="使用方法",
-                value="1. 点击下方左侧按钮选择要搜索的论坛频道\n2. 设置搜索条件（标签、关键词等）\n3. 查看搜索结果",
+                value="1. 点击下方左侧按钮，选择要搜索的论坛频道\n2. 设置搜索条件（标签、关键词等）\n3. 查看搜索结果",
                 inline=False,
             )
             embed.add_field(
@@ -298,7 +250,7 @@ class Search(commands.Cog):
         await safe_defer(interaction, ephemeral=True)
         try:
             # 直接从缓存中获取所有可搜索的频道
-            channels = list(self.channel_cache.values())
+            channels = self.cache_service.get_indexed_channels()
 
             logger.debug(f"从缓存中加载了 {len(channels)} 个频道。")
 
@@ -309,7 +261,7 @@ class Search(commands.Cog):
                 )
                 return
 
-            all_channel_ids = list(self.channel_cache.keys())
+            all_channel_ids = list(self.cache_service.indexed_channel_ids)
 
             # 获取用户偏好 DTO
             async with self.session_factory() as session:

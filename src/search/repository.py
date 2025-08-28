@@ -13,7 +13,7 @@ from shared.models.user_search_preferences import UserSearchPreferences
 from .dto.user_search_preferences import UserSearchPreferencesDTO
 from search.qo.thread_search import ThreadSearchQuery
 from shared.ranking_config import RankingConfig
-from tag_system.tagService import TagService
+from core.tagService import TagService
 
 
 class SearchRepository:

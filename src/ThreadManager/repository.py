@@ -15,7 +15,7 @@ from shared.models.thread_tag_link import ThreadTagLink
 logger = logging.getLogger(__name__)
 
 
-class TagSystemRepository:
+class ThreadManagerRepository:
     """封装与标签系统相关的数据库操作。"""
 
     def __init__(self, session: AsyncSession):

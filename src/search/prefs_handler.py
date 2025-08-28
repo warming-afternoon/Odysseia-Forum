@@ -10,7 +10,7 @@ from typing import List, Optional, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from shared.safe_defer import safe_defer
 from .repository import SearchRepository
-from tag_system.tagService import TagService
+from core.tagService import TagService
 from .views.components.keyword_button import KeywordModal
 from .dto.user_search_preferences import UserSearchPreferencesDTO
 from .views.tag_preferences_view import TagPreferencesView

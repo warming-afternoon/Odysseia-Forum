@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from shared.safe_defer import safe_defer
-from tag_system.cog import TagSystem
-from tag_system.tagService import TagService
+from ThreadManager.cog import ThreadManager
+from core.tagService import TagService
 from .views import IndexerDashboard
 
 
@@ -68,12 +68,12 @@ class Indexer(commands.Cog):
 
         # 步骤 1: 预同步该频道的所有可用标签，避免后续的并发冲突
         try:
-            tag_system_cog = cast(TagSystem, self.bot.get_cog("TagSystem"))
-            if tag_system_cog:
-                await tag_system_cog.pre_sync_forum_tags(dashboard.channel)
+            thread_manager_cog = cast(ThreadManager, self.bot.get_cog("ThreadManager"))
+            if thread_manager_cog:
+                await thread_manager_cog.pre_sync_forum_tags(dashboard.channel)
             else:
                 logging.warning(
-                    f"[{dashboard.channel.id}] 无法获取 TagSystem Cog，跳过标签预同步。"
+                    f"[{dashboard.channel.id}] 无法获取 ThreadManager Cog，跳过标签预同步。"
                 )
         except Exception as e:
             # 如果预同步失败，记录一个致命错误并停止索引
@@ -191,7 +191,7 @@ class Indexer(commands.Cog):
 
     async def consumer(self, dashboard: IndexerDashboard, consumer_id: int):
         """消费者：从队列中取出帖子并处理，受信号量控制。"""
-        tag_system_cog = cast(TagSystem, self.bot.get_cog("TagSystem"))
+        thread_manager_cog = cast(ThreadManager, self.bot.get_cog("ThreadManager"))
 
         try:
             while True:
@@ -208,8 +208,8 @@ class Indexer(commands.Cog):
                     thread = await dashboard.queue.get()
 
                     try:
-                        if tag_system_cog:
-                            await tag_system_cog.sync_thread(
+                        if thread_manager_cog:
+                            await thread_manager_cog.sync_thread(
                                 thread, fetch_if_incomplete=True
                             )
                     except Exception as e:

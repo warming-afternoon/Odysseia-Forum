@@ -222,9 +222,7 @@ class TagPreferencesView(discord.ui.View):
 
     async def cancel_view(self, interaction: discord.Interaction):
         """取消操作，删除此视图"""
-        await self.handler.bot.api_scheduler.submit(
-            coro_factory=lambda: safe_defer(interaction), priority=1
-        )
+        await safe_defer(interaction)
 
         # 删除当前视图
         await self.handler.bot.api_scheduler.submit(

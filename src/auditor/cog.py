@@ -10,7 +10,7 @@ from src.auditor.repository import AuditorRepository
 from src.shared.api_scheduler import APIScheduler
 
 if TYPE_CHECKING:
-    from src.tag_system.cog import TagSystem
+    from src.ThreadManager.cog import ThreadManager
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +29,12 @@ class Auditor(commands.Cog):
         bot: commands.Bot,
         session_factory: async_sessionmaker,
         api_scheduler: APIScheduler,
-        tag_system_cog: "TagSystem",
+        thread_manager_cog: "ThreadManager",
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.api_scheduler = api_scheduler
-        self.tag_system_cog = tag_system_cog
+        self.thread_manager_cog = thread_manager_cog
         self.audit_queue: List[int] = []
         logger.info("Auditor 模块已加载")
 
@@ -83,7 +83,7 @@ class Auditor(commands.Cog):
                     # logger.debug(f"正在提交帖子 {thread_id} 的审计任务。")
                     # 使用最低优先级(10)来调度同步任务，确保不影响用户交互
                     await self.api_scheduler.submit(
-                        coro_factory=lambda: self.tag_system_cog.sync_thread(thread_id),
+                        coro_factory=lambda: self.thread_manager_cog.sync_thread(thread_id),
                         priority=10,
                     )
                     # 等待2秒，以极低的速率进行审计，避免触发API速率限制

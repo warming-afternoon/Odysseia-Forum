@@ -2,11 +2,14 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Callable
+from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from shared.ranking_config import RankingConfig, PresetConfigs
 from shared.safe_defer import safe_defer
-from .embed_builder import RankingEmbedBuilder
+from .embed_builder import ConfigEmbedBuilder
+from .mutex_tags_handler import MutexTagsHandler
+from src.core.tagService import TagService
 
 
 if TYPE_CHECKING:
@@ -17,13 +20,33 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 class Configuration(commands.Cog):
-    """管理搜索排序算法的配置"""
+    """管理机器人各项配置"""
 
-    def __init__(self, bot: "MyBot"):
+    def __init__(
+        self,
+        bot: "MyBot",
+        session_factory: async_sessionmaker,
+        api_scheduler,
+        tag_service: TagService,
+    ):
         self.bot = bot
+        self.session_factory = session_factory
+        self.api_scheduler = api_scheduler
+        self.tag_service = tag_service
+        self.mutex_handler = MutexTagsHandler(
+            bot, self.session_factory, self.api_scheduler, self.tag_service
+        )
         logger.info("Config 模块已加载")
 
-    @app_commands.command(name="排序算法配置", description="管理员设置搜索排序算法参数")
+    @app_commands.command(name="查看目前排序算法", description="查看当前搜索排序算法配置")
+    async def view_ranking_config(self, interaction: discord.Interaction):
+        await safe_defer(interaction, ephemeral=True)
+        embed = ConfigEmbedBuilder.build_view_config_embed()
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    config_group = app_commands.Group(name="配置", description="管理机器人各项配置")
+
+    @config_group.command(name="排序算法", description="管理员设置搜索排序算法参数")
     @app_commands.describe(
         preset="预设配置方案",
         time_weight="时间权重因子 (0.0-1.0)",
@@ -43,6 +66,7 @@ class Configuration(commands.Cog):
             app_commands.Choice(name="严格质量控制", value="strict_quality"),
         ]
     )
+    @app_commands.checks.has_permissions(administrator=True)
     async def configure_ranking(
         self,
         interaction: discord.Interaction,
@@ -55,18 +79,8 @@ class Configuration(commands.Cog):
         severe_penalty: Optional[float] = None,
         mild_penalty: Optional[float] = None,
     ):
-        # 检查权限 (需要管理员权限)
         await safe_defer(interaction, ephemeral=True)
-        assert isinstance(interaction.user, discord.Member)
-        if not interaction.user.guild_permissions.administrator:
-            await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.followup.send(
-                    "此命令需要管理员权限。", ephemeral=True
-                ),
-                priority=1,
-            )
-            return
-
+        
         try:
             # 应用预设配置
             if preset:
@@ -116,16 +130,10 @@ class Configuration(commands.Cog):
                     )
 
                     # 如果权重和不为1，按比例重新分配
-                    if abs(current_total - 1.0) > 0.001:
-                        RankingConfig.TIME_WEIGHT_FACTOR = (
-                            RankingConfig.TIME_WEIGHT_FACTOR / current_total
-                        )
-                        RankingConfig.TAG_WEIGHT_FACTOR = (
-                            RankingConfig.TAG_WEIGHT_FACTOR / current_total
-                        )
-                        RankingConfig.REACTION_WEIGHT_FACTOR = (
-                            RankingConfig.REACTION_WEIGHT_FACTOR / current_total
-                        )
+                    if abs(current_total - 1.0) > 0.001 and current_total > 0:
+                        RankingConfig.TIME_WEIGHT_FACTOR /= current_total
+                        RankingConfig.TAG_WEIGHT_FACTOR /= current_total
+                        RankingConfig.REACTION_WEIGHT_FACTOR /= current_total
 
                 if time_decay is not None:
                     if 0.01 <= time_decay <= 0.5:
@@ -155,10 +163,7 @@ class Configuration(commands.Cog):
 
             # 验证配置
             RankingConfig.validate()
-
-            # 构建响应消息
-            embed = RankingEmbedBuilder.build_config_updated_embed(config_name)
-
+            embed = ConfigEmbedBuilder.build_config_updated_embed(config_name)
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
                     embed=embed, ephemeral=True
@@ -181,12 +186,25 @@ class Configuration(commands.Cog):
                 priority=1,
             )
 
-    @app_commands.command(name="查看排序配置", description="查看当前搜索排序算法配置")
-    async def view_ranking_config(self, interaction: discord.Interaction):
-        await safe_defer(interaction, ephemeral=True)
-        embed = RankingEmbedBuilder.build_view_config_embed()
+    @configure_ranking.error
+    async def on_ranking_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ 此命令需要 admin 权限。", ephemeral=True)
+        else:
+            logger.error("配置排序命令出错", exc_info=error)
+            await interaction.response.send_message(f"❌ 命令执行失败: {error}", ephemeral=True)
 
-        await self.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.followup.send(embed=embed, ephemeral=True),
-            priority=1,
-        )
+
+    @config_group.command(name="互斥标签组", description="配置互斥标签组")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def configure_mutex_tags(self, interaction: discord.Interaction):
+        """唤出私密的互斥标签组配置面板。"""
+        await self.mutex_handler.start_configuration_flow(interaction)
+
+    @configure_mutex_tags.error
+    async def on_mutex_tags_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message("❌ 此命令需要 admin 权限。", ephemeral=True)
+        else:
+            logger.error("配置互斥标签命令出错", exc_info=error)
+            await interaction.response.send_message(f"❌ 命令执行失败: {error}", ephemeral=True)

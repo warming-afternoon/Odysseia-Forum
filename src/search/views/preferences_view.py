@@ -277,17 +277,13 @@ class PreferencesView(discord.ui.View):
             return  # Modal 流程自己处理响应，此处返回
 
         elif custom_id == "prefs_preview":
-            await self.handler.bot.api_scheduler.submit(
-                coro_factory=lambda: safe_defer(interaction), priority=1
-            )
+            await safe_defer(interaction)
             await self.handler.toggle_preview_mode(interaction.user.id)
             await self.refresh(interaction)
             return
 
         elif custom_id == "prefs_clear":
-            await self.handler.bot.api_scheduler.submit(
-                coro_factory=lambda: safe_defer(interaction), priority=1
-            )
+            await safe_defer(interaction)
             await self.handler.clear_user_preferences(interaction.user.id)
             await self.refresh(interaction)
             return

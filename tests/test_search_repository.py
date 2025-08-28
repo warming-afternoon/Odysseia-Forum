@@ -21,7 +21,7 @@ from shared.fts5_tokenizer import register_jieba_tokenizer
 from shared.models.thread import Thread
 from search.repository import SearchRepository
 from search.qo.thread_search import ThreadSearchQuery
-from tag_system.tagService import TagService
+from core.tagService import TagService
 
 # 使用内存数据库进行测试
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"

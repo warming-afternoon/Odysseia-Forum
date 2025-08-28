@@ -18,8 +18,9 @@ import asyncio
 from typing import cast
 
 from shared.database import AsyncSessionFactory, init_db, close_db
-from tag_system.cog import TagSystem
-from tag_system.tagService import TagService
+from ThreadManager.cog import ThreadManager
+from core.tagService import TagService
+from core.cache_service import CacheService
 from indexer.cog import Indexer
 from search.cog import Search
 from auditor.cog import Auditor
@@ -39,7 +40,8 @@ class MyBot(commands.Bot):
 
         self.config = config
         self.db_url = config["db_url"]
-        self.tag_service: TagService | None = None
+        self.tag_service: TagService
+        self.cache_service: CacheService
 
         # 从配置初始化API调度器
         concurrency = self.config.get("performance", {}).get(
@@ -54,48 +56,71 @@ class MyBot(commands.Bot):
         """
         return  # 什么都不做
 
+    async def on_index_updated_global(self):
+        """接收 'index_updated' 事件并刷新缓存"""
+        logger.debug("接收 'index_updated' 事件，开始刷新缓存")
+        if self.tag_service:
+            await self.tag_service.build_cache()
+        if self.cache_service:
+            await self.cache_service.build_or_refresh_cache()
+        logger.info("Core 缓存刷新完毕")
+
     async def setup_hook(self):
         """在机器人登录前执行的初始化。"""
         # 启动API调度器
         self.api_scheduler.start()
         await init_db()
 
+        # 1. 初始化核心服务
         self.tag_service = TagService(AsyncSessionFactory)
-        tag_system_cog = TagSystem(
-            bot=self, session_factory=AsyncSessionFactory, config=self.config
-        )
-        await asyncio.gather(
-            self.tag_service.build_cache(), self.add_cog(tag_system_cog)
-        )
+        self.cache_service = CacheService(self, AsyncSessionFactory)
+        
+        asyncio.create_task(self.tag_service.build_cache())
+        asyncio.create_task(self.cache_service.build_or_refresh_cache())
 
-        retrieved_tag_system_cog = self.get_cog("TagSystem")
-        if retrieved_tag_system_cog and self.tag_service:
-            dependent_cogs = [
-                Indexer(
-                    bot=self,
-                    session_factory=AsyncSessionFactory,
-                    config=self.config,
-                    tag_service=self.tag_service,
-                ),
-                Search(
-                    bot=self,
-                    session_factory=AsyncSessionFactory,
-                    config=self.config,
-                    tag_service=self.tag_service,
-                ),
-                Auditor(
-                    bot=self,
-                    session_factory=AsyncSessionFactory,
-                    api_scheduler=self.api_scheduler,
-                    tag_system_cog=cast(TagSystem, retrieved_tag_system_cog),
-                ),
-                Configuration(bot=self),
-            ]
-            await asyncio.gather(*(self.add_cog(cog) for cog in dependent_cogs))
-        else:
-            logger.error(
-                "无法加载依赖性 Cogs，因为 TagService 或 TagSystem 未能成功加载。"
-            )
+        # logger.info("核心服务已初始化，缓存构建任务已在后台启动。")
+
+        # 2. 加载 Cogs 并注入服务
+        thread_manager_cog = ThreadManager(
+            bot=self,
+            session_factory=AsyncSessionFactory,
+            config=self.config,
+            cache_service=self.cache_service,
+        )
+        await self.add_cog(thread_manager_cog)
+
+        dependent_cogs = [
+            Indexer(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                config=self.config,
+                tag_service=self.tag_service,
+            ),
+            Search(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                config=self.config,
+                tag_service=self.tag_service,
+                cache_service=self.cache_service,
+            ),
+            Auditor(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                api_scheduler=self.api_scheduler,
+                thread_manager_cog=thread_manager_cog,
+            ),
+            Configuration(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                api_scheduler=self.api_scheduler,
+                tag_service=self.tag_service,
+            ),
+        ]
+        await asyncio.gather(*(self.add_cog(cog) for cog in dependent_cogs))
+        logger.info("所有 Cogs 已加载。")
+
+        # 3. 注册全局事件监听器
+        self.add_listener(self.on_index_updated_global, "on_index_updated")
 
         # --- 同步应用程序命令 ---
         try:
