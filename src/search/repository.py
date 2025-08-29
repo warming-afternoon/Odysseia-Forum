@@ -9,8 +9,6 @@ from shared.database import thread_fts_table
 from shared.models.thread_tag_link import ThreadTagLink
 from shared.models.thread import Thread
 from shared.models.tag import Tag
-from shared.models.user_search_preferences import UserSearchPreferences
-from .dto.user_search_preferences import UserSearchPreferencesDTO
 from search.qo.thread_search import ThreadSearchQuery
 from shared.ranking_config import RankingConfig
 from core.tagService import TagService
@@ -249,30 +247,6 @@ class SearchRepository:
                 "Error during search_threads_with_count execution", exc_info=True
             )
             raise
-
-    async def get_user_preferences(
-        self, user_id: int
-    ) -> Optional[UserSearchPreferencesDTO]:
-        """获取用户的搜索偏好设置"""
-        prefs_orm = await self.session.get(UserSearchPreferences, user_id)
-        if not prefs_orm:
-            return None
-        return UserSearchPreferencesDTO.model_validate(prefs_orm)
-
-    async def save_user_preferences(
-        self, user_id: int, prefs_data: dict
-    ) -> UserSearchPreferencesDTO:
-        """创建或更新用户的搜索偏好设置"""
-        prefs = await self.session.get(UserSearchPreferences, user_id)
-        if prefs:
-            for key, value in prefs_data.items():
-                setattr(prefs, key, value)
-        else:
-            prefs = UserSearchPreferences(user_id=user_id, **prefs_data)
-        self.session.add(prefs)
-        await self.session.commit()
-        await self.session.refresh(prefs)
-        return UserSearchPreferencesDTO.model_validate(prefs)
 
     async def get_tags_for_author(self, author_id: int) -> Sequence[Tag]:
         """获取指定作者发布过的所有帖子的唯一标签列表"""

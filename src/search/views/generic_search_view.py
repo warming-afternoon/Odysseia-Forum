@@ -1,12 +1,11 @@
 import discord
-import discord
-from typing import List, TYPE_CHECKING, Optional, Set
+from typing import List, TYPE_CHECKING, Set
 
-from search.dto.user_search_preferences import UserSearchPreferencesDTO
+from search.dto.search_state import SearchStateDTO
 from shared.safe_defer import safe_defer
 from shared.view.tag_select import TagSelect
 from ..qo.thread_search import ThreadSearchQuery
-from .results_view import NewSearchResultsView
+from .results_view import SearchResultsView
 from .components.keyword_button import KeywordButton, KeywordModal
 from .components.tag_logic_button import TagLogicButton
 from .components.sort_order_button import SortOrderButton
@@ -20,54 +19,21 @@ if TYPE_CHECKING:
 
 
 class GenericSearchView(discord.ui.View):
-    """筛选逻辑的核心视图，管理所有搜索参数和UI状态。"""
+    """筛选逻辑的核心视图，它操作一个 SearchStateDTO 来管理状态。"""
 
     def __init__(
         self,
         cog: "Search",
         interaction: discord.Interaction,
-        channel_ids: List[int],
-        user_prefs: Optional[UserSearchPreferencesDTO] = None,
+        search_state: SearchStateDTO,
     ):
         super().__init__(timeout=885)
         self.cog = cog
         self.original_interaction = interaction
         self.last_interaction = interaction
-        self.channel_ids = channel_ids
-
-        # --- 搜索参数 ---
-        # 根据所选频道获取合并后的标签
-        merged_tags = self.cog.get_merged_tags(self.channel_ids)
-        self.all_unique_tags: List[str] = [tag.name for tag in merged_tags]
-
-        # 从用户偏好加载初始值，否则使用默认值
-        if user_prefs:
-            self.include_tags: set[str] = set(user_prefs.include_tags or [])
-            self.exclude_tags: set[str] = set(user_prefs.exclude_tags or [])
-            # 注意：快捷搜索的作者ID不应被偏好覆盖，所以这里不加载作者偏好
-            self.author_ids: set[int] = set()
-            self.keywords = user_prefs.include_keywords or ""
-            self.exclude_keywords = user_prefs.exclude_keywords or ""
-            self.exemption_markers: List[str] = (
-                user_prefs.exclude_keyword_exemption_markers
-                if user_prefs.exclude_keyword_exemption_markers is not None
-                else ["禁", "🈲"]
-            )
-        else:
-            self.include_tags: set[str] = set()
-            self.exclude_tags: set[str] = set()
-            self.author_ids: set[int] = set()
-            self.keywords = ""
-            self.exclude_keywords = ""
-            self.exemption_markers: List[str] = ["禁", "🈲"]
-
-        self.tag_logic = "or"
-        self.sort_method = "comprehensive"
-        self.sort_order = "desc"
+        self.search_state = search_state
 
         # --- UI状态 ---
-        self.page = 1
-        self.tag_page = 0
         self.tags_per_page = 25
         self.last_search_results: dict | None = None
 
@@ -83,13 +49,15 @@ class GenericSearchView(discord.ui.View):
     def get_filter_components(self) -> List[discord.ui.Item]:
         """准备所有筛选UI组件的列表，但不添加到视图中。"""
         components = []
+        state = self.search_state
+        all_tags = state.all_available_tags
 
         # 第 0 行: 正选标签
         components.append(
             TagSelect(
-                all_tags=self.all_unique_tags,
-                selected_tags=self.include_tags,
-                page=self.tag_page,
+                all_tags=all_tags,
+                selected_tags=state.include_tags,
+                page=state.tag_page,
                 tags_per_page=self.tags_per_page,
                 placeholder_prefix="正选",
                 custom_id="generic_include_tags",
@@ -101,9 +69,9 @@ class GenericSearchView(discord.ui.View):
         # 第 1 行: 反选标签
         components.append(
             TagSelect(
-                all_tags=self.all_unique_tags,
-                selected_tags=self.exclude_tags,
-                page=self.tag_page,
+                all_tags=all_tags,
+                selected_tags=state.exclude_tags,
+                page=state.tag_page,
                 tags_per_page=self.tags_per_page,
                 placeholder_prefix="反选",
                 custom_id="generic_exclude_tags",
@@ -115,36 +83,36 @@ class GenericSearchView(discord.ui.View):
         # 第 2 行: 控制按钮
         components.append(KeywordButton(self.show_keyword_modal, row=2))
 
-        if len(self.all_unique_tags) > self.tags_per_page:
-            max_page = (len(self.all_unique_tags) - 1) // self.tags_per_page
+        if len(all_tags) > self.tags_per_page:
+            max_page = (len(all_tags) - 1) // self.tags_per_page
             components.append(
                 TagPageButton(
-                    "prev", self.on_tag_page_change, row=2, disabled=self.tag_page == 0
+                    "prev", self.on_tag_page_change, row=2, disabled=state.tag_page == 0
                 )
             )
 
         components.append(
-            TagLogicButton(self.tag_logic, self.on_tag_logic_change, row=2)
+            TagLogicButton(state.tag_logic, self.on_tag_logic_change, row=2)
         )
 
-        if len(self.all_unique_tags) > self.tags_per_page:
-            max_page = (len(self.all_unique_tags) - 1) // self.tags_per_page
+        if len(all_tags) > self.tags_per_page:
+            max_page = (len(all_tags) - 1) // self.tags_per_page
             components.append(
                 TagPageButton(
                     "next",
                     self.on_tag_page_change,
                     row=2,
-                    disabled=self.tag_page >= max_page,
+                    disabled=state.tag_page >= max_page,
                 )
             )
 
         components.append(
-            SortOrderButton(self.sort_order, self.on_sort_order_change, row=2)
+            SortOrderButton(state.sort_order, self.on_sort_order_change, row=2)
         )
 
         # 第 3 行: 排序选择器
         components.append(
-            SortMethodSelect(self.sort_method, self.on_sort_method_change, row=3)
+            SortMethodSelect(state.sort_method, self.on_sort_method_change, row=3)
         )
 
         return components
@@ -152,7 +120,6 @@ class GenericSearchView(discord.ui.View):
     async def update_view(
         self,
         interaction: discord.Interaction,
-        page: int = 1,
         rerun_search: bool = True,
         send_new_ephemeral: bool = False,
     ):
@@ -162,19 +129,16 @@ class GenericSearchView(discord.ui.View):
         """
         self.last_interaction = interaction
         await safe_defer(interaction, ephemeral=True)
-        self.page = page
 
         results = {}
         if rerun_search:
-            qo = self.build_query_object()
-            results = await self.cog._search_and_display(interaction, qo, self.page)
+            results = await self._execute_search(interaction)
             self.last_search_results = results
         elif self.last_search_results:
             results = self.last_search_results
         else:
             # Fallback: if no cache exists, must run search
-            qo = self.build_query_object()
-            results = await self.cog._search_and_display(interaction, qo, self.page)
+            results = await self._execute_search(interaction)
             self.last_search_results = results
 
         # 准备所有UI组件
@@ -182,10 +146,12 @@ class GenericSearchView(discord.ui.View):
 
         # 构建消息和最终视图
         content = "搜索结果"
-        if self.channel_ids:
+        if self.search_state.channel_ids:
             guild = interaction.guild
             if guild:
-                channels = [guild.get_channel(cid) for cid in self.channel_ids]
+                channels = [
+                    guild.get_channel(cid) for cid in self.search_state.channel_ids
+                ]
                 channel_mentions = [ch.mention for ch in channels if ch]
                 if channel_mentions:
                     content = f"在 {', '.join(channel_mentions)} 中搜索"
@@ -197,14 +163,16 @@ class GenericSearchView(discord.ui.View):
         final_view = None
         if results.get("has_results"):
             # 如果有结果，创建分页视图并组合
-            results_view = NewSearchResultsView(
+            results_view = SearchResultsView(
                 self.cog,
                 interaction,
                 self.build_query_object(),
                 results["total"],
                 results["page"],
                 results["per_page"],
-                self.update_view,
+                self.update_view_from_pager,  # 使用新的回调
+                self.search_state.results_per_page,
+                self.search_state.preview_image_mode,
             )
             final_view = CombinedSearchView(self, results_view, filter_components)
         else:
@@ -234,42 +202,71 @@ class GenericSearchView(discord.ui.View):
                 coro_factory=lambda: edit_coro, priority=1
             )
 
+    async def _execute_search(self, interaction: discord.Interaction) -> dict:
+        """执行搜索并返回结果"""
+        state = self.search_state
+        search_qo = self.build_query_object()
+
+        # 从 self.search_state 中获取显示参数
+        results = await self.cog._search_and_display(
+            interaction=interaction,
+            search_qo=search_qo,
+            page=state.page,
+            per_page=state.results_per_page,  # 传递每页数量
+            preview_mode=state.preview_image_mode,  # 传递预览模式
+        )
+        return results
+
+    async def update_view_from_pager(
+        self,
+        interaction: discord.Interaction,
+        page: int,
+        per_page: int,
+        preview_mode: str,
+    ):
+        """由分页视图 (SearchResultsView) 调用的回调"""
+        self.search_state.page = page
+        self.search_state.results_per_page = per_page
+        self.search_state.preview_image_mode = preview_mode
+        await self.update_view(interaction, rerun_search=True)
+
     async def on_filter_change(self, interaction: discord.Interaction):
-        """当任何筛选条件改变时调用此方法"""
+        """当任何筛选条件改变时调用此方法，重置页码并重新搜索"""
         self.last_interaction = interaction
-        await self.update_view(interaction, page=1)
+        self.search_state.page = 1
+        await self.update_view(interaction, rerun_search=True)
 
     async def on_sort_order_change(self, interaction: discord.Interaction):
         """处理排序顺序改变的逻辑"""
-        self.last_interaction = interaction
-        self.sort_order = "asc" if self.sort_order == "desc" else "desc"
+        self.search_state.sort_order = (
+            "asc" if self.search_state.sort_order == "desc" else "desc"
+        )
         await self.on_filter_change(interaction)
 
     async def on_tag_logic_change(self, interaction: discord.Interaction):
         """处理标签匹配逻辑改变的逻辑"""
-        self.last_interaction = interaction
-        self.tag_logic = "or" if self.tag_logic == "and" else "and"
+        self.search_state.tag_logic = (
+            "or" if self.search_state.tag_logic == "and" else "and"
+        )
         await self.on_filter_change(interaction)
 
     async def on_sort_method_change(
         self, interaction: discord.Interaction, new_method: str
     ):
         """处理排序方法改变的逻辑"""
-        self.last_interaction = interaction
-        self.sort_method = new_method
+        self.search_state.sort_method = new_method
         await self.on_filter_change(interaction)
 
     async def on_tag_page_change(self, interaction: discord.Interaction, action: str):
         """处理标签翻页"""
-        self.last_interaction = interaction
-        max_page = (len(self.all_unique_tags) - 1) // self.tags_per_page
+        max_page = (len(self.search_state.all_available_tags) - 1) // self.tags_per_page
         if action == "prev":
-            self.tag_page = max(0, self.tag_page - 1)
+            self.search_state.tag_page = max(0, self.search_state.tag_page - 1)
         elif action == "next":
-            self.tag_page = min(max_page, self.tag_page + 1)
+            self.search_state.tag_page = min(max_page, self.search_state.tag_page + 1)
 
         # 翻页后，只需更新视图，不需要重新搜索
-        await self.update_view(interaction, self.page, rerun_search=False)
+        await self.update_view(interaction, rerun_search=False)
 
     async def handle_keyword_update(
         self,
@@ -281,10 +278,9 @@ class GenericSearchView(discord.ui.View):
         """处理来自KeywordModal的数据回传"""
         import re
 
-        self.last_interaction = interaction
-        self.keywords = keywords
-        self.exclude_keywords = exclude_keywords
-        self.exemption_markers = sorted(
+        self.search_state.keywords = keywords
+        self.search_state.exclude_keywords = exclude_keywords
+        self.search_state.exemption_markers = sorted(
             list(
                 {
                     p.strip()
@@ -293,75 +289,74 @@ class GenericSearchView(discord.ui.View):
                 }
             )
         )
-        await self.update_view(interaction, page=1)
+        await self.on_filter_change(interaction)
 
     async def show_keyword_modal(self, interaction: discord.Interaction):
         """创建并显示关键词模态框"""
-        self.last_interaction = interaction
         modal = KeywordModal(
-            initial_keywords=self.keywords,
-            initial_exclude_keywords=self.exclude_keywords,
-            initial_exemption_markers=", ".join(self.exemption_markers),
+            initial_keywords=self.search_state.keywords,
+            initial_exclude_keywords=self.search_state.exclude_keywords,
+            initial_exemption_markers=", ".join(self.search_state.exemption_markers),
             submit_callback=self.handle_keyword_update,
         )
         await interaction.response.send_modal(modal)
 
-
     async def on_include_tags_change(
         self, interaction: discord.Interaction, new_selection: Set[str]
     ):
-        self.last_interaction = interaction
-        self.include_tags = new_selection
-        await self.update_view(interaction, page=1)
+        self.search_state.include_tags = new_selection
+        await self.on_filter_change(interaction)
 
     async def on_exclude_tags_change(
         self, interaction: discord.Interaction, new_selection: Set[str]
     ):
-        self.last_interaction = interaction
-        self.exclude_tags = new_selection
-        await self.update_view(interaction, page=1)
+        self.search_state.exclude_tags = new_selection
+        await self.on_filter_change(interaction)
 
-    async def on_author_select(
-        self, interaction: discord.Interaction, users: List[discord.User]
-    ):
-        """处理作者选择的回调"""
-        self.last_interaction = interaction
-        self.author_ids = {user.id for user in users}
-        await self.update_view(interaction, page=1)
 
     def build_query_object(self) -> ThreadSearchQuery:
         """根据当前视图状态构建查询对象。"""
+        state = self.search_state
         return ThreadSearchQuery(
-            channel_ids=self.channel_ids,
-            include_authors=list(self.author_ids) if self.author_ids else None,
-            include_tags=list(self.include_tags),
-            exclude_tags=list(self.exclude_tags),
-            keywords=self.keywords,
-            exclude_keywords=self.exclude_keywords,
-            exclude_keyword_exemption_markers=self.exemption_markers,
-            tag_logic=self.tag_logic,
-            sort_method=self.sort_method,
-            sort_order=self.sort_order,
+            channel_ids=state.channel_ids,
+            include_authors=list(state.include_authors)
+            if state.include_authors
+            else None,
+            exclude_authors=list(state.exclude_authors)
+            if state.exclude_authors
+            else None,
+            include_tags=list(state.include_tags),
+            exclude_tags=list(state.exclude_tags),
+            keywords=state.keywords,
+            exclude_keywords=state.exclude_keywords,
+            exclude_keyword_exemption_markers=state.exemption_markers,
+            tag_logic=state.tag_logic,
+            sort_method=state.sort_method,
+            sort_order=state.sort_order,
         )
 
     def build_summary_embed(self, results: dict) -> discord.Embed:
         """构建并返回一个包含当前筛选条件和结果摘要的Embed"""
         description_parts = []
         filters = []
-        if self.include_tags:
-            filters.append(f"含: {', '.join(sorted(list(self.include_tags)))}")
-        if self.exclude_tags:
-            filters.append(f"不含: {', '.join(sorted(list(self.exclude_tags)))}")
-        if self.author_ids:
+        state = self.search_state
+
+        if state.include_tags:
+            filters.append(f"含: {', '.join(sorted(list(state.include_tags)))}")
+        if state.exclude_tags:
+            filters.append(f"不含: {', '.join(sorted(list(state.exclude_tags)))}")
+        if state.include_authors:
             filters.append(
-                f"作者: {', '.join([f'<@{uid}>' for uid in self.author_ids])}"
+                f"只看作者: {', '.join([f'<@{uid}>' for uid in state.include_authors])}"
             )
-        if self.keywords:
-            filters.append(f"包含关键词: {self.keywords}")
-        if self.exclude_keywords:
-            filters.append(f"排除关键词: {self.exclude_keywords}")
-        # if self.exemption_markers:
-        #     filters.append(f"豁免标记: {', '.join(self.exemption_markers)}")
+        if state.exclude_authors:
+            filters.append(
+                f"屏蔽作者: {', '.join([f'<@{uid}>' for uid in state.exclude_authors])}"
+            )
+        if state.keywords:
+            filters.append(f"包含关键词: {state.keywords}")
+        if state.exclude_keywords:
+            filters.append(f"排除关键词: {state.exclude_keywords}")
 
         if filters:
             description_parts.append("\n".join(filters))
@@ -380,20 +375,11 @@ class GenericSearchView(discord.ui.View):
 
     async def on_timeout(self):
         """当视图超时时，保存状态并显示一个带有“继续”按钮的新视图"""
-        state = {
-            "channel_ids": self.channel_ids,
-            "include_tags": list(self.include_tags),
-            "exclude_tags": list(self.exclude_tags),
-            "author_ids": list(self.author_ids),
-            "keywords": self.keywords,
-            "exclude_keywords": self.exclude_keywords,
-            "exemption_markers": self.exemption_markers,
-            "tag_logic": self.tag_logic,
-            "sort_method": self.sort_method,
-            "sort_order": self.sort_order,
-            "page": self.page,
-            "tag_page": self.tag_page,
-        }
+        # Pydantic v2 使用 model_dump, v1 使用 dict
+        try:
+            state = self.search_state.model_dump()
+        except AttributeError:
+            state = self.search_state.dict()
 
         timeout_view = TimeoutView(self.cog, self.last_interaction, state)
 

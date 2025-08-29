@@ -5,16 +5,16 @@ from discord.enums import ChannelType
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:
-    from ..prefs_handler import SearchPreferencesHandler
+    from ..preferences_service import PreferencesService
     from .preferences_view import PreferencesView
-    from ..dto.user_search_preferences import UserSearchPreferencesDTO
+    from ...search.dto.user_search_preferences import UserSearchPreferencesDTO
 
 class ChannelPreferencesView(discord.ui.View):
     """用于设置用户默认搜索频道的独立视图"""
 
     def __init__(
         self,
-        handler: "SearchPreferencesHandler",
+        handler: "PreferencesService",
         original_interaction: discord.Interaction,
         parent_view: "PreferencesView",
         prefs_dto: "UserSearchPreferencesDTO",

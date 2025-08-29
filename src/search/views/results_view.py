@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from ..cog import Search
 
 
-class NewSearchResultsView(discord.ui.View):
+class SearchResultsView(discord.ui.View):
     def __init__(
         self,
         cog: "Search",
@@ -19,6 +19,8 @@ class NewSearchResultsView(discord.ui.View):
         page: int,
         per_page: int,
         page_callback,
+        results_per_page: int,
+        preview_image_mode: str,
     ):
         super().__init__(timeout=900)
         self.cog = cog
@@ -29,6 +31,8 @@ class NewSearchResultsView(discord.ui.View):
         self.per_page = per_page
         self.max_page = max(1, math.ceil(total / per_page))
         self.page_callback = page_callback
+        self.results_per_page = results_per_page
+        self.preview_image_mode = preview_image_mode
 
         self.update_buttons()
 
@@ -79,7 +83,12 @@ class NewSearchResultsView(discord.ui.View):
     async def go_to_page(self, interaction: discord.Interaction, page: int):
         # 调用从 GenericSearchView 传入的回调函数
         if self.page_callback:
-            await self.page_callback(interaction, page=page)
+            await self.page_callback(
+                interaction,
+                page=page,
+                per_page=self.results_per_page,
+                preview_mode=self.preview_image_mode,
+            )
 
     async def go_to_first_page(self, interaction: discord.Interaction):
         await self.go_to_page(interaction, 1)

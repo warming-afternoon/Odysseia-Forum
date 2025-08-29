@@ -24,6 +24,8 @@ from src.core.cache_service import CacheService
 from src.core.sync_service import SyncService
 from src.indexer.cog import Indexer
 from src.search.cog import Search
+from src.preferences.cog import Preferences
+from src.preferences.preferences_service import PreferencesService
 from src.auditor.cog import Auditor
 from src.config.cog import Configuration
 from src.shared.api_scheduler import APIScheduler
@@ -81,7 +83,13 @@ class MyBot(commands.Bot):
         asyncio.create_task(self.tag_service.build_cache())
         asyncio.create_task(self.cache_service.build_or_refresh_cache())
 
-        # logger.info("核心服务已初始化，缓存构建任务已在后台启动。")
+        # 1.5. 初始化共享服务
+        preferences_service = PreferencesService(
+            bot=self,
+            session_factory=AsyncSessionFactory,
+            tag_service=self.tag_service,
+            cache_service=self.cache_service,
+        )
 
         # 2. 加载 Cogs 并注入服务
         cogs_to_load = [
@@ -105,6 +113,13 @@ class MyBot(commands.Bot):
                 config=self.config,
                 tag_service=self.tag_service,
                 cache_service=self.cache_service,
+                preferences_service=preferences_service,
+            ),
+            Preferences(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                config=self.config,
+                preferences_service=preferences_service,
             ),
             Auditor(
                 bot=self,
@@ -119,7 +134,7 @@ class MyBot(commands.Bot):
                 tag_service=self.tag_service,
             ),
         ]
-        await asyncio.gather(*(self.add_cog(cog) for cog in cogs_to_load))
+        await asyncio.gather(*(self.add_cog(cog) for cog in cogs_to_load), return_exceptions=True)
         logger.info("所有 Cogs 已加载。")
 
         # 3. 注册全局事件监听器

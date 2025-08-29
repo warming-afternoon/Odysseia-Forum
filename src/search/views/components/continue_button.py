@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ...cog import Search
+    from ...dto.search_state import SearchStateDTO
 
 
 class ContinueButton(discord.ui.Button):
@@ -19,23 +20,19 @@ class ContinueButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         # 懒加载以避免循环导入
         from ..generic_search_view import GenericSearchView
+        from ...dto.search_state import SearchStateDTO
 
-        # 创建一个新的 GenericSearchView 实例并恢复其状态
+        # 从 state 字典重建 SearchStateDTO
+        # 注意：需要确保 on_timeout 保存的状态与 SearchStateDTO 字段兼容
+        search_state = SearchStateDTO(**self.state)
+
+        # 创建一个新的 GenericSearchView 实例并传入恢复的状态
         view = GenericSearchView(
-            self.cog, self.original_interaction, self.state["channel_ids"]
+            cog=self.cog,
+            interaction=self.original_interaction,
+            search_state=search_state,
         )
 
-        # 恢复所有筛选条件
-        view.include_tags = self.state.get("include_tags", set())
-        view.exclude_tags = self.state.get("exclude_tags", set())
-        view.author_ids = self.state.get("author_ids", set())
-        view.keywords = self.state.get("keywords", "")
-        view.exclude_keywords = self.state.get("exclude_keywords", "")
-        view.exemption_markers = self.state.get("exemption_markers", ["禁", "🈲"])
-        view.tag_logic = self.state.get("tag_logic", "and")
-        view.sort_method = self.state.get("sort_method", "comprehensive")
-        view.sort_order = self.state.get("sort_order", "desc")
-        view.page = self.state.get("page", 1)
-
-        # 使用恢复的状态更新视图
-        await view.update_view(interaction, page=view.page)
+        # 使用恢复的状态更新视图。
+        # rerun_search=True 会让视图根据恢复的状态重新执行一次搜索
+        await view.update_view(interaction, rerun_search=True)

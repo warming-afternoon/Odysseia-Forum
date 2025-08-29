@@ -2,7 +2,6 @@ import discord
 from typing import TYPE_CHECKING
 
 from shared.safe_defer import safe_defer
-from .preferences_view import PreferencesView
 
 
 if TYPE_CHECKING:
@@ -37,7 +36,6 @@ class GlobalSearchView(discord.ui.View):
     async def preferences_button(
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
-        """打开搜索偏好设置面板。"""
-        await safe_defer(interaction, ephemeral=True)
-        view = PreferencesView(self.cog.prefs_handler, interaction)
-        await view.start()
+        """分派一个事件来打开搜索偏好设置面板。"""
+        # 分派一个自定义事件，由 PreferencesCog 监听
+        self.cog.bot.dispatch("open_preferences_panel", interaction)

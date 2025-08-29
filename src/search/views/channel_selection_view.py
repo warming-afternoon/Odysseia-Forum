@@ -1,12 +1,12 @@
 import discord
-from typing import List, TYPE_CHECKING, Sequence, Optional
+from typing import List, TYPE_CHECKING, Sequence
 
 from shared.safe_defer import safe_defer
 from .generic_search_view import GenericSearchView
 
 if TYPE_CHECKING:
     from ..cog import Search
-    from ..dto.user_search_preferences import UserSearchPreferencesDTO
+    from ..dto.search_state import SearchStateDTO
 
 
 class ChannelSelectionView(discord.ui.View):
@@ -18,24 +18,23 @@ class ChannelSelectionView(discord.ui.View):
         original_interaction: discord.Interaction,
         channels: Sequence[discord.ForumChannel],
         all_channel_ids: Sequence[int],
-        user_prefs: Optional["UserSearchPreferencesDTO"],
+        initial_state: "SearchStateDTO",
     ):
         super().__init__(timeout=900)
         self.cog = cog
         self.original_interaction = original_interaction
         self.channels = channels
         self.all_channel_ids = all_channel_ids
-        self.user_prefs = user_prefs
-        self.selected_channel_ids: List[int] = []
+        self.search_state = initial_state
 
-        preselected_ids = set(user_prefs.preferred_channels) if user_prefs and user_prefs.preferred_channels else set()
+        preselected_ids = set(initial_state.channel_ids)
 
         # 构建选项
         options = [
             discord.SelectOption(
                 label="所有已索引频道",
                 value="all",
-                default="all" in preselected_ids, # "all" 理论上不应该被预设，但做个兼容
+                default="all" in preselected_ids,
             )
         ]
         # Discord限制25个选项，为"all"选项留一个位置
@@ -49,7 +48,7 @@ class ChannelSelectionView(discord.ui.View):
                 for ch in channels[:24]
             ]
         )
-        
+
         # 如果有预设值，确定按钮初始就可点击
         initial_disabled = not bool(preselected_ids)
 
@@ -100,22 +99,23 @@ class ChannelSelectionView(discord.ui.View):
         await safe_defer(interaction)
 
         selected_values = self.channel_select.values
+        selected_ids: List[int] = []
 
-        # 如果用户没有进行任何新的选择，但存在偏好设置，则使用偏好设置
-        if not selected_values and self.user_prefs and self.user_prefs.preferred_channels:
-            self.selected_channel_ids = self.user_prefs.preferred_channels
-        else:
-            if "all" in selected_values:
-                # 如果选择了 "all"，则使用所有可用的频道ID
-                self.selected_channel_ids = list(self.all_channel_ids)
-            else:
-                self.selected_channel_ids = [int(v) for v in selected_values]
+        if "all" in selected_values:
+            # 如果选择了 "all"，则使用所有可用的频道ID
+            selected_ids = list(self.all_channel_ids)
+        elif selected_values:
+            selected_ids = [int(v) for v in selected_values]
+        else: # 如果用户清空了选择但点击了确定（可能是因为有预设值）
+            selected_ids = self.search_state.channel_ids
 
-        if not self.selected_channel_ids:
+        if not selected_ids:
             await interaction.followup.send("请至少选择一个频道。", ephemeral=True)
             return
 
-        generic_view = GenericSearchView(
-            self.cog, interaction, self.selected_channel_ids, self.user_prefs
-        )
+        # 更新 search_state 中的频道列表
+        self.search_state.channel_ids = selected_ids
+
+        # 启动通用搜索视图，并传入更新后的状态
+        generic_view = GenericSearchView(self.cog, interaction, self.search_state)
         await generic_view.start()

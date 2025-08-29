@@ -5,19 +5,19 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .generic_search_view import GenericSearchView
-    from .results_view import NewSearchResultsView
+    from .results_view import SearchResultsView
 
 
 class CombinedSearchView(discord.ui.View):
     """
     一个组合视图，它将筛选视图 (GenericSearchView) 和
-    结果分页视图 (NewSearchResultsView) 的组件合并在一起，并委托相应的逻辑。
+    结果分页视图 (SearchResultsView) 的组件合并在一起，并委托相应的逻辑。
     """
 
     def __init__(
         self,
         search_view: "GenericSearchView",
-        results_view: "NewSearchResultsView",
+        results_view: "SearchResultsView",
         filter_components: list,
     ):
         # 超时时间继承自 search_view

@@ -3,11 +3,11 @@ from typing import List, TYPE_CHECKING, Set
 
 from shared.safe_defer import safe_defer
 from shared.view.tag_select import TagSelect
-from ..dto.user_search_preferences import UserSearchPreferencesDTO
-from .components.tag_page_button import TagPageButton
+from ...search.dto.user_search_preferences import UserSearchPreferencesDTO
+from ...search.views.components.tag_page_button import TagPageButton
 
 if TYPE_CHECKING:
-    from ..prefs_handler import SearchPreferencesHandler
+    from ..preferences_service import PreferencesService
     from .preferences_view import PreferencesView
 
 
@@ -16,7 +16,7 @@ class TagPreferencesView(discord.ui.View):
 
     def __init__(
         self,
-        handler: "SearchPreferencesHandler",
+        handler: "PreferencesService",
         interaction: discord.Interaction,
         parent_view: "PreferencesView",
         preferences: "UserSearchPreferencesDTO",

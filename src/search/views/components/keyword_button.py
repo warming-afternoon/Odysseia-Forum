@@ -1,4 +1,5 @@
 import discord
+from shared.default_preferences import DefaultPreferences
 
 
 class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
@@ -6,8 +7,8 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
         self,
         initial_keywords: str,
         initial_exclude_keywords: str,
-        initial_exemption_markers: str,
         submit_callback,
+        initial_exemption_markers: str,
     ):
         super().__init__()
         self.submit_callback = submit_callback

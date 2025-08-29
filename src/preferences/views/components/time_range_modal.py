@@ -5,7 +5,7 @@ from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:
     from ..preferences_view import PreferencesView
-    from ....search.prefs_handler import SearchPreferencesHandler
+    from ...preferences_service import PreferencesService
 
 
 class TimeRangeModal(discord.ui.Modal, title="设置时间范围"):
@@ -26,7 +26,7 @@ class TimeRangeModal(discord.ui.Modal, title="设置时间范围"):
 
     def __init__(
         self,
-        handler: "SearchPreferencesHandler",
+        handler: "PreferencesService",
         view: "PreferencesView",
         current_after: str = "",
         current_before: str = "",

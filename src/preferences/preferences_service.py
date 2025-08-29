@@ -3,41 +3,91 @@ import logging
 from venv import logger
 import discord
 from discord import app_commands
-import datetime
+from datetime import datetime, timezone
 import re
 from typing import List, Optional, TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from core.cache_service import CacheService
 from shared.safe_defer import safe_defer
-from .repository import SearchRepository
+from shared.utils import process_string_to_set # 导入新工具函数
+from .repository import PreferencesRepository
+from src.search.dto.user_search_preferences import UserSearchPreferencesDTO
 from core.tagService import TagService
-from .views.components.keyword_button import KeywordModal
-from .dto.user_search_preferences import UserSearchPreferencesDTO
+from ..search.views.components.keyword_button import KeywordModal
 from .views.tag_preferences_view import TagPreferencesView
 from .views.channel_preferences_view import ChannelPreferencesView
+from preferences.repository import PreferencesRepository
 
 if TYPE_CHECKING:
     from .views.preferences_view import PreferencesView
-    from .cog import Search
+    from ..search.cog import Search
 
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from bot_main import MyBot
 
-class SearchPreferencesHandler:
+class PreferencesService:
     """处理用户搜索偏好设置"""
 
     def __init__(
         self,
-        cog: Search,
-        bot,
+        bot: "MyBot",
         session_factory: async_sessionmaker,
         tag_service: TagService,
+        cache_service: CacheService,
     ):
-        self.cog = cog
         self.bot = bot
         self.session_factory = session_factory
         self.tag_service = tag_service
+        self.cache_service = cache_service
+
+    async def get_user_preferences(
+        self, user_id: int
+    ) -> Optional[UserSearchPreferencesDTO]:
+        """获取并返回用户的搜索偏好 DTO"""
+        async with self.session_factory() as session:
+            repo = PreferencesRepository(session, self.tag_service)
+            return await repo.get_user_preferences(user_id)
+
+    async def save_user_preferences(
+        self, user_id: int, prefs_data: dict
+    ) -> UserSearchPreferencesDTO:
+        """创建或更新用户的搜索偏好设置"""
+        async with self.session_factory() as session:
+            repo = PreferencesRepository(session, self.tag_service)
+            return await repo.save_user_preferences(user_id, prefs_data)
+
+    async def save_user_keywords(
+        self,
+        user_id: int,
+        include_str: str,
+        exclude_str: str,
+        exemption_markers_str: str,
+    ) -> UserSearchPreferencesDTO:
+        """接收关键词字符串，处理并保存到数据库。"""
+        
+        final_include_set = process_string_to_set(include_str)
+        final_exclude_set = process_string_to_set(exclude_str)
+        final_exemption_markers_list = sorted(
+            list(process_string_to_set(exemption_markers_str))
+        )
+
+        final_include_str = ", ".join(sorted(list(final_include_set)))
+        final_exclude_str = ", ".join(sorted(list(final_exclude_set)))
+
+        async with self.session_factory() as session:
+            repo = PreferencesRepository(session, self.tag_service)
+            return await repo.save_user_preferences(
+                user_id,
+                {
+                    "include_keywords": final_include_str,
+                    "exclude_keywords": final_exclude_str,
+                    "exclude_keyword_exemption_markers": final_exemption_markers_list,
+                },
+            )
 
     async def search_preferences_author(
         self,
@@ -58,7 +108,7 @@ class SearchPreferencesHandler:
                 return
 
             async with self.session_factory() as session:
-                repo = SearchRepository(session, self.tag_service)
+                repo = PreferencesRepository(session, self.tag_service)
                 prefs = await repo.get_user_preferences(user_id)
 
                 if not prefs:
@@ -119,12 +169,12 @@ class SearchPreferencesHandler:
         await safe_defer(interaction, ephemeral=True)
         try:
             async with self.session_factory() as session:
-                repo = SearchRepository(session, self.tag_service)
+                repo = PreferencesRepository(session, self.tag_service)
                 prefs_dto = await repo.get_user_preferences(interaction.user.id)
                 if not prefs_dto:
                     prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
             
-            indexed_channels = list(self.cog.channel_cache.values())
+            indexed_channels = self.cache_service.get_indexed_channels()
 
             view = ChannelPreferencesView(
                 self, interaction, parent_view, prefs_dto, indexed_channels
@@ -143,7 +193,7 @@ class SearchPreferencesHandler:
     async def save_preferred_channels(self, user_id: int, channel_ids: List[int]):
         """保存用户的默认搜索频道列表"""
         async with self.session_factory() as session:
-            repo = SearchRepository(session, self.tag_service)
+            repo = PreferencesRepository(session, self.tag_service)
             await repo.save_user_preferences(
                 user_id,
                 {"preferred_channels": channel_ids},
@@ -167,19 +217,18 @@ class SearchPreferencesHandler:
         """
         update_data = {}
         if after_date_str:
-            update_data["after_date"] = datetime.datetime.strptime(
-                after_date_str, "%Y-%m-%d"
-            )
+            naive_dt = datetime.strptime(after_date_str, "%Y-%m-%d")
+            update_data["after_date"] = naive_dt.replace(tzinfo=timezone.utc)
         if before_date_str:
-            update_data["before_date"] = datetime.datetime.strptime(
-                before_date_str, "%Y-%m-%d"
-            ).replace(hour=23, minute=59, second=59)
+            naive_dt = datetime.strptime(before_date_str, "%Y-%m-%d")
+            aware_dt = naive_dt.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            update_data["before_date"] = aware_dt
 
         if not after_date_str and not before_date_str:
             update_data = {"after_date": None, "before_date": None}
 
         async with self.session_factory() as session:
-            repo = SearchRepository(session, self.tag_service)
+            repo = PreferencesRepository(session, self.tag_service)
             await repo.save_user_preferences(user_id, update_data)
 
     async def search_preferences_tags(
@@ -189,7 +238,7 @@ class SearchPreferencesHandler:
         await safe_defer(interaction, ephemeral=True)
         try:
             async with self.session_factory() as session:
-                repo = SearchRepository(session, self.tag_service)
+                repo = PreferencesRepository(session, self.tag_service)
 
                 # 1. 获取所有可用标签
                 all_tags = self.tag_service.get_unique_tag_names()
@@ -224,7 +273,7 @@ class SearchPreferencesHandler:
         """由 TagPreferencesView 回调，用于保存标签偏好。"""
         try:
             async with self.session_factory() as session:
-                repo = SearchRepository(session, self.tag_service)
+                repo = PreferencesRepository(session, self.tag_service)
                 await repo.save_user_preferences(
                     interaction.user.id,
                     {
@@ -236,99 +285,10 @@ class SearchPreferencesHandler:
             # 在视图中已经处理了对用户的响应，这里只记录日志
             logger.error(f"保存 Tag 偏好时出错: {e}")
 
-    async def search_preferences_keywords(
-        self, interaction: discord.Interaction, view: "PreferencesView"
-    ):
-        """处理 /搜索偏好 关键词 命令，启动关键词设置模态框。"""
-        try:
-            # 1. 获取当前偏好
-            async with self.session_factory() as session:
-                repo = SearchRepository(session, self.tag_service)
-                prefs = await repo.get_user_preferences(interaction.user.id)
-                initial_include = ""
-                initial_exclude = ""
-                initial_exemption_markers = "禁, 🈲"
-                if prefs:
-                    initial_include = prefs.include_keywords or ""
-                    initial_exclude = prefs.exclude_keywords or ""
-                    if prefs.exclude_keyword_exemption_markers:
-                        initial_exemption_markers = ", ".join(
-                            prefs.exclude_keyword_exemption_markers
-                        )
-
-            # 2. 定义模态框提交后的回调函数
-            async def handle_keyword_submit(
-                modal_interaction: discord.Interaction,
-                submitted_include: str,
-                submitted_exclude: str,
-                submitted_exemption_markers: str,
-            ):
-                # 响应Modal提交后的交互
-                await safe_defer(modal_interaction, ephemeral=True)
-
-                def process_keywords(s: str) -> set[str]:
-                    """使用正则表达式分割字符串，并返回一个干净的集合"""
-                    if not s:
-                        return set()
-                    parts = {p.strip() for p in re.split(r"[，,/\s]+", s) if p.strip()}
-                    return parts
-
-                final_include_set = process_keywords(submitted_include)
-                final_exclude_set = process_keywords(submitted_exclude)
-                final_exemption_markers_list = sorted(
-                    list(process_keywords(submitted_exemption_markers))
-                )
-
-                final_include_str = ", ".join(sorted(list(final_include_set)))
-                final_exclude_str = ", ".join(sorted(list(final_exclude_set)))
-
-                # 4. 保存到数据库
-                async with self.session_factory() as session:
-                    repo = SearchRepository(session, self.tag_service)
-                    await repo.save_user_preferences(
-                        interaction.user.id,
-                        {
-                            "include_keywords": final_include_str,
-                            "exclude_keywords": final_exclude_str,
-                            "exclude_keyword_exemption_markers": final_exemption_markers_list,
-                        },
-                    )
-
-                # 5. 刷新原始视图
-                await view.refresh(modal_interaction)
-
-            # 3. 创建并发送模态框
-            modal = KeywordModal(
-                initial_keywords=initial_include,
-                initial_exclude_keywords=initial_exclude,
-                initial_exemption_markers=initial_exemption_markers,
-                submit_callback=handle_keyword_submit,
-            )
-            await self.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.response.send_modal(modal), priority=1
-            )
-
-        except Exception as e:
-            # 检查交互是否已经被响应
-            if not interaction.response.is_done():
-                await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: interaction.response.send_message(
-                        f"❌ 打开关键词设置时出错: {e}", ephemeral=True
-                    ),
-                    priority=1,
-                )
-            else:
-                await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: interaction.followup.send(
-                        f"❌ 打开关键词设置时出错: {e}", ephemeral=True
-                    ),
-                    priority=1,
-                )
-
     async def toggle_preview_mode(self, user_id: int) -> None:
         """切换用户的预览图显示模式（大图/缩略图）。"""
         async with self.session_factory() as session:
-            repo = SearchRepository(session, self.tag_service)
+            repo = PreferencesRepository(session, self.tag_service)
             prefs = await repo.get_user_preferences(user_id)
 
             current_mode = "thumbnail"  # 默认值
@@ -342,7 +302,7 @@ class SearchPreferencesHandler:
     async def clear_user_preferences(self, user_id: int) -> None:
         """清空指定用户的所有搜索偏好设置"""
         async with self.session_factory() as session:
-            repo = SearchRepository(session, self.tag_service)
+            repo = PreferencesRepository(session, self.tag_service)
             await repo.save_user_preferences(
                 user_id,
                 {
@@ -356,6 +316,6 @@ class SearchPreferencesHandler:
                     "exclude_tags": [],
                     "include_keywords": "",
                     "exclude_keywords": "",
-                    "preferred_channels": [], # 新增
+                    "preferred_channels": [],
                 },
             )
