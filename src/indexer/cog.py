@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from shared.safe_defer import safe_defer
 from ThreadManager.cog import ThreadManager
 from core.tagService import TagService
+from core.sync_service import SyncService
 from .views import IndexerDashboard
 
 
@@ -28,11 +29,13 @@ class Indexer(commands.Cog):
         session_factory: async_sessionmaker,
         config: dict,
         tag_service: TagService,
+        sync_service: SyncService,
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
         self.tag_service = tag_service
+        self.sync_service = sync_service
         logger.info("Indexer 模块已加载")
 
     @app_commands.command(
@@ -191,8 +194,6 @@ class Indexer(commands.Cog):
 
     async def consumer(self, dashboard: IndexerDashboard, consumer_id: int):
         """消费者：从队列中取出帖子并处理，受信号量控制。"""
-        thread_manager_cog = cast(ThreadManager, self.bot.get_cog("ThreadManager"))
-
         try:
             while True:
                 await dashboard.wait_if_paused()
@@ -208,10 +209,9 @@ class Indexer(commands.Cog):
                     thread = await dashboard.queue.get()
 
                     try:
-                        if thread_manager_cog:
-                            await thread_manager_cog.sync_thread(
-                                thread, fetch_if_incomplete=True
-                            )
+                        await self.sync_service.sync_thread(
+                            thread, fetch_if_incomplete=True
+                        )
                     except Exception as e:
                         error_reason = f"{type(e).__name__}"
                         logging.error(

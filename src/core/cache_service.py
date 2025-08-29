@@ -1,7 +1,8 @@
 import logging
 import discord
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from src.ThreadManager.repository import ThreadManagerRepository
+from sqlmodel import select
+from shared.models.thread import Thread
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +15,7 @@ class CacheService:
         self.session_factory = session_factory
         self.indexed_channel_ids: set[int] = set()
         self.indexed_channels: dict[int, discord.ForumChannel] = {}
-        logger.info("CacheService 已初始化")
+        logger.debug("CacheService 已初始化")
 
     async def build_or_refresh_cache(self):
         """
@@ -24,9 +25,10 @@ class CacheService:
         await self.bot.wait_until_ready()
         logger.debug("正在刷新 CacheService...")
         async with self.session_factory() as session:
-            # 注意：这里暂时使用 ThreadManagerRepository，后续可能会创建一个更通用的仓库
-            repo = ThreadManagerRepository(session)
-            self.indexed_channel_ids = set(await repo.get_indexed_channel_ids())
+            # 从数据库获取所有已索引的频道ID
+            statement = select(Thread.channel_id).distinct()
+            result = await session.execute(statement)
+            self.indexed_channel_ids = set(result.scalars().all())
 
             new_channel_cache = {}
             for channel_id in self.indexed_channel_ids:
@@ -46,3 +48,11 @@ class CacheService:
     def get_indexed_channels(self) -> list[discord.ForumChannel]:
         """获取所有已索引的频道对象列表。"""
         return list(self.indexed_channels.values())
+
+    def get_indexed_channel_ids_set(self) -> set[int]:
+        """从缓存中获取已索引的频道ID集合。"""
+        return self.indexed_channel_ids
+
+    def get_indexed_channel_ids_list(self) -> list[int]:
+        """从缓存中获取已索引的频道ID列表。"""
+        return list(self.indexed_channel_ids)

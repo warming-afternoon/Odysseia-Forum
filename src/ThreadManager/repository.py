@@ -28,35 +28,26 @@ class ThreadManagerRepository:
         if not tags_data:
             return []
 
-        # 使用 INSERT ... ON CONFLICT DO NOTHING 批量插入所有可能的标签。
-        insert_stmt = sqlite_insert(Tag).values(
-            [{"id": id, "name": name} for id, name in tags_data.items()]
-        )
-        do_nothing_stmt = insert_stmt.on_conflict_do_nothing(index_elements=["id"])
-        await self.session.execute(do_nothing_stmt)
-
-        # 更新可能已更改名称的标签。
-        # (这一步在实践中很少发生，因为Discord标签ID是唯一的，但为了健壮性而保留)
         tag_ids = list(tags_data.keys())
-        statement = select(Tag).where(cast(ColumnElement, Tag.id).in_(tag_ids))
-        result = await self.session.execute(statement)
-        existing_tags_map = {tag.id: tag for tag in result.scalars().all()}
+        values_to_insert = [{"id": id, "name": name} for id, name in tags_data.items()]
 
-        updated = False
-        for tag_id, tag in existing_tags_map.items():
-            if tags_data[tag_id] != tag.name:
-                tag.name = tags_data[tag_id]
-                self.session.add(tag)
-                updated = True
+        # 1. 使用 INSERT ... ON CONFLICT DO UPDATE 一次性完成创建和更新
+        insert_stmt = sqlite_insert(Tag).values(values_to_insert)
+        
+        # 构建 ON CONFLICT ... DO UPDATE 子句
+        # 当 'id' 冲突时，更新 'name' 字段
+        # 'excluded' 是一个特殊的对象，代表了在 INSERT 语句中试图插入的值
+        update_stmt = insert_stmt.on_conflict_do_update(
+            index_elements=["id"],
+            set_={"name": insert_stmt.excluded.name}
+        )
+        
+        await self.session.execute(update_stmt)
 
-        if updated:
-            await self.session.flush()
-
-        # 返回所有相关的标签对象。
-        # 重新查询以获取完整的对象列表。
+        # 2. 查询所有相关的标签对象
         final_statement = select(Tag).where(cast(ColumnElement, Tag.id).in_(tag_ids))
-        final_result = await self.session.execute(final_statement)
-        return list(final_result.scalars().all())
+        result = await self.session.execute(final_statement)
+        return list(result.scalars().all())
 
     async def add_or_update_thread_with_tags(
         self, thread_data: dict, tags_data: dict[int, str]
@@ -107,12 +98,6 @@ class ThreadManagerRepository:
             self.session.add(new_thread)
         await self.session.commit()
 
-    async def get_indexed_channel_ids(self) -> Sequence[int]:
-        """获取所有已索引的频道ID列表"""
-        statement = select(Thread.channel_id).distinct()
-        result = await self.session.execute(statement)
-        return result.scalars().all()
-
     async def delete_thread_index(self, thread_id: int):
         """删除帖子的所有相关索引数据"""
         statement = select(Thread).where(Thread.thread_id == thread_id)  # type: ignore
@@ -158,17 +143,6 @@ class ThreadManagerRepository:
         )
         await self.session.execute(stmt)
         await self.session.commit()
-
-    async def get_tags_for_author(self, author_id: int) -> Sequence[Tag]:
-        """获取指定作者发布过的所有帖子的唯一标签列表"""
-        statement = (
-            select(Tag)
-            .join(Thread, Tag.threads)  # type: ignore
-            .where(Thread.author_id == author_id)  # type: ignore
-            .distinct()
-        )
-        result = await self.session.execute(statement)
-        return result.scalars().all()
 
     async def get_tags_for_channels(self, channel_ids: List[int]) -> Sequence[Tag]:
         """获取指定频道列表内的所有唯一标签"""

@@ -14,6 +14,8 @@ from .dto.user_search_preferences import UserSearchPreferencesDTO
 from search.qo.thread_search import ThreadSearchQuery
 from shared.ranking_config import RankingConfig
 from core.tagService import TagService
+from shared.models.tag import Tag
+from shared.models.thread import Thread
 
 
 class SearchRepository:
@@ -172,7 +174,7 @@ class SearchRepository:
             needs_fts_join = query.keywords  # 只在有正选关键词时才需要JOIN
             if needs_fts_join:
                 base_stmt = base_stmt.join(
-                    thread_fts_table, Thread.id == thread_fts_table.c.rowid
+                    thread_fts_table, Thread.id == thread_fts_table.c.rowid  # type: ignore
                 )
 
             # -- 正选关键词 --
@@ -232,7 +234,7 @@ class SearchRepository:
                 final_select_stmt = final_select_stmt.order_by(order_by)
 
             final_select_stmt = (
-                final_select_stmt.options(selectinload(Thread.tags))
+                final_select_stmt.options(selectinload(Thread.tags))  # type: ignore
                 .offset(offset)
                 .limit(limit)
             )
@@ -273,11 +275,11 @@ class SearchRepository:
         return UserSearchPreferencesDTO.model_validate(prefs)
 
     async def get_tags_for_author(self, author_id: int) -> Sequence[Tag]:
-        """获取指定作者使用过的所有标签"""
+        """获取指定作者发布过的所有帖子的唯一标签列表"""
         statement = (
             select(Tag)
-            .join(Thread.tags)  # type: ignore
-            .where(Thread.author_id == author_id)
+            .join(Thread, Tag.threads) # type: ignore
+            .where(Thread.author_id == author_id) # type: ignore
             .distinct()
         )
         result = await self.session.execute(statement)

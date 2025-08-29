@@ -9,7 +9,6 @@ from .dto.tag import TagDTO
 from .views.global_search_view import GlobalSearchView
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from .repository import SearchRepository
-from ThreadManager.repository import ThreadManagerRepository
 from core.tagService import TagService
 from core.cache_service import CacheService
 from search.qo.thread_search import ThreadSearchQuery
@@ -44,7 +43,6 @@ class Search(commands.Cog):
         self.config = config
         self.tag_service = tag_service
         self.cache_service = cache_service
-        self.tag_system_repo = ThreadManagerRepository
         self.prefs_handler = SearchPreferencesHandler(
             self, bot, session_factory, self.tag_service
         )
@@ -302,10 +300,7 @@ class Search(commands.Cog):
         await safe_defer(interaction, ephemeral=True)
         try:
             # 获取所有已索引的频道ID
-            async with self.session_factory() as session:
-                repo = self.tag_system_repo(session)
-                all_channel_ids = await repo.get_indexed_channel_ids()
-
+            all_channel_ids = self.cache_service.get_indexed_channel_ids_list()
             if not all_channel_ids:
                 await interaction.followup.send(
                     "❌ 未找到任何可供搜索的已索引论坛频道。", ephemeral=True
@@ -336,16 +331,14 @@ class Search(commands.Cog):
             await interaction.followup.send(f"❌ 启动搜索作者失败: {e}", ephemeral=True)
 
     async def get_tags_for_author(self, author_id: int):
-        """Gets all unique tags for a given author's posts."""
+        """获取给定作者使用过的全部标签"""
         async with self.session_factory() as session:
-            repo = self.tag_system_repo(session)
+            repo = SearchRepository(session, self.tag_service)
             return await repo.get_tags_for_author(author_id)
 
     async def get_indexed_channel_ids(self) -> Sequence[int]:
-        """Gets all indexed channel IDs."""
-        async with self.session_factory() as session:
-            repo = self.tag_system_repo(session)
-            return await repo.get_indexed_channel_ids()
+        """获取索引过的频道id列表"""
+        return self.cache_service.get_indexed_channel_ids_list()
 
     async def _search_and_display(
         self,

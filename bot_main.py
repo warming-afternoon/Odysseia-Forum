@@ -18,14 +18,15 @@ import asyncio
 from typing import cast
 
 from shared.database import AsyncSessionFactory, init_db, close_db
-from ThreadManager.cog import ThreadManager
-from core.tagService import TagService
-from core.cache_service import CacheService
-from indexer.cog import Indexer
-from search.cog import Search
-from auditor.cog import Auditor
-from config.cog import Configuration
-from shared.api_scheduler import APIScheduler
+from src.ThreadManager.cog import ThreadManager
+from src.core.tagService import TagService
+from src.core.cache_service import CacheService
+from src.core.sync_service import SyncService
+from src.indexer.cog import Indexer
+from src.search.cog import Search
+from src.auditor.cog import Auditor
+from src.config.cog import Configuration
+from src.shared.api_scheduler import APIScheduler
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class MyBot(commands.Bot):
         self.db_url = config["db_url"]
         self.tag_service: TagService
         self.cache_service: CacheService
+        self.sync_service: SyncService
 
         # 从配置初始化API调度器
         concurrency = self.config.get("performance", {}).get(
@@ -74,6 +76,7 @@ class MyBot(commands.Bot):
         # 1. 初始化核心服务
         self.tag_service = TagService(AsyncSessionFactory)
         self.cache_service = CacheService(self, AsyncSessionFactory)
+        self.sync_service = SyncService(bot=self, session_factory=AsyncSessionFactory)
         
         asyncio.create_task(self.tag_service.build_cache())
         asyncio.create_task(self.cache_service.build_or_refresh_cache())
@@ -81,20 +84,20 @@ class MyBot(commands.Bot):
         # logger.info("核心服务已初始化，缓存构建任务已在后台启动。")
 
         # 2. 加载 Cogs 并注入服务
-        thread_manager_cog = ThreadManager(
-            bot=self,
-            session_factory=AsyncSessionFactory,
-            config=self.config,
-            cache_service=self.cache_service,
-        )
-        await self.add_cog(thread_manager_cog)
-
-        dependent_cogs = [
+        cogs_to_load = [
+            ThreadManager(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                config=self.config,
+                cache_service=self.cache_service,
+                sync_service=self.sync_service,
+            ),
             Indexer(
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 config=self.config,
                 tag_service=self.tag_service,
+                sync_service=self.sync_service,
             ),
             Search(
                 bot=self,
@@ -107,7 +110,7 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 api_scheduler=self.api_scheduler,
-                thread_manager_cog=thread_manager_cog,
+                sync_service=self.sync_service,
             ),
             Configuration(
                 bot=self,
@@ -116,7 +119,7 @@ class MyBot(commands.Bot):
                 tag_service=self.tag_service,
             ),
         ]
-        await asyncio.gather(*(self.add_cog(cog) for cog in dependent_cogs))
+        await asyncio.gather(*(self.add_cog(cog) for cog in cogs_to_load))
         logger.info("所有 Cogs 已加载。")
 
         # 3. 注册全局事件监听器
