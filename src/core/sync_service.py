@@ -1,12 +1,11 @@
 import discord
 import datetime
 import logging
+import re
 from typing import Coroutine, Union, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import async_sessionmaker
-
 # 导入 ThreadManagerRepository，因为 sync_thread 方法会用到它
 from src.ThreadManager.repository import ThreadManagerRepository
-
 if TYPE_CHECKING:
     from bot_main import MyBot
 
@@ -46,6 +45,7 @@ class SyncService:
         """
         同步一个帖子的数据到数据库，包括其标签。
         该方法可以接受一个完整的帖子对象，或者一个帖子ID。
+
         :param thread: 要同步的帖子对象或帖子ID。
         :param priority: 此操作的API调用优先级。
         :param fetch_if_incomplete: 如果为True，则强制从API获取最新的帖子对象，用于处理可能不完整的对象。
@@ -58,6 +58,7 @@ class SyncService:
                     coro_factory=lambda: self.bot.fetch_channel(thread_id),
                     priority=priority,
                 )
+
                 if not isinstance(fetched_channel, discord.Thread):
                     logger.warning(
                         f"sync_thread: 获取到的 channel {thread_id} 不是一个帖子，已将其从索引中删除。"
@@ -67,6 +68,7 @@ class SyncService:
                         await repo.delete_thread_index(thread_id=thread_id)
                     return
                 thread = fetched_channel
+
             except discord.NotFound:
                 logger.warning(
                     f"sync_thread: 无法找到帖子 {thread_id}，可能已被删除。将从数据库中移除。"
@@ -81,7 +83,6 @@ class SyncService:
                     exc_info=True,
                 )
                 return
-
         # 如果需要，强制从API获取最新的帖子对象
         elif fetch_if_incomplete:
             try:
@@ -99,17 +100,19 @@ class SyncService:
                     repo = ThreadManagerRepository(session=session)
                     await repo.delete_thread_index(thread_id=thread.id)
                 return
+
         assert isinstance(thread, discord.Thread)
 
         tags_data = {t.id: t.name for t in thread.applied_tags or []}
-
         excerpt = ""
         thumbnail_url = ""
         reaction_count = 0
 
         # 创建原始的获取消息的协程，并用包装器包裹它
         first_msg = await self.bot.api_scheduler.submit(
-            coro_factory=lambda: self._fetch_message_wrapper(thread.fetch_message(thread.id)),
+            coro_factory=lambda: self._fetch_message_wrapper(
+                thread.fetch_message(thread.id)
+            ),
             priority=priority,
         )
 
@@ -122,12 +125,13 @@ class SyncService:
                 repo = ThreadManagerRepository(session=session)
                 await repo.delete_thread_index(thread_id=thread.id)
             return
-
+            
         # 消息获取成功，但解析内容时可能出错
         try:
             excerpt = first_msg.content
             if first_msg.attachments:
                 thumbnail_url = first_msg.attachments[0].url
+
             reaction_count = (
                 max([r.count for r in first_msg.reactions])
                 if first_msg.reactions
@@ -136,15 +140,50 @@ class SyncService:
         except Exception:
             logger.error(f"同步帖子 {thread.id} 时解析首楼消息内容失败", exc_info=True)
 
+        # --- 匹配重建格式中的信息 ---
+        final_author_id = thread.owner_id or 0
+        final_created_at = thread.created_at
+        if excerpt:
+            # 使用正则表达式匹配原作者ID
+            match_id = re.search(r"发帖人[:：\s*]*<@(\d+)>", excerpt)
+            if match_id:
+                try:
+                    proxy_author_id = int(match_id.group(1))
+                    final_author_id = proxy_author_id
+                except (ValueError, IndexError):
+                    logger.warning(f"帖子 {thread.id} 匹配到代发格式，但无法解析作者ID")
+
+            # 解析原始创建时间
+            # 正则表达式匹配: 年(4位), 月(1-2位), 日(1-2位), 时(2位), 分(2位)
+            time_match = re.search(
+                r"原始创建时间:\s*(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日.*?(\d{2}):(\d{2})", excerpt
+            )
+            if time_match:
+                try:
+                    year, month, day, hour, minute = map(int, time_match.groups())
+                    
+                    # 假设原始时间是 UTC+8 时区
+                    local_tz = datetime.timezone(datetime.timedelta(hours=8))
+                    
+                    # 创建一个带时区的本地时间对象
+                    local_dt = datetime.datetime(year, month, day, hour, minute, tzinfo=local_tz)
+                    
+                    # 转换为 UTC 时间并更新最终创建时间
+                    final_created_at = local_dt.astimezone(datetime.timezone.utc)
+                    logger.debug(f"帖子 {thread.id} 检测到原始创建时间并转换为 UTC: {final_created_at}")
+                except Exception as e:
+                    logger.warning(f"帖子 {thread.id} 匹配到时间格式，但解析或转换失败: {e}")
+
+
         thread_data = {
             "thread_id": thread.id,
             "channel_id": thread.parent_id,
             "title": thread.name,
-            "author_id": thread.owner_id or 0,
-            "created_at": thread.created_at,
+            "author_id": final_author_id,
+            "created_at": final_created_at,
             "last_active_at": discord.utils.snowflake_time(thread.last_message_id)
             if thread.last_message_id
-            else thread.created_at,
+            else final_created_at,
             "reaction_count": reaction_count,
             "reply_count": thread.message_count,
             "first_message_excerpt": excerpt,
