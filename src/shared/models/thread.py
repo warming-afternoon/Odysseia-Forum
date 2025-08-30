@@ -16,12 +16,12 @@ class Thread(SQLModel, table=True):
     channel_id: int = Field(index=True)
     thread_id: int = Field(index=True, unique=True)
     title: str
-    author_id: int
+    author_id: int = Field(index=True)
     created_at: datetime = Field(default_factory=datetime.utcnow, nullable=False)
 
     last_active_at: Optional[datetime] = Field(default=None, index=True)
-    reaction_count: int = Field(default=0)
-    reply_count: int = Field(default=0)
+    reaction_count: int = Field(default=0, index=True)
+    reply_count: int = Field(default=0, index=True)
     first_message_excerpt: Optional[str] = Field(default=None)
     thumbnail_url: Optional[str] = Field(default=None)
 

@@ -81,7 +81,7 @@ class Auditor(commands.Cog):
                     # logger.debug(f"正在提交帖子 {thread_id} 的审计任务。")
                     # 使用最低优先级(10)来调度同步任务，确保不影响用户交互
                     await self.api_scheduler.submit(
-                        coro_factory=lambda: self.sync_service.sync_thread(thread_id),
+                        coro_factory=lambda tid=thread_id: self.sync_service.sync_thread(tid),
                         priority=10,
                     )
                     # 等待2秒，以极低的速率进行审计，避免触发API速率限制

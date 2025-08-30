@@ -113,8 +113,13 @@ class ChannelSelectionView(discord.ui.View):
             await interaction.followup.send("请至少选择一个频道。", ephemeral=True)
             return
 
-        # 更新 search_state 中的频道列表
+        # 根据用户选择的频道，重新获取合并后的专属标签
+        merged_tags = self.cog.get_merged_tags(selected_ids)
+        correct_tag_names = [tag.name for tag in merged_tags]
+
+        # 更新 search_state 中的频道列表和可用标签列表
         self.search_state.channel_ids = selected_ids
+        self.search_state.all_available_tags = correct_tag_names
 
         # 启动通用搜索视图，并传入更新后的状态
         generic_view = GenericSearchView(self.cog, interaction, self.search_state)
