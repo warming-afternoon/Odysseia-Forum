@@ -1,7 +1,6 @@
 import logging
-from typing import Optional, List
+from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
 
 from shared.models.user_search_preferences import UserSearchPreferences
 from src.search.dto.user_search_preferences import UserSearchPreferencesDTO

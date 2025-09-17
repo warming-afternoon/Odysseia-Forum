@@ -1,6 +1,7 @@
 import discord
 from shared.ranking_config import RankingConfig
 
+
 class ConfigEmbedBuilder:
     """构建与排序配置相关的 Discord Embeds"""
 

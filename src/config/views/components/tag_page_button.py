@@ -1,6 +1,7 @@
 import discord
 from typing import Callable, Coroutine
 
+
 class TagPageButton(discord.ui.Button):
     """一个用于标签选择视图翻页的自定义按钮。"""
 

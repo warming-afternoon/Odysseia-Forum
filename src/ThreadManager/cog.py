@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, List, Tuple, Any
 
 from shared.safe_defer import safe_defer
 from src.config.repository import ConfigRepository
+from src.core.cache_service import CacheService
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -17,9 +18,6 @@ from .views.vote_view import TagVoteView
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-from src.core.cache_service import CacheService
 
 
 class ThreadManager(commands.Cog):
@@ -44,7 +42,9 @@ class ThreadManager(commands.Cog):
         """检查频道是否已索引"""
         return self.cache_service.is_channel_indexed(channel_id)
 
-    async def _notify_user_of_mutex_removal(self, thread: discord.Thread, conflicts: List[Tuple[Any, set]]):
+    async def _notify_user_of_mutex_removal(
+        self, thread: discord.Thread, conflicts: List[Tuple[Any, set]]
+    ):
         """通知用户他们的帖子因为互斥规则被修改了。"""
         if not thread.owner:
             logger.warning(f"无法获取帖子 {thread.id} 的作者，无法发送通知。")
@@ -52,46 +52,56 @@ class ThreadManager(commands.Cog):
 
         author = thread.owner
 
-        parent_channel_str = '未知频道'
+        parent_channel_str = "未知频道"
         if thread.parent:
             parent_channel_str = f"[{thread.parent.name}]({thread.parent.jump_url})"
-        
+
         embed = discord.Embed(
             title="🏷️ 帖子标签自动修改通知",
             description=f"您发表在 {thread.guild.name} > {parent_channel_str} 的帖子 "
-                        f"[{thread.name}]({thread.jump_url})\n"
-                        f"其标签已被自动修改",
-            color=discord.Color.orange()
+            f"[{thread.name}]({thread.jump_url})\n"
+            f"其标签已被自动修改",
+            color=discord.Color.orange(),
         )
         embed.add_field(name="原因", value="触发了互斥标签规则", inline=False)
 
         for i, (group, removed_tags_for_group) in enumerate(conflicts):
             sorted_rules = sorted(group.rules, key=lambda r: r.priority)
-            group_tags_list = [f"优先级 {j+1} : {rule.tag_name}" for j, rule in enumerate(sorted_rules)]
+            group_tags_list = [
+                f"优先级 {j + 1} : {rule.tag_name}"
+                for j, rule in enumerate(sorted_rules)
+            ]
             group_tags_str = "\n".join(group_tags_list)
-            
+
             embed.add_field(
-                name=f"冲突组 {i+1}",
+                name=f"冲突组 {i + 1}",
                 value=f"**规则**:\n{group_tags_str}\n**被移除的标签**:\n{', '.join(removed_tags_for_group)}",
-                inline=False
+                inline=False,
             )
-        
-        embed.set_footer(text="系统自动保留了冲突组中优先级最高的标签\n请右键点击左侧频道列表中的帖子名，对标签进行修改\n选择其中一个标签进行保留")
+
+        embed.set_footer(
+            text="系统自动保留了冲突组中优先级最高的标签\n请右键点击左侧频道列表中的帖子名，对标签进行修改\n选择其中一个标签进行保留"
+        )
 
         async def send_dm():
             try:
                 await author.send(embed=embed)
                 logger.info(f"已向用户 {author.id} 发送互斥标签移除私信通知。")
             except discord.Forbidden:
-                logger.warning(f"无法向用户 {author.id} 发送私信，将在原帖中发送公开通知。")
+                logger.warning(
+                    f"无法向用户 {author.id} 发送私信，将在原帖中发送公开通知。"
+                )
                 # 发送备用公开通知
                 await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: thread.send(content=f"{author.mention}，你的帖子标签已被修改，详情请见上方通知。", embed=embed),
-                    priority=3
+                    coro_factory=lambda: thread.send(
+                        content=f"{author.mention}，你的帖子标签已被修改，详情请见上方通知。",
+                        embed=embed,
+                    ),
+                    priority=3,
                 )
             except Exception as e:
                 logger.error(f"向用户 {author.id} 发送私信时发生未知错误。", exc_info=e)
-        
+
         await self.bot.api_scheduler.submit(coro_factory=send_dm, priority=3)
 
     async def apply_mutex_tag_rules(self, thread: discord.Thread) -> bool:
@@ -104,15 +114,19 @@ class ThreadManager(commands.Cog):
         post_tag_names = set(post_tag_name_to_id.keys())
 
         async with self.session_factory() as session:
-            repo = ConfigRepository(session) # 使用新的ConfigRepository
+            repo = ConfigRepository(session)  # 使用新的ConfigRepository
             groups = await repo.get_all_mutex_groups_with_rules()
 
         tags_to_remove_ids = set()
-        all_conflicts = [] # 收集所有冲突信息
+        all_conflicts = []  # 收集所有冲突信息
 
         for group in groups:
             sorted_rules = sorted(group.rules, key=lambda r: r.priority)
-            conflicting_names = [rule.tag_name for rule in sorted_rules if rule.tag_name in post_tag_names]
+            conflicting_names = [
+                rule.tag_name
+                for rule in sorted_rules
+                if rule.tag_name in post_tag_names
+            ]
 
             # 如果帖子的标签中，有超过一个（含）的标签在本互斥组内
             if len(conflicting_names) > 1:
@@ -120,7 +134,7 @@ class ThreadManager(commands.Cog):
                 # 保留优先级最高的（第一个），移除其他的
                 for name_to_remove in group_tags_to_remove:
                     tags_to_remove_ids.add(post_tag_name_to_id[name_to_remove])
-                
+
                 # 记录冲突信息
                 all_conflicts.append((group, group_tags_to_remove))
 
@@ -130,21 +144,27 @@ class ThreadManager(commands.Cog):
                 await self._notify_user_of_mutex_removal(thread, all_conflicts)
 
             # 使用列表推导式创建新的标签列表
-            final_tags = [tag for tag in applied_tags if tag.id not in tags_to_remove_ids]
-            
+            final_tags = [
+                tag for tag in applied_tags if tag.id not in tags_to_remove_ids
+            ]
+
             # 使用集合推导式获取被移除的标签名称
-            removed_tag_names = {tag.name for tag in applied_tags if tag.id in tags_to_remove_ids}
-            logger.info(f"帖子 {thread.id} 发现互斥标签，将移除: {', '.join(removed_tag_names)}")
+            removed_tag_names = {
+                tag.name for tag in applied_tags if tag.id in tags_to_remove_ids
+            }
+            logger.info(
+                f"帖子 {thread.id} 发现互斥标签，将移除: {', '.join(removed_tag_names)}"
+            )
 
             try:
                 await self.bot.api_scheduler.submit(
                     coro_factory=lambda: thread.edit(applied_tags=final_tags),
-                    priority=2
+                    priority=2,
                 )
                 return True
             except Exception as e:
                 logger.error(f"自动修改帖子 {thread.id} 的标签时失败", exc_info=e)
-        
+
         return False
 
     @commands.Cog.listener()
@@ -158,9 +178,8 @@ class ThreadManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
-        if (
-            self.is_channel_indexed(channel_id=after.parent_id)
-            and before.applied_tags != after.applied_tags
+        if self.is_channel_indexed(channel_id=after.parent_id) and (
+            before.applied_tags != after.applied_tags or before.name != after.name
         ):
             modified = await self.apply_mutex_tag_rules(after)
             if modified:
@@ -386,9 +405,10 @@ class ThreadManager(commands.Cog):
                 priority=1,
             )
         except Exception as e:
+            error_message = f"❌ 命令执行失败: {e}"
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 命令执行失败: {e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )

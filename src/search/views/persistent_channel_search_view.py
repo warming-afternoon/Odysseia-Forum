@@ -48,20 +48,20 @@ class PersistentChannelSearchView(discord.ui.View):
                 priority=1,
             )
             return
-            
+
         # 获取父频道 (channel) 和它的 ID (channel_id)
         channel = interaction.channel.parent
-        if not channel: # 预防帖子父频道丢失的罕见情况
-             await self.cog.bot.api_scheduler.submit(
+        if not channel:  # 预防帖子父频道丢失的罕见情况
+            await self.cog.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
                     "❌ 无法找到该帖子的父频道。", ephemeral=True
                 ),
                 priority=1,
             )
-             return
-        
+            return
+
         channel_id = channel.id
-        
+
         # 确保父频道是论坛
         if not isinstance(channel, discord.ForumChannel):
             await self.cog.bot.api_scheduler.submit(
@@ -76,7 +76,7 @@ class PersistentChannelSearchView(discord.ui.View):
         user_prefs = await self.cog.preferences_service.get_user_preferences(
             interaction.user.id
         )
-        
+
         # 获取该频道的标签
         channel_tags = self.cog.get_merged_tags([channel_id])
         channel_tag_names = [tag.name for tag in channel_tags]

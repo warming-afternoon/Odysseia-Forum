@@ -1,4 +1,6 @@
 import discord
+import re
+
 from typing import List, TYPE_CHECKING, Set
 
 from search.dto.search_state import SearchStateDTO
@@ -40,7 +42,9 @@ class GenericSearchView(discord.ui.View):
     async def start(self, send_new_ephemeral: bool = False):
         """
         初始化视图
-        :param send_new_ephemeral: 如果为 True，则发送一个新的私密消息，而不是编辑原始消息。
+
+        Args:
+            send_new_ephemeral (bool): 如果为 True，则发送一个新的私密消息，而不是编辑原始消息
         """
         await self.update_view(
             self.original_interaction, send_new_ephemeral=send_new_ephemeral
@@ -125,7 +129,11 @@ class GenericSearchView(discord.ui.View):
     ):
         """
         根据当前状态更新整个视图，包括UI组件和搜索结果
-        :param send_new_ephemeral: 如果为 True，则发送一个新的私密消息，而不是编辑原始消息。
+
+        Args:
+            rerun_search (bool): 如果为 True，则根据恢复的状态重新执行一次搜索
+            send_new_ephemeral (bool): 如果为 True，则发送一个新的私密消息，而不是编辑原始消息
+
         """
         self.last_interaction = interaction
         await safe_defer(interaction, ephemeral=True)
@@ -276,7 +284,6 @@ class GenericSearchView(discord.ui.View):
         exemption_markers: str,
     ):
         """处理来自KeywordModal的数据回传"""
-        import re
 
         self.search_state.keywords = keywords
         self.search_state.exclude_keywords = exclude_keywords
@@ -312,7 +319,6 @@ class GenericSearchView(discord.ui.View):
     ):
         self.search_state.exclude_tags = new_selection
         await self.on_filter_change(interaction)
-
 
     def build_query_object(self) -> ThreadSearchQuery:
         """根据当前视图状态构建查询对象。"""
@@ -375,11 +381,8 @@ class GenericSearchView(discord.ui.View):
 
     async def on_timeout(self):
         """当视图超时时，保存状态并显示一个带有“继续”按钮的新视图"""
-        # Pydantic v2 使用 model_dump, v1 使用 dict
-        try:
-            state = self.search_state.model_dump()
-        except AttributeError:
-            state = self.search_state.dict()
+
+        state = self.search_state.model_dump()
 
         timeout_view = TimeoutView(self.cog, self.last_interaction, state)
 

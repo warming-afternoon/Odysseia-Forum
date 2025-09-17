@@ -1,5 +1,6 @@
 import discord
-from typing import List, Set, Callable, Optional, Awaitable
+from typing import List, Set, Callable, Awaitable
+
 
 class TagSelect(discord.ui.Select):
     def __init__(
@@ -18,7 +19,7 @@ class TagSelect(discord.ui.Select):
         self.tag_page = page
         self.tags_per_page = tags_per_page
         self.on_change_callback = on_change_callback
-        self.custom_id_prefix = custom_id # 用作标识，例如 "generic_include_tags"
+        self.custom_id_prefix = custom_id  # 用作标识，例如 "generic_include_tags"
 
         start_idx = self.tag_page * self.tags_per_page
         end_idx = start_idx + self.tags_per_page
