@@ -42,7 +42,7 @@ class GenericSearchView(discord.ui.View):
     async def start(self, send_new_ephemeral: bool = False):
         """
         初始化视图
-                
+
         Args:
             send_new_ephemeral (bool): 如果为 True，则发送一个新的私密消息，而不是编辑原始消息
         """
@@ -129,11 +129,11 @@ class GenericSearchView(discord.ui.View):
     ):
         """
         根据当前状态更新整个视图，包括UI组件和搜索结果
-        
+
         Args:
             rerun_search (bool): 如果为 True，则根据恢复的状态重新执行一次搜索
             send_new_ephemeral (bool): 如果为 True，则发送一个新的私密消息，而不是编辑原始消息
-            
+
         """
         self.last_interaction = interaction
         await safe_defer(interaction, ephemeral=True)
@@ -320,7 +320,6 @@ class GenericSearchView(discord.ui.View):
         self.search_state.exclude_tags = new_selection
         await self.on_filter_change(interaction)
 
-
     def build_query_object(self) -> ThreadSearchQuery:
         """根据当前视图状态构建查询对象。"""
         state = self.search_state
@@ -382,7 +381,7 @@ class GenericSearchView(discord.ui.View):
 
     async def on_timeout(self):
         """当视图超时时，保存状态并显示一个带有“继续”按钮的新视图"""
-        
+
         state = self.search_state.model_dump()
 
         timeout_view = TimeoutView(self.cog, self.last_interaction, state)

@@ -2,12 +2,13 @@ import logging
 from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from sqlmodel import select, delete
+from sqlmodel import select
 
 from shared.models.mutex_tag_group import MutexTagGroup
 from shared.models.mutex_tag_rule import MutexTagRule
 
 logger = logging.getLogger(__name__)
+
 
 class ConfigRepository:
     def __init__(self, session: AsyncSession):
@@ -19,7 +20,7 @@ class ConfigRepository:
         使用 selectinload 避免 N+1 查询问题。
         """
         result = await self.session.execute(
-            select(MutexTagGroup).options(selectinload(MutexTagGroup.rules)) # type: ignore
+            select(MutexTagGroup).options(selectinload(MutexTagGroup.rules))  # type: ignore
         )
         return list(result.scalars().unique().all())
 

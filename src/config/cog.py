@@ -2,8 +2,8 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
-from typing import TYPE_CHECKING, Optional, Callable
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+from typing import TYPE_CHECKING, Optional
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from shared.ranking_config import RankingConfig, PresetConfigs
 from shared.safe_defer import safe_defer
@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
+
 
 class Configuration(commands.Cog):
     """管理机器人各项配置"""
@@ -38,7 +39,9 @@ class Configuration(commands.Cog):
         )
         logger.info("Config 模块已加载")
 
-    @app_commands.command(name="查看目前排序算法", description="查看当前搜索排序算法配置")
+    @app_commands.command(
+        name="查看目前排序算法", description="查看当前搜索排序算法配置"
+    )
     async def view_ranking_config(self, interaction: discord.Interaction):
         await safe_defer(interaction, ephemeral=True)
         embed = ConfigEmbedBuilder.build_view_config_embed()
@@ -80,7 +83,7 @@ class Configuration(commands.Cog):
         mild_penalty: Optional[float] = None,
     ):
         await safe_defer(interaction, ephemeral=True)
-        
+
         try:
             # 应用预设配置
             if preset:
@@ -172,28 +175,35 @@ class Configuration(commands.Cog):
             )
 
         except ValueError as e:
+            error_message = f"❌ 配置错误：{e}"
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 配置错误：{e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )
         except Exception as e:
+            error_message = f"❌ 配置失败：{e}"
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 配置失败：{e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )
 
     @configure_ranking.error
-    async def on_ranking_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+    async def on_ranking_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
         if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message("❌ 此命令需要 admin 权限。", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ 此命令需要 admin 权限。", ephemeral=True
+            )
         else:
             logger.error("配置排序命令出错", exc_info=error)
-            await interaction.response.send_message(f"❌ 命令执行失败: {error}", ephemeral=True)
-
+            await interaction.response.send_message(
+                f"❌ 命令执行失败: {error}", ephemeral=True
+            )
 
     @config_group.command(name="互斥标签组", description="配置互斥标签组")
     @app_commands.checks.has_permissions(administrator=True)
@@ -202,9 +212,15 @@ class Configuration(commands.Cog):
         await self.mutex_handler.start_configuration_flow(interaction)
 
     @configure_mutex_tags.error
-    async def on_mutex_tags_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):
+    async def on_mutex_tags_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
         if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message("❌ 此命令需要 admin 权限。", ephemeral=True)
+            await interaction.response.send_message(
+                "❌ 此命令需要 admin 权限。", ephemeral=True
+            )
         else:
             logger.error("配置互斥标签命令出错", exc_info=error)
-            await interaction.response.send_message(f"❌ 命令执行失败: {error}", ephemeral=True)
+            await interaction.response.send_message(
+                f"❌ 命令执行失败: {error}", ephemeral=True
+            )

@@ -1,6 +1,6 @@
 import logging
 import re
-from typing import Optional, Sequence
+from typing import Sequence
 from sqlmodel import select, func, and_, case, cast, Float
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -12,8 +12,6 @@ from shared.models.tag import Tag
 from search.qo.thread_search import ThreadSearchQuery
 from shared.ranking_config import RankingConfig
 from core.tagService import TagService
-from shared.models.tag import Tag
-from shared.models.thread import Thread
 
 
 class SearchRepository:
@@ -141,23 +139,34 @@ class SearchRepository:
 
             # --- 步骤 2: 单独处理反选关键词 ---
             if query.exclude_keywords:
-                exemption_markers = query.exclude_keyword_exemption_markers if query.exclude_keyword_exemption_markers is not None else ["禁", "🈲"]
+                exemption_markers = (
+                    query.exclude_keyword_exemption_markers
+                    if query.exclude_keyword_exemption_markers is not None
+                    else ["禁", "🈲"]
+                )
                 exclude_keywords_list = [
-                    kw.strip() for kw in re.split(r"[,，/\s]+", query.exclude_keywords) if kw.strip()
+                    kw.strip()
+                    for kw in re.split(r"[,，/\s]+", query.exclude_keywords)
+                    if kw.strip()
                 ]
 
                 all_exclude_parts = []
                 for keyword in exclude_keywords_list:
                     # 只有在豁免标记列表非空时才构建豁免逻辑
-                    if exemption_markers: 
-                        exemption_clauses = [f'NEAR("{keyword}" "{marker}", 8)' for marker in exemption_markers]
+                    if exemption_markers:
+                        exemption_clauses = [
+                            f'NEAR("{keyword}" "{marker}", 8)'
+                            for marker in exemption_markers
+                        ]
                         exemption_match_str = f"({' OR '.join(exemption_clauses)})"
                         # 构建带有 NOT 的 FTS 表达式
-                        all_exclude_parts.append(f'"{keyword}" NOT {exemption_match_str}')
+                        all_exclude_parts.append(
+                            f'"{keyword}" NOT {exemption_match_str}'
+                        )
                     else:
                         # 如果没有豁免标记，直接排除关键词
                         all_exclude_parts.append(f'"{keyword}"')
-                
+
                 if all_exclude_parts:
                     final_exclude_expr = " OR ".join(all_exclude_parts)
                     # 创建一个子查询，专门用于找出要排除的 thread ID
@@ -172,7 +181,8 @@ class SearchRepository:
             needs_fts_join = query.keywords  # 只在有正选关键词时才需要JOIN
             if needs_fts_join:
                 base_stmt = base_stmt.join(
-                    thread_fts_table, Thread.id == thread_fts_table.c.rowid  # type: ignore
+                    thread_fts_table,
+                    Thread.id == thread_fts_table.c.rowid,  # type: ignore
                 )
 
             # -- 正选关键词 --
@@ -252,8 +262,8 @@ class SearchRepository:
         """获取指定作者发布过的所有帖子的唯一标签列表"""
         statement = (
             select(Tag)
-            .join(Thread, Tag.threads) # type: ignore
-            .where(Thread.author_id == author_id) # type: ignore
+            .join(Thread, Tag.threads)  # type: ignore
+            .where(Thread.author_id == author_id)  # type: ignore
             .distinct()
         )
         result = await self.session.execute(statement)

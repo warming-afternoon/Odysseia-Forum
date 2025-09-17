@@ -1,8 +1,6 @@
 import discord
 from typing import TYPE_CHECKING
 
-from shared.safe_defer import safe_defer
-
 
 if TYPE_CHECKING:
     from ..cog import Search

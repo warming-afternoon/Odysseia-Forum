@@ -1,8 +1,6 @@
 import logging
 import discord
 from typing import TYPE_CHECKING, Optional
-from discord.ui import ChannelSelect
-from discord.enums import ChannelType
 
 from shared.safe_defer import safe_defer
 from preferences.repository import PreferencesRepository
@@ -88,7 +86,7 @@ class PreferencesView(discord.ui.View):
                 value="\n".join(keyword_info),
                 inline=False,
             )
-        
+
         # 频道偏好
         channel_names = []
         if prefs.preferred_channels and self.original_interaction.guild:
@@ -96,7 +94,7 @@ class PreferencesView(discord.ui.View):
                 channel = self.original_interaction.guild.get_channel(channel_id)
                 if channel:
                     channel_names.append(channel.mention)
-        
+
         if channel_names:
             embed.add_field(
                 name="🔍 偏好频道",
@@ -149,16 +147,20 @@ class PreferencesView(discord.ui.View):
         # 作者偏好
         author_info = []
         if prefs.include_authors:
-            author_info.append(f"✅ 包含作者： {', '.join([f'<@{author_id}>' for author_id in prefs.include_authors])}")
+            author_info.append(
+                f"✅ 包含作者： {', '.join([f'<@{author_id}>' for author_id in prefs.include_authors])}"
+            )
         if prefs.exclude_authors:
-            author_info.append(f"❌ 排除作者： {', '.join([f'<@{author_id}>' for author_id in prefs.exclude_authors])}")
+            author_info.append(
+                f"❌ 排除作者： {', '.join([f'<@{author_id}>' for author_id in prefs.exclude_authors])}"
+            )
         if author_info:
             embed.add_field(
                 name="👤 作者设置",
                 value="\n".join(author_info),
                 inline=False,
             )
-        
+
         return embed
 
     def update_components(self):
@@ -202,9 +204,7 @@ class PreferencesView(discord.ui.View):
             else DefaultPreferences.PREVIEW_IMAGE_MODE.value
         )
         preview_button_label = (
-            "🔄 切换为缩略图"
-            if current_preview_mode == "image"
-            else "🔄 切换为大图"
+            "🔄 切换为缩略图" if current_preview_mode == "image" else "🔄 切换为大图"
         )
         self.add_item(
             discord.ui.Button(
@@ -275,7 +275,7 @@ class PreferencesView(discord.ui.View):
 
         elif custom_id == "prefs_keywords":
             # 获取当前偏好用于填充 Modal
-            prefs = self.preferences # 假设已经通过 fetch_preferences 获取
+            prefs = self.preferences  # 假设已经通过 fetch_preferences 获取
             initial_include = prefs.include_keywords if prefs else ""
             initial_exclude = prefs.exclude_keywords if prefs else ""
             initial_markers = (
@@ -292,12 +292,12 @@ class PreferencesView(discord.ui.View):
                 initial_exemption_markers=initial_markers,
             )
             await interaction.response.send_modal(modal)
-            return # Modal 流程自己处理响应
-            
+            return  # Modal 流程自己处理响应
+
         elif custom_id == "prefs_channels":
             await self.service.search_preferences_channels(interaction, self)
-            return # 服务自己处理响应
-            
+            return  # 服务自己处理响应
+
         elif custom_id == "prefs_time":
             current_after = (
                 self.preferences.after_date.strftime("%Y-%m-%d")
@@ -320,13 +320,13 @@ class PreferencesView(discord.ui.View):
             current_page_size = (
                 self.preferences.results_per_page
                 if self.preferences and self.preferences.results_per_page
-                else 5 # 默认值
+                else 5  # 默认值
             )
             modal = ResultsPerPageModal(self.service, self, current_page_size)
             await self.service.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.response.send_modal(modal), priority=1
             )
-            return # Modal 流程自己处理响应
+            return  # Modal 流程自己处理响应
 
         elif custom_id == "prefs_preview":
             await safe_defer(interaction)
@@ -349,7 +349,6 @@ class PreferencesView(discord.ui.View):
     ):
         await safe_defer(modal_interaction, ephemeral=True)
         try:
-            
             await self.service.save_user_keywords(
                 user_id=modal_interaction.user.id,
                 include_str=submitted_include,

@@ -6,10 +6,12 @@ from shared.models.thread import Thread
 
 logger = logging.getLogger(__name__)
 
+
 class CacheService:
     """
     一个统一的服务，用于缓存和提供整个机器人共享的数据状态。
     """
+
     def __init__(self, bot, session_factory: async_sessionmaker):
         self.bot = bot
         self.session_factory = session_factory
@@ -39,7 +41,9 @@ class CacheService:
                     logger.warning(f"无法找到或频道类型错误 (ID: {channel_id})")
             self.indexed_channels = new_channel_cache
 
-        logger.info(f"CacheService 刷新完毕。缓存了 {len(self.indexed_channel_ids)} 个频道ID 和 {len(self.indexed_channels)} 个频道对象。")
+        logger.info(
+            f"CacheService 刷新完毕。缓存了 {len(self.indexed_channel_ids)} 个频道ID 和 {len(self.indexed_channels)} 个频道对象。"
+        )
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道ID是否已索引。"""

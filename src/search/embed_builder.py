@@ -1,6 +1,7 @@
 import discord
 from shared.models.thread import Thread as ThreadModel
-from datetime import datetime, timezone 
+from datetime import timezone
+
 
 class ThreadEmbedBuilder:
     """负责构建帖子搜索结果的 Embed"""
@@ -29,7 +30,9 @@ class ThreadEmbedBuilder:
 
         # 使用 Discord 动态时间戳格式
         if thread.last_active_at:
-            last_active_ts = int(thread.last_active_at.replace(tzinfo=timezone.utc).timestamp())
+            last_active_ts = int(
+                thread.last_active_at.replace(tzinfo=timezone.utc).timestamp()
+            )
             last_active_str = f"<t:{last_active_ts}:F>"
         else:
             last_active_str = "无"

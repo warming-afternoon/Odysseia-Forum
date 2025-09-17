@@ -1,33 +1,29 @@
 from __future__ import annotations
 import logging
-from venv import logger
 import discord
 from discord import app_commands
 from datetime import datetime, timezone
-import re
 from typing import List, Optional, TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from core.cache_service import CacheService
 from shared.safe_defer import safe_defer
-from shared.utils import process_string_to_set # 导入新工具函数
+from shared.utils import process_string_to_set
 from .repository import PreferencesRepository
 from src.search.dto.user_search_preferences import UserSearchPreferencesDTO
 from core.tagService import TagService
-from ..search.views.components.keyword_button import KeywordModal
 from .views.tag_preferences_view import TagPreferencesView
 from .views.channel_preferences_view import ChannelPreferencesView
-from preferences.repository import PreferencesRepository
 
 if TYPE_CHECKING:
     from .views.preferences_view import PreferencesView
-    from ..search.cog import Search
 
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from bot_main import MyBot
+
 
 class PreferencesService:
     """处理用户搜索偏好设置"""
@@ -68,7 +64,7 @@ class PreferencesService:
         exemption_markers_str: str,
     ) -> UserSearchPreferencesDTO:
         """接收关键词字符串，处理并保存到数据库。"""
-        
+
         final_include_set = process_string_to_set(include_str)
         final_exclude_set = process_string_to_set(exclude_str)
         final_exemption_markers_list = sorted(
@@ -155,9 +151,10 @@ class PreferencesService:
                 priority=1,
             )
         except Exception as e:
+            error_message = f"❌ 操作失败: {e}"
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 操作失败: {e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )
@@ -173,7 +170,7 @@ class PreferencesService:
                 prefs_dto = await repo.get_user_preferences(interaction.user.id)
                 if not prefs_dto:
                     prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
-            
+
             indexed_channels = self.cache_service.get_indexed_channels()
 
             view = ChannelPreferencesView(
@@ -183,9 +180,10 @@ class PreferencesService:
 
         except Exception as e:
             logger.error(f"打开频道偏好设置时出错: {e}", exc_info=True)
+            error_message = f"❌ 打开频道设置时出错: {e}"
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 打开频道设置时出错: {e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )
@@ -221,7 +219,9 @@ class PreferencesService:
             update_data["after_date"] = naive_dt.replace(tzinfo=timezone.utc)
         if before_date_str:
             naive_dt = datetime.strptime(before_date_str, "%Y-%m-%d")
-            aware_dt = naive_dt.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
+            aware_dt = naive_dt.replace(
+                hour=23, minute=59, second=59, tzinfo=timezone.utc
+            )
             update_data["before_date"] = aware_dt
 
         if not after_date_str and not before_date_str:
@@ -257,9 +257,10 @@ class PreferencesService:
             await view.start()
 
         except Exception as e:
+            error_message = f"❌ 打开标签设置时出错: {e}"
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 打开标签设置时出错: {e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )

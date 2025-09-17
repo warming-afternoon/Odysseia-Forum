@@ -90,7 +90,7 @@ class ChannelSelectionView(discord.ui.View):
         selected_values = self.channel_select.values
         for option in self.channel_select.options:
             option.default = option.value in selected_values
- 
+
         # 更新消息以反映当前选择
         if not has_selection:
             message_content = "请选择想搜索的论坛频道（可多选）："
@@ -139,7 +139,7 @@ class ChannelSelectionView(discord.ui.View):
             selected_ids = list(self.all_channel_ids)
         elif selected_values:
             selected_ids = [int(v) for v in selected_values]
-        else: # 如果用户清空了选择但点击了确定（可能是因为有预设值）
+        else:  # 如果用户清空了选择但点击了确定（可能是因为有预设值）
             selected_ids = self.search_state.channel_ids
 
         if not selected_ids:

@@ -1,11 +1,12 @@
 import discord
-from typing import TYPE_CHECKING, Callable, Optional
+from typing import TYPE_CHECKING
 
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:
     from ...preferences_service import PreferencesService
     from ..preferences_view import PreferencesView
+
 
 class ResultsPerPageModal(discord.ui.Modal, title="设置每页结果数量"):
     def __init__(
@@ -52,9 +53,10 @@ class ResultsPerPageModal(discord.ui.Modal, title="设置每页结果数量"):
                 priority=1,
             )
         except Exception as e:
+            error_message = f"❌ 保存失败: {e}"
             await self.service.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 保存失败: {e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )

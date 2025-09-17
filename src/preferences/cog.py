@@ -33,7 +33,7 @@ class Preferences(commands.Cog):
 
     async def cog_load(self):
         """在Cog加载时注册上下文菜单命令"""
-        
+
         # --- 手动创建和注册上下文菜单 ---
         add_block_menu = app_commands.ContextMenu(
             name="加入搜索屏蔽", callback=self.add_to_search_blocklist
@@ -64,7 +64,9 @@ class Preferences(commands.Cog):
     ):
         """管理作者偏好设置"""
         # 这里的逻辑已经大部分在 PreferencesService 中，所以直接调用
-        await self.preferences_service.search_preferences_author(interaction, action, user)
+        await self.preferences_service.search_preferences_author(
+            interaction, action, user
+        )
 
     @search_prefs.command(name="设置", description="打开偏好设置面板")
     async def open_search_preferences_panel(self, interaction: discord.Interaction):
@@ -75,7 +77,7 @@ class Preferences(commands.Cog):
         """打开偏好设置面板"""
         try:
             await safe_defer(interaction, ephemeral=True)
-            
+
             view = PreferencesView(self.preferences_service, interaction)
             await view.start()
         except Exception as e:
@@ -87,18 +89,28 @@ class Preferences(commands.Cog):
             )
 
     # 上下文菜单命令的回调函数
-    async def add_to_search_blocklist(self, interaction: discord.Interaction, user: discord.User):
+    async def add_to_search_blocklist(
+        self, interaction: discord.Interaction, user: discord.User
+    ):
         """将用户加入搜索屏蔽列表"""
         action = app_commands.Choice(name="屏蔽作者", value="exclude")
-        await self.preferences_service.search_preferences_author(interaction, action, user)
+        await self.preferences_service.search_preferences_author(
+            interaction, action, user
+        )
 
-    async def remove_from_search_blocklist(self, interaction: discord.Interaction, user: discord.User):
+    async def remove_from_search_blocklist(
+        self, interaction: discord.Interaction, user: discord.User
+    ):
         """将用户从搜索屏蔽列表中移除"""
         action = app_commands.Choice(name="取消屏蔽", value="unblock")
-        await self.preferences_service.search_preferences_author(interaction, action, user)
+        await self.preferences_service.search_preferences_author(
+            interaction, action, user
+        )
 
     @commands.Cog.listener("on_open_preferences_panel")
-    async def on_open_preferences_panel_listener(self, interaction: discord.Interaction):
+    async def on_open_preferences_panel_listener(
+        self, interaction: discord.Interaction
+    ):
         """监听从其他视图（如GlobalSearchView）发出的事件，以打开偏好面板。"""
         # 调用内部逻辑函数
         await self._open_search_preferences_panel(interaction)

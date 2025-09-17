@@ -1,5 +1,4 @@
 import discord
-from shared.default_preferences import DefaultPreferences
 
 
 class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):

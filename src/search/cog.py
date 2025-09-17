@@ -2,7 +2,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from shared.safe_defer import safe_defer
 from .dto.tag import TagDTO
@@ -61,7 +61,7 @@ class Search(commands.Cog):
             name="搜索作品", callback=self.search_user_posts
         )
         self.bot.tree.add_command(search_user_context_menu)
-        
+
         # search_message_context_menu = app_commands.ContextMenu(
         #     name="搜索作品", callback=self.search_message_author
         # )
@@ -113,7 +113,7 @@ class Search(commands.Cog):
             embed.add_field(
                 name="使用方法",
                 value="点击“**搜索本频道**”按钮，可以根据标签、作者、关键词等条件进行搜索。\n"
-                      "点击“**偏好设置**”按钮，可以修改您的默认搜索偏好。",
+                "点击“**偏好设置**”按钮，可以修改您的默认搜索偏好。",
                 inline=False,
             )
 
@@ -133,9 +133,10 @@ class Search(commands.Cog):
                 priority=1,
             )
         except Exception as e:
+            error_message = f"❌ 创建失败: {e}"
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 创建失败: {e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )
@@ -176,9 +177,10 @@ class Search(commands.Cog):
                 priority=1,
             )
         except Exception as e:
+            error_message = f"❌ 创建失败: {e}"
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    f"❌ 创建失败: {e}", ephemeral=True
+                    error_message, ephemeral=True
                 ),
                 priority=1,
             )
@@ -201,7 +203,7 @@ class Search(commands.Cog):
                 return
 
             all_channel_ids = list(self.cache_service.indexed_channel_ids)
-            
+
             # 获取所有频道的合并标签
             merged_tags = self.get_merged_tags(all_channel_ids)
             all_tag_names = [tag.name for tag in merged_tags]
@@ -236,11 +238,11 @@ class Search(commands.Cog):
 
             message_content = "请选择想搜索的论坛频道（可多选）："
             if user_prefs and user_prefs.preferred_channels:
-                message_content = "已根据偏好预选了频道，可以直接点击“确定搜索”继续或进行修改。"
+                message_content = (
+                    "已根据偏好预选了频道，可以直接点击“确定搜索”继续或进行修改。"
+                )
 
-            await interaction.followup.send(
-                message_content, view=view, ephemeral=True
-            )
+            await interaction.followup.send(message_content, view=view, ephemeral=True)
         except Exception:
             logger.error("在启动全局搜索中发生严重错误", exc_info=True)
             # 确保即使有异常，也能给用户一个反馈
@@ -263,7 +265,9 @@ class Search(commands.Cog):
         """启动一个交互式视图，用于搜索特定作者的帖子并按标签等进行筛选。"""
         await self._quick_author_search(interaction, author)
 
-    async def _quick_author_search(self, interaction: discord.Interaction, author: discord.User | discord.Member):
+    async def _quick_author_search(
+        self, interaction: discord.Interaction, author: discord.User | discord.Member
+    ):
         """快速作者搜索的内部逻辑"""
         await safe_defer(interaction, ephemeral=True)
         try:
@@ -321,13 +325,16 @@ class Search(commands.Cog):
                 await safe_defer(interaction, ephemeral=True)
             await interaction.followup.send(f"❌ 启动搜索作者失败: {e}", ephemeral=True)
 
-
     # 上下文菜单命令的回调函数
-    async def search_user_posts(self, interaction: discord.Interaction, user: discord.User):
+    async def search_user_posts(
+        self, interaction: discord.Interaction, user: discord.User
+    ):
         """右键点击用户，搜索该用户的作品"""
         await self._quick_author_search(interaction, author=user)
-    
-    async def search_message_author(self, interaction: discord.Interaction, message: discord.Message):
+
+    async def search_message_author(
+        self, interaction: discord.Interaction, message: discord.Message
+    ):
         """右键点击消息，搜索该消息作者的作品"""
         await self._quick_author_search(interaction, author=message.author)
 
@@ -349,7 +356,7 @@ class Search(commands.Cog):
         per_page: int,
         preview_mode: str,
     ) -> dict:
-        """ 通用搜索和显示函数 """
+        """通用搜索和显示函数"""
         try:
             async with self.session_factory() as session:
                 repo = SearchRepository(session, self.tag_service)

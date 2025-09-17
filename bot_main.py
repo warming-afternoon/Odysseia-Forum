@@ -15,7 +15,6 @@ import discord
 import logging
 from discord.ext import commands
 import asyncio
-from typing import cast
 
 from shared.database import AsyncSessionFactory, init_db, close_db
 from src.ThreadManager.cog import ThreadManager
@@ -79,7 +78,7 @@ class MyBot(commands.Bot):
         self.tag_service = TagService(AsyncSessionFactory)
         self.cache_service = CacheService(self, AsyncSessionFactory)
         self.sync_service = SyncService(bot=self, session_factory=AsyncSessionFactory)
-        
+
         asyncio.create_task(self.tag_service.build_cache())
         asyncio.create_task(self.cache_service.build_or_refresh_cache())
 
@@ -134,7 +133,9 @@ class MyBot(commands.Bot):
                 tag_service=self.tag_service,
             ),
         ]
-        await asyncio.gather(*(self.add_cog(cog) for cog in cogs_to_load), return_exceptions=True)
+        await asyncio.gather(
+            *(self.add_cog(cog) for cog in cogs_to_load), return_exceptions=True
+        )
         logger.info("所有 Cogs 已加载。")
 
         # 3. 注册全局事件监听器
