@@ -29,7 +29,11 @@ class PersistentChannelSearchView(discord.ui.View):
         """
         当用户点击“搜索本频道”按钮时，启动一个预设了频道ID的通用搜索流程。
         """
-        await safe_defer(interaction, ephemeral=True)
+        try:
+            await interaction.response.send_message("正在加载搜索界面...", ephemeral=True)
+        except discord.errors.InteractionResponded:
+            await interaction.followup.send("操作过快，请稍后重试。", ephemeral=True)
+            return
 
         if not interaction.guild:
             await self.cog.bot.api_scheduler.submit(
@@ -107,7 +111,7 @@ class PersistentChannelSearchView(discord.ui.View):
             interaction=interaction,
             search_state=initial_state,
         )
-        await generic_view.start(send_new_ephemeral=True)
+        await generic_view.start(send_new_ephemeral=False)
 
     @discord.ui.button(
         label="⚙️ 偏好设置",
