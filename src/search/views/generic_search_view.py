@@ -1,7 +1,7 @@
 import discord
 import re
 
-from typing import List, TYPE_CHECKING, Set
+from typing import List, TYPE_CHECKING, Set, Optional
 
 from search.dto.search_state import SearchStateDTO
 from shared.safe_defer import safe_defer
@@ -15,6 +15,9 @@ from .components.sort_method_select import SortMethodSelect
 from .timeout_view import TimeoutView
 from .combined_search_view import CombinedSearchView
 from .components.tag_page_button import TagPageButton
+from .custom_search_settings_view import CustomSearchSettingsView
+from ..dto.search_state import SearchStateDTO
+from src.shared.default_preferences import DefaultPreferences
 
 if TYPE_CHECKING:
     from ..cog import Search
@@ -38,6 +41,7 @@ class GenericSearchView(discord.ui.View):
         # --- UI状态 ---
         self.tags_per_page = 25
         self.last_search_results: dict | None = None
+        self.custom_settings_message: Optional[discord.WebhookMessage] = None
 
     async def start(self, send_new_ephemeral: bool = False):
         """
@@ -262,8 +266,31 @@ class GenericSearchView(discord.ui.View):
         self, interaction: discord.Interaction, new_method: str
     ):
         """处理排序方法改变的逻辑"""
+        # 清理可能存在的旧配置视图
+        if self.custom_settings_message:
+            try:
+                await self.custom_settings_message.delete()
+            except (discord.errors.NotFound, discord.errors.HTTPException):
+                pass  # 消息可能已被删除，忽略错误
+            finally:
+                self.custom_settings_message = None
+
+        if new_method == "custom":
+            self.search_state.sort_method = "custom"
+            await safe_defer(interaction, ephemeral=True)
+            settings_view = CustomSearchSettingsView(self)
+            # 启动并保存配置视图的消息
+            self.custom_settings_message = await settings_view.start()
+            # 打开配置视图时不立即搜索，等待用户操作
+            return
+            
         self.search_state.sort_method = new_method
         await self.on_filter_change(interaction)
+
+    async def trigger_search_from_custom_settings(self, updated_state: "SearchStateDTO"):
+        """由 CustomSearchSettingsView 回调，应用设置并使用 self.last_interaction 刷新主视图"""
+        self.search_state = updated_state
+        await self.on_filter_change(self.last_interaction)
 
     async def on_tag_page_change(self, interaction: discord.Interaction, action: str):
         """处理标签翻页"""
@@ -339,6 +366,13 @@ class GenericSearchView(discord.ui.View):
             tag_logic=state.tag_logic,
             sort_method=state.sort_method,
             sort_order=state.sort_order,
+            custom_base_sort=state.custom_base_sort,
+            reaction_count_range=state.reaction_count_range,
+            reply_count_range=state.reply_count_range,
+            created_after=state.created_after,
+            created_before=state.created_before,
+            active_after=state.active_after,
+            active_before=state.active_before,
         )
 
     def build_summary_embed(self, results: dict) -> discord.Embed:
@@ -363,6 +397,30 @@ class GenericSearchView(discord.ui.View):
             filters.append(f"包含关键词: {state.keywords}")
         if state.exclude_keywords:
             filters.append(f"排除关键词: {state.exclude_keywords}")
+
+        if state.sort_method == "custom":
+            custom_filters = []
+            # 数值范围
+            if state.reaction_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
+                custom_filters.append(f"反应数: `{state.reaction_count_range}`")
+            if state.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
+                custom_filters.append(f"回复数: `{state.reply_count_range}`")
+            
+            # 时间范围
+            if state.created_after: custom_filters.append(f"发帖晚于 {state.created_after.strftime('%Y-%m-%d')}")
+            if state.created_before: custom_filters.append(f"发帖早于 {state.created_before.strftime('%Y-%m-%d')}")
+            if state.active_after: custom_filters.append(f"活跃晚于 {state.active_after.strftime('%Y-%m-%d')}")
+            if state.active_before: custom_filters.append(f"活跃早于 {state.active_before.strftime('%Y-%m-%d')}")
+            
+            if custom_filters:
+                # 找到基础排序方法的标签
+                base_sort_label = "综合排序" # 默认值
+                for option in SortMethodSelect(state.custom_base_sort, lambda: None).options:
+                    if option.value == state.custom_base_sort:
+                        base_sort_label = option.label
+                        break
+                
+                filters.append(f"自定义排序: {base_sort_label}: {'; '.join(custom_filters)}")
 
         if filters:
             description_parts.append("\n".join(filters))
