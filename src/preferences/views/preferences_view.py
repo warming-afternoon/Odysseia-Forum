@@ -9,6 +9,7 @@ from ...search.views.components.keyword_button import KeywordModal
 from .components.time_range_modal import TimeRangeModal
 from .components.results_per_page_modal import ResultsPerPageModal
 from shared.default_preferences import DefaultPreferences
+from ...search.views.components.sort_method_select import SortMethodSelect
 
 if TYPE_CHECKING:
     from ..preferences_service import PreferencesService
@@ -144,6 +145,25 @@ class PreferencesView(discord.ui.View):
             inline=True,
         )
 
+        # 排序偏好
+        current_sort_method = (
+            prefs.sort_method
+            if prefs and prefs.sort_method
+            else DefaultPreferences.SORT_METHOD.value
+        )
+        sort_method_display = {
+            "comprehensive": "🧠 综合排序",
+            "created_at": "🕐 按发帖时间",
+            "last_active_at": "⏰ 按活跃时间",
+            "reaction_count": "🎉 按反应数",
+            "reply_count": "💬 按回复数",
+        }.get(current_sort_method, "未知")
+        embed.add_field(
+            name="🔀 排序算法",
+            value=f"{sort_method_display}",
+            inline=False,
+        )
+
         # 作者偏好
         author_info = []
         if prefs.include_authors:
@@ -168,11 +188,26 @@ class PreferencesView(discord.ui.View):
         self.clear_items()
 
         # 第一行
+        current_sort_method = (
+            self.preferences.sort_method
+            if self.preferences and self.preferences.sort_method
+            else DefaultPreferences.SORT_METHOD.value
+        )
+        self.add_item(
+            SortMethodSelect(
+                current_sort=current_sort_method,
+                update_callback=self.handle_sort_method_change,
+                row=0,
+            )
+        )
+
+        # 第二行
         self.add_item(
             discord.ui.Button(
                 label="🏷️ 标签",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_tags",
+                row=1,
             )
         )
         self.add_item(
@@ -180,6 +215,7 @@ class PreferencesView(discord.ui.View):
                 label="📝 关键词",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_keywords",
+                row=1,
             )
         )
         self.add_item(
@@ -187,6 +223,7 @@ class PreferencesView(discord.ui.View):
                 label="🔍 频道",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_channels",
+                row=1,
             )
         )
         self.add_item(
@@ -194,10 +231,11 @@ class PreferencesView(discord.ui.View):
                 label="⏱️ 时间",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_time",
+                row=1,
             )
         )
 
-        # 第二行
+        # 第三行
         current_preview_mode = (
             self.preferences.preview_image_mode
             if self.preferences and self.preferences.preview_image_mode
@@ -211,7 +249,7 @@ class PreferencesView(discord.ui.View):
                 label=preview_button_label,
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_preview",
-                row=1,
+                row=2,
             )
         )
         self.add_item(
@@ -219,17 +257,18 @@ class PreferencesView(discord.ui.View):
                 label="📊 每页结果数",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_page_size",
-                row=1,
+                row=2,
             )
         )
 
         # 第三行
+ 
         self.add_item(
             discord.ui.Button(
                 label="🗑️ 清空所有设置",
                 style=discord.ButtonStyle.danger,
                 custom_id="prefs_clear",
-                row=2,
+                row=3,
             )
         )
 
@@ -360,3 +399,15 @@ class PreferencesView(discord.ui.View):
         except Exception as e:
             logger.error(f"保存关键词偏好失败: {e}", exc_info=True)
             await modal_interaction.followup.send(f"❌ 保存失败: {e}", ephemeral=True)
+
+    async def handle_sort_method_change(
+        self, interaction: discord.Interaction, sort_method: str
+    ):
+        """处理排序方式选择的回调"""
+        await safe_defer(interaction)
+        try:
+            await self.service.save_sort_method(interaction.user.id, sort_method)
+            await self.refresh(interaction)
+        except Exception as e:
+            logger.error(f"保存排序方式失败: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ 保存失败: {e}", ephemeral=True)

@@ -31,5 +31,9 @@ class UserSearchPreferencesDTO(BaseModel):
     preview_image_mode: str = "thumbnail"
     results_per_page: int = 5
 
+    # 排序算法偏好
+    sort_method: str = "comprehensive"
+
+
     class Config:
         from_attributes = True

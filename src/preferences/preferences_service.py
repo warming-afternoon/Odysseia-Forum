@@ -318,5 +318,15 @@ class PreferencesService:
                     "include_keywords": "",
                     "exclude_keywords": "",
                     "preferred_channels": [],
+                    "sort_method": "comprehensive",
                 },
+            )
+
+    async def save_sort_method(self, user_id: int, sort_method: str) -> None:
+        """保存用户的排序算法偏好"""
+        async with self.session_factory() as session:
+            repo = PreferencesRepository(session, self.tag_service)
+            await repo.save_user_preferences(
+                user_id,
+                {"sort_method": sort_method},
             )
