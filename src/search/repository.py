@@ -12,6 +12,8 @@ from shared.models.tag import Tag
 from search.qo.thread_search import ThreadSearchQuery
 from shared.ranking_config import RankingConfig
 from core.tagService import TagService
+from shared.range_parser import parse_range_string
+from shared.default_preferences import DefaultPreferences
 
 
 class SearchRepository:
@@ -20,6 +22,21 @@ class SearchRepository:
     def __init__(self, session: AsyncSession, tag_service: TagService):
         self.session = session
         self.tag_service = tag_service
+
+    def _apply_range_filter(self, filters, column, range_str):
+        """解析范围字符串并应用为SQLAlchemy过滤器"""
+        min_val, max_val, min_op, max_op = parse_range_string(range_str)
+        if min_val is not None and min_op is not None:
+            if min_op == ">=":
+                filters.append(column >= min_val)
+            else:
+                filters.append(column > min_val)
+        
+        if max_val is not None and max_op is not None:
+            if max_op == "<=":
+                filters.append(column <= max_val)
+            else:
+                filters.append(column < max_val)
 
     def _apply_ranking(self, statement, resolved_include_tag_ids):
         if resolved_include_tag_ids:
@@ -123,6 +140,27 @@ class SearchRepository:
                 filters.append(Thread.created_at >= query.after_ts)
             if query.before_ts:
                 filters.append(Thread.created_at <= query.before_ts)
+
+            # --- 自定义排序算法的范围过滤---
+            if query.reaction_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
+                self._apply_range_filter(filters, Thread.reaction_count, query.reaction_count_range)
+            if query.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
+                self._apply_range_filter(filters, Thread.reply_count, query.reply_count_range)
+
+            if query.created_after:
+                filters.append(Thread.created_at >= query.created_after)
+            if query.created_before:
+                filters.append(Thread.created_at <= query.created_before)
+            
+            # 对可能为 None 的 last_active_at 进行安全处理
+            if query.active_after or query.active_before:
+                conditions = [Thread.last_active_at != None]
+                if query.active_after:
+                    conditions.append(Thread.last_active_at >= query.active_after)  # type: ignore
+                if query.active_before:
+                    conditions.append(Thread.last_active_at <= query.active_before)  # type: ignore
+                filters.append(and_(*conditions))
+
             # -- 标签过滤 --
             if resolved_include_tag_ids:
                 if query.tag_logic == "and":
@@ -218,7 +256,12 @@ class SearchRepository:
             final_select_stmt = select(Thread).where(Thread.id.in_(base_stmt))  # type: ignore
 
             order_by = None
-            if query.sort_method == "comprehensive":
+            
+            # --- 修改：确定排序方法 ---
+            # 如果是自定义搜索，则使用其基础排序算法，否则使用主排序算法
+            effective_sort_method = query.custom_base_sort if query.sort_method == "custom" else query.sort_method
+            
+            if effective_sort_method == "comprehensive":
                 final_select_stmt, final_score_expr = self._apply_ranking(
                     final_select_stmt, resolved_include_tag_ids
                 )
@@ -229,14 +272,15 @@ class SearchRepository:
                 )
             else:
                 sort_col_name = (
-                    query.sort_method
-                    if hasattr(Thread, query.sort_method)
+                    effective_sort_method
+                    if hasattr(Thread, effective_sort_method)
                     else "last_active_at"
                 )
                 sort_col = getattr(Thread, sort_col_name)
                 order_by = (
                     sort_col.desc() if query.sort_order == "desc" else sort_col.asc()
                 )
+            # --- 结束修改 ---
 
             if order_by is not None:
                 final_select_stmt = final_select_stmt.order_by(order_by)
