@@ -228,6 +228,7 @@ class Search(commands.Cog):
                     page=1,
                     results_per_page=user_prefs.results_per_page,
                     preview_image_mode=user_prefs.preview_image_mode,
+                    sort_method=user_prefs.sort_method,
                 )
             else:
                 initial_state = SearchStateDTO(all_available_tags=all_tag_names, page=1)

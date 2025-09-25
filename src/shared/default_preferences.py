@@ -10,3 +10,6 @@ class DefaultPreferences(Enum):
 
     # 每页结果数量
     RESULTS_PER_PAGE = 5
+
+    # 默认排序算法
+    SORT_METHOD = "comprehensive"
