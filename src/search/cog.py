@@ -204,9 +204,8 @@ class Search(commands.Cog):
 
             all_channel_ids = list(self.cache_service.indexed_channel_ids)
 
-            # 获取所有频道的合并标签
-            merged_tags = self.get_merged_tags(all_channel_ids)
-            all_tag_names = [tag.name for tag in merged_tags]
+            # 从缓存服务获取预计算的合并标签
+            all_tag_names = self.cache_service.get_global_merged_tags()
 
             # 获取用户偏好 DTO
             user_prefs = await self.preferences_service.get_user_preferences(
