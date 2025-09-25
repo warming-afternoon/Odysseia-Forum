@@ -81,9 +81,8 @@ class PersistentChannelSearchView(discord.ui.View):
             interaction.user.id
         )
 
-        # 获取该频道的标签
-        channel_tags = self.cog.get_merged_tags([channel_id])
-        channel_tag_names = [tag.name for tag in channel_tags]
+        # 从 channel 对象获取标签名
+        channel_tag_names = sorted([tag.name for tag in channel.available_tags])
 
         # 创建初始状态
         if user_prefs:
