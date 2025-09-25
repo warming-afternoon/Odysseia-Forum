@@ -23,7 +23,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "pytest-asyncio"
+    "pytest-asyncio",
+    "sqlite-utils"
 ]
 
 [tool.setuptools.packages.find]

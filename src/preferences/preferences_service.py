@@ -3,14 +3,14 @@ import logging
 import discord
 from discord import app_commands
 from datetime import datetime, timezone
-from typing import List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from core.cache_service import CacheService
 from shared.safe_defer import safe_defer
 from shared.utils import process_string_to_set
 from .repository import PreferencesRepository
-from src.search.dto.user_search_preferences import UserSearchPreferencesDTO
+from search.dto.user_search_preferences import UserSearchPreferencesDTO
 from core.tagService import TagService
 from .views.tag_preferences_view import TagPreferencesView
 from .views.channel_preferences_view import ChannelPreferencesView
@@ -198,38 +198,14 @@ class PreferencesService:
             )
             # logger.info(f"用户 {user_id} 的默认搜索频道已保存: {channel_ids}")
 
-    async def update_user_time_range(
-        self,
-        user_id: int,
-        after_date_str: Optional[str],
-        before_date_str: Optional[str],
-    ) -> None:
+    async def save_time_preferences(self, user_id: int, time_data: Dict[str, Optional[str]]) -> None:
         """
-        更新用户的时间范围偏好设置。
-        此方法只处理业务逻辑，不发送任何 discord 响应。
-
-        :param user_id: 用户 ID。
-        :param after_date_str: 开始日期字符串 (YYYY-MM-DD)。
-        :param before_date_str: 结束日期字符串 (YYYY-MM-DD)。
-        :raises ValueError: 如果日期格式无效。
+        保存用户的时间范围偏好设置 (created_after/before, active_after/before)
+        直接存储字符串
         """
-        update_data = {}
-        if after_date_str:
-            naive_dt = datetime.strptime(after_date_str, "%Y-%m-%d")
-            update_data["after_date"] = naive_dt.replace(tzinfo=timezone.utc)
-        if before_date_str:
-            naive_dt = datetime.strptime(before_date_str, "%Y-%m-%d")
-            aware_dt = naive_dt.replace(
-                hour=23, minute=59, second=59, tzinfo=timezone.utc
-            )
-            update_data["before_date"] = aware_dt
-
-        if not after_date_str and not before_date_str:
-            update_data = {"after_date": None, "before_date": None}
-
         async with self.session_factory() as session:
             repo = PreferencesRepository(session, self.tag_service)
-            await repo.save_user_preferences(user_id, update_data)
+            await repo.save_user_preferences(user_id, time_data)
 
     async def search_preferences_tags(
         self, interaction: discord.Interaction, parent_view: "PreferencesView"
@@ -240,17 +216,17 @@ class PreferencesService:
             async with self.session_factory() as session:
                 repo = PreferencesRepository(session, self.tag_service)
 
-                # 1. 获取所有可用标签
+                # 获取所有可用标签
                 all_tags = self.tag_service.get_unique_tag_names()
 
-                # 2. 获取用户当前偏好
+                # 获取用户当前偏好
                 prefs_dto = await repo.get_user_preferences(interaction.user.id)
                 if not prefs_dto:
                     # 创建一个新的DTO，但暂时不保存到数据库
                     # 直到用户点击保存时，才会通过 save_tag_preferences 创建记录
                     prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
 
-            # 3. 启动视图
+            # 启动视图
             view = TagPreferencesView(
                 self, interaction, parent_view, prefs_dto, all_tags
             )
@@ -309,8 +285,10 @@ class PreferencesService:
                 {
                     "include_authors": [],
                     "exclude_authors": [],
-                    "after_date": None,
-                    "before_date": None,
+                    "created_after": None,
+                    "created_before": None,
+                    "active_after": None,
+                    "active_before": None,
                     "preview_image_mode": "thumbnail",
                     "results_per_page": 5,
                     "include_tags": [],
@@ -318,5 +296,15 @@ class PreferencesService:
                     "include_keywords": "",
                     "exclude_keywords": "",
                     "preferred_channels": [],
+                    "sort_method": "comprehensive",
                 },
+            )
+
+    async def save_sort_method(self, user_id: int, sort_method: str) -> None:
+        """保存用户的排序算法偏好"""
+        async with self.session_factory() as session:
+            repo = PreferencesRepository(session, self.tag_service)
+            await repo.save_user_preferences(
+                user_id,
+                {"sort_method": sort_method},
             )

@@ -7,12 +7,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from typing import TYPE_CHECKING, List, Tuple, Any
 
 from shared.safe_defer import safe_defer
-from src.config.repository import ConfigRepository
-from src.core.cache_service import CacheService
+from config.repository import ConfigRepository
+from shared.enum.search_config_type import SearchConfigType
+from core.cache_service import CacheService
 
 if TYPE_CHECKING:
     from bot_main import MyBot
-    from src.core.sync_service import SyncService
+    from core.sync_service import SyncService
 from .repository import ThreadManagerRepository
 from .views.vote_view import TagVoteView
 from .services.batch_update_service import BatchUpdateService
@@ -114,7 +115,7 @@ class ThreadManager(commands.Cog):
                 # 发送备用公开通知
                 await self.bot.api_scheduler.submit(
                     coro_factory=lambda: thread.send(
-                        content=f"{author.mention}，你的帖子标签已被修改，详情请见上方通知。",
+                        content=f":crying_cat_face: \n{author.mention}，您的帖子标签将被修改，详情请见下方解释",
                         embed=embed,
                     ),
                     priority=3,
@@ -123,6 +124,44 @@ class ThreadManager(commands.Cog):
                 logger.error(f"向用户 {author.id} 发送私信时发生未知错误。", exc_info=e)
 
         await self.bot.api_scheduler.submit(coro_factory=send_dm, priority=3)
+
+    async def _notify_management_of_mutex_conflict(
+        self, thread: discord.Thread, conflicts: List[Tuple[Any, set]]
+    ):
+        """在帖子中通知管理组发生了互斥标签冲突。"""
+        management_role_id = self.bot.config.get("management_role_id")
+        if not management_role_id:
+            logger.warning("未在 config.json 中配置 management_role_id，无法发送管理通知。")
+            return
+
+        content = f"🛡️ <@&{management_role_id}>"
+        
+        embed = discord.Embed(
+            title="互斥标签冲突 - 管理通知",
+            description=f"帖子 [{thread.name}]({thread.jump_url}) 存在互斥标签",
+            color=discord.Color.greyple(),
+        )
+
+        for i, (group, removed_tags_for_group) in enumerate(conflicts):
+            sorted_rules = sorted(group.rules, key=lambda r: r.priority)
+            highest_priority_tag = sorted_rules[0].tag_name
+            
+            value_str = (
+                f"**保留标签**: {highest_priority_tag}\n"
+                f"**移除标签**: {', '.join(f' {tag}' for tag in removed_tags_for_group)}"
+            )
+            embed.add_field(
+                name=f"冲突组 {i + 1}",
+                value=value_str,
+                inline=False,
+            )
+
+        await self.bot.api_scheduler.submit(
+            coro_factory=lambda: thread.send(content=content, embed=embed),
+            priority=3,
+        )
+        logger.debug(f"已在帖子 {thread.id} 中发送互斥标签管理通知。")
+
 
     async def apply_mutex_tag_rules(self, thread: discord.Thread) -> bool:
         """检查并应用互斥标签规则。如果进行了修改，则返回 True。"""
@@ -134,8 +173,13 @@ class ThreadManager(commands.Cog):
         post_tag_names = set(post_tag_name_to_id.keys())
 
         async with self.session_factory() as session:
-            repo = ConfigRepository(session)  # 使用新的ConfigRepository
+            repo = ConfigRepository(session)
             groups = await repo.get_all_mutex_groups_with_rules()
+            
+            # 检查是否需要发送管理通知
+            notify_config = await repo.get_search_config(SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT)
+            should_notify_management = notify_config and notify_config.value_int == 1
+
 
         tags_to_remove_ids = set()
         all_conflicts = []  # 收集所有冲突信息
@@ -161,9 +205,13 @@ class ThreadManager(commands.Cog):
         if tags_to_remove_ids:
             # 发送通知 (一次性发送所有冲突)
             if all_conflicts:
+                # 通知发帖人 (私信)
                 await self._notify_user_of_mutex_removal(thread, all_conflicts)
+                
+                # 如果配置开启，通知管理组 (在帖子内)
+                if should_notify_management:
+                    await self._notify_management_of_mutex_conflict(thread, all_conflicts)
 
-            # 使用列表推导式创建新的标签列表
             final_tags = [
                 tag for tag in applied_tags if tag.id not in tags_to_remove_ids
             ]

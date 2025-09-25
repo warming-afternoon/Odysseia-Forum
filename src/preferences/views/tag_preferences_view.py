@@ -2,7 +2,7 @@ import discord
 from typing import List, TYPE_CHECKING, Set
 
 from shared.safe_defer import safe_defer
-from shared.view.tag_select import TagSelect
+from shared.views.tag_select import TagSelect
 from ...search.dto.user_search_preferences import UserSearchPreferencesDTO
 from ...search.views.components.tag_page_button import TagPageButton
 

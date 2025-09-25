@@ -2,9 +2,7 @@ from typing import List, Optional, Set
 
 from pydantic import BaseModel
 
-from src.shared.default_preferences import DefaultPreferences
-
-
+from shared.enum.default_preferences import DefaultPreferences
 class SearchStateDTO(BaseModel):
     """用于封装 GenericSearchView 所有搜索参数和UI状态的数据传输对象。"""
 
@@ -28,6 +26,17 @@ class SearchStateDTO(BaseModel):
     tag_logic: str = "or"  # "or" 或 "and"
     sort_method: str = "comprehensive"
     sort_order: str = "desc"  # "asc" 或 "desc"
+
+    # 基础排序算法（在自定义筛选后应用）
+    custom_base_sort: str = "comprehensive"
+    # 数值范围 (使用数学区间表示法)
+    reaction_count_range: str = DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+    reply_count_range: str = DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+    # 时间范围
+    created_after: Optional[str] = None
+    created_before: Optional[str] = None
+    active_after: Optional[str] = None
+    active_before: Optional[str] = None
 
     # 显示偏好
     preview_image_mode: str = DefaultPreferences.PREVIEW_IMAGE_MODE.value

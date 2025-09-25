@@ -24,12 +24,21 @@ class UserSearchPreferencesDTO(BaseModel):
     exclude_keyword_exemption_markers: List[str] = ["禁", "🈲"]
 
     # 时间偏好
-    after_date: Optional[datetime] = None
-    before_date: Optional[datetime] = None
+    created_after: Optional[str] = None
+    created_before: Optional[str] = None
+    active_after: Optional[str] = None
+    active_before: Optional[str] = None
 
     # 显示偏好
     preview_image_mode: str = "thumbnail"
     results_per_page: int = 5
+
+    # 排序算法偏好
+    sort_method: str = "comprehensive"
+    
+    # 自定义排序的基础算法
+    custom_base_sort: str = "comprehensive"
+
 
     class Config:
         from_attributes = True

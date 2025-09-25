@@ -1,81 +1,56 @@
 import discord
-from shared.ranking_config import RankingConfig
+from typing import List, Optional
+from shared.models.bot_config import BotConfig
 
 
 class ConfigEmbedBuilder:
-    """构建与排序配置相关的 Discord Embeds"""
+    """构建与配置相关的 Discord Embed"""
 
     @staticmethod
-    def build_config_updated_embed(config_name: str) -> discord.Embed:
-        """构建配置更新成功的 embed"""
+    def build_config_panel_embed(selected_config: Optional[BotConfig], all_configs: List[BotConfig]) -> discord.Embed:
+        """为通用配置面板构建 embed"""
         embed = discord.Embed(
-            title="✅ 排序算法配置已更新",
-            description=f"当前配置：**{config_name}**",
-            color=0x00FF00,
-        )
-
-        embed.add_field(
-            name="权重配置",
-            value=f"• 时间权重：**{RankingConfig.TIME_WEIGHT_FACTOR:.1%}**\n"
-            f"• 标签权重：**{RankingConfig.TAG_WEIGHT_FACTOR:.1%}**\n"
-            f"• 反应权重：**{RankingConfig.REACTION_WEIGHT_FACTOR:.1%}**\n"
-            f"• 时间衰减率：**{RankingConfig.TIME_DECAY_RATE}**\n"
-            f"• 反应对数基数：**{RankingConfig.REACTION_LOG_BASE}**",
-            inline=True,
-        )
-
-        embed.add_field(
-            name="惩罚机制",
-            value=f"• 严重惩罚阈值：**{RankingConfig.SEVERE_PENALTY_THRESHOLD}**\n"
-            f"• 轻度惩罚阈值：**{RankingConfig.MILD_PENALTY_THRESHOLD}**\n"
-            f"• 严重惩罚系数：**{RankingConfig.SEVERE_PENALTY_FACTOR}**",
-            inline=True,
-        )
-
-        embed.add_field(
-            name="算法说明",
-            value="新的排序算法将立即生效，影响所有后续搜索结果。\n"
-            "时间权重基于指数衰减，标签权重基于Wilson Score算法。",
-            inline=False,
-        )
-        return embed
-
-    @staticmethod
-    def build_view_config_embed() -> discord.Embed:
-        """构建查看当前配置的 embed"""
-        embed = discord.Embed(
-            title="🔧 当前排序算法配置",
-            description="智能混合权重排序算法参数",
+            title="⚙️ 机器人通用配置面板",
+            description="使用下方的下拉菜单选择要查看或修改的配置项。",
             color=0x3498DB,
         )
 
-        embed.add_field(
-            name="权重配置",
-            value=f"• 时间权重：**{RankingConfig.TIME_WEIGHT_FACTOR:.1%}**\n"
-            f"• 标签权重：**{RankingConfig.TAG_WEIGHT_FACTOR:.1%}**\n"
-            f"• 反应权重：**{RankingConfig.REACTION_WEIGHT_FACTOR:.1%}**\n"
-            f"• 时间衰减率：**{RankingConfig.TIME_DECAY_RATE}**\n"
-            f"• 反应对数基数：**{RankingConfig.REACTION_LOG_BASE}**",
-            inline=True,
-        )
+        if selected_config:
+            embed.add_field(
+                name=f"📄 当前选中: {selected_config.type_str}",
+                value=f"{selected_config.tips}",
+                inline=False
+            )
+            
+            current_value = ""
+            if selected_config.value_float is not None:
+                current_value += f"**浮点值**: `{selected_config.value_float}`\n"
+            if selected_config.value_int is not None:
+                current_value += f"**整数值**: `{selected_config.value_int}`\n"
+            
+            if not current_value:
+                current_value = "未设置"
+                
+            embed.add_field(
+                name="当前值",
+                value=current_value,
+                inline=True
+            )
+        else:
+            embed.description = "请从下方选择一个配置项。"
 
-        embed.add_field(
-            name="惩罚机制",
-            value=f"• 严重惩罚阈值：**{RankingConfig.SEVERE_PENALTY_THRESHOLD}**\n"
-            f"• 轻度惩罚阈值：**{RankingConfig.MILD_PENALTY_THRESHOLD}**\n"
-            f"• 严重惩罚系数：**{RankingConfig.SEVERE_PENALTY_FACTOR:.1%}**\n"
-            f"• 轻度惩罚系数：**{RankingConfig.MILD_PENALTY_FACTOR:.1%}**",
-            inline=True,
-        )
+        # 将所有配置项的值概览作为 footer 或另一个 field
+        overview = []
+        for config in all_configs:
+            val = config.value_float if config.value_float is not None else config.value_int
+            overview.append(f"• {config.type_str}: {val}")
+        
+        if overview:
+             embed.add_field(
+                name="所有配置项概览",
+                value="\n".join(overview),
+                inline=False
+            )
 
-        embed.add_field(
-            name="算法特性",
-            value="• **Wilson Score**：置信度评估标签质量\n"
-            "• **指数衰减**：时间新鲜度自然衰减\n"
-            "• **智能惩罚**：差评内容自动降权\n"
-            "• **可配置权重**：灵活调整排序偏好",
-            inline=False,
-        )
-
-        embed.set_footer(text="管理员可使用 /排序算法配置 命令调整参数")
+        embed.set_footer(text="选择配置项后，点击 '编辑' 按钮进行修改。")
         return embed

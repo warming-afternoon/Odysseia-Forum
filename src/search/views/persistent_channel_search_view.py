@@ -77,34 +77,18 @@ class PersistentChannelSearchView(discord.ui.View):
             )
             return
 
-        # 获取用户偏好
-        user_prefs = await self.cog.preferences_service.get_user_preferences(
-            interaction.user.id
-        )
-
         # 从 channel 对象获取标签名
         channel_tag_names = sorted([tag.name for tag in channel.available_tags])
 
-        # 创建初始状态
-        if user_prefs:
-            initial_state = SearchStateDTO(
-                channel_ids=[channel_id],
-                include_authors=set(user_prefs.include_authors or []),
-                exclude_authors=set(user_prefs.exclude_authors or []),
-                include_tags=set(user_prefs.include_tags or []),
-                exclude_tags=set(user_prefs.exclude_tags or []),
-                all_available_tags=channel_tag_names,
-                keywords=user_prefs.include_keywords or "",
-                exclude_keywords=user_prefs.exclude_keywords or "",
-                exemption_markers=user_prefs.exclude_keyword_exemption_markers,
-                page=1,
-                results_per_page=user_prefs.results_per_page,
-                preview_image_mode=user_prefs.preview_image_mode,
-            )
-        else:
-            initial_state = SearchStateDTO(
-                channel_ids=[channel_id], all_available_tags=channel_tag_names, page=1
-            )
+        # 定义需要强制覆盖用户偏好的字段
+        overrides = {
+            'channel_ids': [channel_id],
+            'all_available_tags': channel_tag_names,
+            'page': 1,
+        }
+        
+        # 使用 cog 中的辅助函数创建初始状态，确保所有偏好（包括时间）都被加载
+        initial_state = await self.cog._create_initial_state_from_prefs(interaction.user.id, overrides)
 
         generic_view = GenericSearchView(
             cog=self.cog,

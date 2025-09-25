@@ -7,6 +7,15 @@
   "proxy": "",
   "_comment_proxy": "如果你需要通过代理连接Discord，请在proxy里填写你的代理地址(例如 http://127.0.0.1:7890)，否则请留空",
 
+  "bot_admin_user_ids": [
+    954037609313747036,
+    1376490363354742805
+  ],
+  "_comment_bot_admin": "上面的 bot_admin_user_ids 列表中的用户将拥有BOT管理员权限",
+
+  "management_role_id": 1403352988944175205,
+  "_comment_management_role": "管理组身份组ID。用于在特定事件（如互斥标签冲突）发生时接收通知。",
+
   "performance": {
     "api_scheduler_concurrency": 40,
     "_comment_1": "上面的api_scheduler_concurrency是全局的api并发调用限制数",

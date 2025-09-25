@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, List
 import datetime
+from shared.enum.default_preferences import DefaultPreferences
 
 
 @dataclass
@@ -20,3 +21,11 @@ class ThreadSearchQuery:
     tag_logic: str = "and"
     sort_method: str = "comprehensive"
     sort_order: str = "desc"
+
+    custom_base_sort: str = "comprehensive"
+    reaction_count_range: str = DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+    reply_count_range: str = DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+    created_after: Optional[str] = None
+    created_before: Optional[str] = None
+    active_after: Optional[str] = None
+    active_before: Optional[str] = None

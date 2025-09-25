@@ -1,4 +1,3 @@
-# (新建文件)
 from typing import Optional, TYPE_CHECKING
 from sqlmodel import Field, SQLModel, Relationship
 

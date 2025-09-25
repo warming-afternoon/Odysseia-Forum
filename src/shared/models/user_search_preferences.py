@@ -18,8 +18,10 @@ class UserSearchPreferences(SQLModel, table=True):
     exclude_authors: Optional[List[int]] = Field(default=None, sa_column=Column(JSON))
 
     # 时间偏好
-    after_date: Optional[datetime] = Field(default=None)
-    before_date: Optional[datetime] = Field(default=None)
+    created_after: Optional[str] = Field(default=None)
+    created_before: Optional[str] = Field(default=None)
+    active_after: Optional[str] = Field(default=None)
+    active_before: Optional[str] = Field(default=None)
 
     # 标签偏好
     include_tags: Optional[List[str]] = Field(default=None, sa_column=Column(JSON))
@@ -35,3 +37,9 @@ class UserSearchPreferences(SQLModel, table=True):
     # 显示偏好
     preview_image_mode: str = Field(default="thumbnail")
     results_per_page: int = Field(default=5)
+
+    # 排序算法偏好
+    sort_method: str = Field(default="comprehensive", nullable=False)
+
+    # 自定义排序的基础算法
+    custom_base_sort: str = Field(default="comprehensive", nullable=False)

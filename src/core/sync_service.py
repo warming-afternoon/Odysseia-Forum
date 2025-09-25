@@ -2,14 +2,15 @@ import discord
 import datetime
 import logging
 import re
+import asyncio
 from typing import Coroutine, Optional, Union, TYPE_CHECKING
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-# 导入 ThreadManagerRepository，因为 sync_thread 方法会用到它
-from src.ThreadManager.repository import ThreadManagerRepository
+from ThreadManager.repository import ThreadManagerRepository
 
 if TYPE_CHECKING:
     from bot_main import MyBot
+    from .author_service import AuthorService
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +24,11 @@ class SyncService:
         self,
         bot: "MyBot",
         session_factory: async_sessionmaker,
+        author_service: "AuthorService",
     ):
         self.bot = bot
         self.session_factory = session_factory
+        self.author_service = author_service
 
     @staticmethod
     async def _fetch_message_wrapper(fetch_coro: Coroutine) -> discord.Message | None:
@@ -53,6 +56,7 @@ class SyncService:
         # 默认值
         final_author_id = thread.owner_id or 0
         final_created_at = thread.created_at
+        source_user_for_author_service = thread.owner
         excerpt = ""
         thumbnail_url = ""
 
@@ -175,6 +179,25 @@ class SyncService:
             excerpt = first_msg.content
             if first_msg.attachments:
                 thumbnail_url = first_msg.attachments[0].url
+            else:
+                # 如果没有附件，则尝试从首楼内容中提取第一个图片 URL
+                # 正则表达式匹配常见的图片格式链接 (jpg, jpeg, png, gif, webp)，不区分大小写
+                image_url_match = re.search(
+                    r"https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp)",
+                    first_msg.content or "",
+                    re.IGNORECASE
+                )
+                if image_url_match:
+                    thumbnail_url = image_url_match.group(0)
+
+        if final_author_id and thread.guild:
+            asyncio.create_task(
+                self.author_service.get_or_fetch_author(
+                    author_id=final_author_id,
+                    guild=thread.guild,
+                    source_member=source_user_for_author_service
+                )
+            )
 
         return {
             "thread_id": thread.id,
@@ -187,6 +210,7 @@ class SyncService:
             else thread.created_at,
             "reaction_count": reaction_count,
             "reply_count": thread.message_count,
+            "not_found_count": 0,
             "first_message_excerpt": excerpt,
             "thumbnail_url": thumbnail_url,
         }
@@ -211,20 +235,20 @@ class SyncService:
                 )
                 if not isinstance(fetched_channel, discord.Thread):
                     logger.warning(
-                        f"sync_thread: 获取到的 channel {thread_id} 不是一个帖子，将从索引中删除。"
+                        f"sync_thread: 获取到的 channel {thread_id} 不是一个帖子，将标记为未找到。"
                     )
                     async with self.session_factory() as session:
                         repo = ThreadManagerRepository(session=session)
-                        await repo.delete_thread_index(thread_id=thread_id)
+                        await repo.increment_not_found_count(thread_id=thread_id)
                     return
                 thread = fetched_channel
             except discord.NotFound:
                 logger.warning(
-                    f"sync_thread: 无法找到帖子 {thread_id}，可能已被删除。将从数据库中移除。"
+                    f"sync_thread: 无法找到帖子 {thread_id}，可能已被删除。将增加其 not_found_count。"
                 )
                 async with self.session_factory() as session:
                     repo = ThreadManagerRepository(session=session)
-                    await repo.delete_thread_index(thread_id=thread_id)
+                    await repo.increment_not_found_count(thread_id=thread_id)
                 return
             except Exception as e:
                 logger.error(
@@ -242,11 +266,11 @@ class SyncService:
                 )
             except discord.NotFound:
                 logger.warning(
-                    f"sync_thread (fetch_if_incomplete): 无法找到帖子 {thread.id}，可能已被删除。"
+                    f"sync_thread (fetch_if_incomplete): 无法找到帖子 {thread.id}，可能已被删除。将增加其 not_found_count。"
                 )
                 async with self.session_factory() as session:
                     repo = ThreadManagerRepository(session=session)
-                    await repo.delete_thread_index(thread_id=thread.id)
+                    await repo.increment_not_found_count(thread_id=thread.id)
                 return
 
         assert isinstance(thread, discord.Thread)
