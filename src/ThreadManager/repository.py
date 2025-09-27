@@ -4,7 +4,7 @@ from datetime import datetime
 from shared.models.tag_vote import TagVote
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update, ColumnElement, and_
+from sqlalchemy import update, ColumnElement, and_, case
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -278,33 +278,65 @@ class ThreadManagerRepository:
 
         return stats
 
-    async def batch_update_thread_activity(self, updates: dict[int, UpdateData]):
+    async def batch_update_thread_activity(self, updates: dict[int, UpdateData]) -> int:
         """
         批量更新多个帖子的活跃时间和回复数。
-        'updates' 的格式: {thread_id: {"increment": count, "last_active_at": dt | None}}
+        
+        Args:
+            updates(dict[int, UpdateData]): {thread_id: {"increment": count, "last_active_at": datetime | None}}
+        
+        Returns:
+            (int) 成功更新的行数。
         """
         if not updates:
-            return
+            return 0
 
-        # 在一个事务中执行所有更新
-        async with self.session.begin():
-            for thread_id, data in updates.items():
-                increment_value = data["increment"]
-                last_active_at = data["last_active_at"]
-                
-                values_to_update: dict[str, Any] = {"reply_count": Thread.reply_count + increment_value}
-                
-                # 只有在提供了有效的活跃时间时才更新它
-                if last_active_at:
-                    values_to_update["last_active_at"] = last_active_at
+        thread_ids_to_update = list(updates.keys())
 
-                if not values_to_update:
-                    continue
+        # 构建 reply_count 的 CASE 表达式
+        reply_count_case = case(
+            {
+                thread_id: Thread.reply_count + data["increment"]
+                for thread_id, data in updates.items()
+            },
+            value=Thread.thread_id,
+            else_=Thread.reply_count  # 保持原值，如果ID不在case中
+        )
 
-                stmt = (
-                    update(Thread)
-                    .where(Thread.thread_id == thread_id)  # type: ignore
-                    .values(**values_to_update)
-                    .execution_options(synchronize_session=False)
-                )
-                await self.session.execute(stmt)
+        values_to_update = {"reply_count": reply_count_case}
+
+        # 仅在存在有效 last_active_at 值时才构建和添加 case 表达式
+        last_active_at_updates = {
+            thread_id: data["last_active_at"]
+            for thread_id, data in updates.items()
+            if data["last_active_at"] is not None
+        }
+
+        if last_active_at_updates:
+            last_active_at_case = case(
+                last_active_at_updates,
+                value=Thread.thread_id,
+                else_=Thread.last_active_at,
+            )
+            values_to_update["last_active_at"] = last_active_at_case
+
+        stmt = (
+            update(Thread)
+            .where(cast(ColumnElement, Thread.thread_id).in_(thread_ids_to_update))
+            .values(**values_to_update)
+            .execution_options(synchronize_session=False)
+        )
+        
+        result = await self.session.execute(stmt)
+        return result.rowcount
+
+    async def get_existing_thread_ids(self, thread_ids: List[int]) -> List[int]:
+        """
+        从给定的ID列表中，查询并返回那些在数据库中真实存在的ID。
+        """
+        if not thread_ids:
+            return []
+            
+        stmt = select(Thread.thread_id).where(cast(ColumnElement, Thread.thread_id).in_(thread_ids))
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())

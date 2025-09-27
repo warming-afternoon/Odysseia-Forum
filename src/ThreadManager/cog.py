@@ -1,3 +1,4 @@
+import asyncio
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -38,10 +39,13 @@ class ThreadManager(commands.Cog):
         self.cache_service = cache_service
         self.sync_service = sync_service
         
-        # 2. 初始化 BatchUpdateService
         # 从配置中读取更新间隔，如果未配置则默认为30秒
         update_interval = self.config.get("performance", {}).get("batch_update_interval", 30)
-        self.batch_update_service = BatchUpdateService(session_factory, interval=update_interval)
+        self.batch_update_service = BatchUpdateService(
+            session_factory,
+            sync_service=self.sync_service,
+            interval=update_interval
+        )
 
         logger.info("ThreadManager 模块已加载")
 
@@ -186,6 +190,8 @@ class ThreadManager(commands.Cog):
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread):
         if self.is_channel_indexed(channel_id=thread.parent_id):
+            # 延时 5s 再进行同步。减小请求失败概率
+            await asyncio.sleep(5)
             modified = await self.apply_mutex_tag_rules(thread)
             if modified:
                 # 标签被修改，on_thread_update会被触发，届时再同步
