@@ -17,6 +17,7 @@ class CacheService:
         self.session_factory = session_factory
         self.indexed_channel_ids: set[int] = set()
         self.indexed_channels: dict[int, discord.ForumChannel] = {}
+        self.global_merged_tags: list[str] = []
         logger.debug("CacheService 已初始化")
 
     async def build_or_refresh_cache(self):
@@ -41,6 +42,16 @@ class CacheService:
                     logger.warning(f"无法找到或频道类型错误 (ID: {channel_id})")
             self.indexed_channels = new_channel_cache
 
+        
+        logger.debug("正在预计算全局合并标签...")
+        all_tags_names = set()
+        for channel in self.indexed_channels.values():
+            all_tags_names.update(tag.name for tag in channel.available_tags)
+
+        self.global_merged_tags = sorted(list(all_tags_names))
+        logger.info(f"全局合并标签预计算完成，共 {len(self.global_merged_tags)} 个唯一标签。")
+        
+
         logger.info(
             f"CacheService 刷新完毕。缓存了 {len(self.indexed_channel_ids)} 个频道ID 和 {len(self.indexed_channels)} 个频道对象。"
         )
@@ -60,3 +71,7 @@ class CacheService:
     def get_indexed_channel_ids_list(self) -> list[int]:
         """从缓存中获取已索引的频道ID列表。"""
         return list(self.indexed_channel_ids)
+
+    def get_global_merged_tags(self) -> list[str]:
+        """获取预计算的全局合并标签列表。"""
+        return self.global_merged_tags
