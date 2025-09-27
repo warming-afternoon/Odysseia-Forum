@@ -1,7 +1,9 @@
+import asyncio
 import discord
 from typing import TYPE_CHECKING, Optional, cast
 
 from src.shared.safe_defer import safe_defer
+from src.shared.default_preferences import DefaultPreferences
 from .components.sort_method_select import SortMethodSelect
 from .components.number_range_modal import NumberRangeModal
 from .components.time_range_modal import TimeRangeModal
@@ -36,9 +38,17 @@ class CustomSearchSettingsView(discord.ui.View):
         embed = discord.Embed(title="🛠️ 自定义搜索设置", description="配置精细的筛选条件，然后选择一种基础排序算法。", color=discord.Color.blue())
         
         # 数值范围
+        reaction_display = f"`{self.state.reaction_count_range}`" \
+            if self.state.reaction_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value \
+            else "未设置"
+            
+        reply_display = f"`{self.state.reply_count_range}`" \
+            if self.state.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value \
+            else "未设置"
+
         num_range_value = (
-            f"反应数: `{self.state.reaction_count_range}`\n"
-            f"回复数: `{self.state.reply_count_range}`"
+            f"反应数: {reaction_display}\n"
+            f"回复数: {reply_display}"
         )
         embed.add_field(name="🔢 数值范围", value=num_range_value, inline=False)
 
@@ -70,13 +80,16 @@ class CustomSearchSettingsView(discord.ui.View):
 
     async def _update_and_research(self, interaction: discord.Interaction):
         """统一的更新和重新搜索入口"""
-        # defer 配置视图自己的交互，以释放它
-        await interaction.response.defer()
+        # defer 配置视图自己的交互
+        await safe_defer(interaction)
+
+        # 创建一个后台任务去执行父视图的搜索，不阻塞当前流程
+        asyncio.create_task(self.parent.trigger_search_from_custom_settings(self.state))
         
-        # 调用父视图的方法，让父视图用它自己的 last_interaction 去更新主消息
-        await self.parent.trigger_search_from_custom_settings(self.state)
-        
-        # 父视图更新完成后，再用 webhook 安全地编辑本视图的消息
+        # 根据新的 state 重建 UI 组件
+        self.update_components()
+
+        # 更新本视图的 embed 和 view
         await interaction.edit_original_response(embed=self.build_embed(), view=self)
 
     async def on_base_sort_change(self, interaction: discord.Interaction, new_method: str):

@@ -18,6 +18,7 @@ from .components.tag_page_button import TagPageButton
 from .custom_search_settings_view import CustomSearchSettingsView
 from ..dto.search_state import SearchStateDTO
 from src.shared.default_preferences import DefaultPreferences
+from src.search.constants import SortMethod
 
 if TYPE_CHECKING:
     from ..cog import Search
@@ -119,9 +120,21 @@ class GenericSearchView(discord.ui.View):
         )
 
         # 第 3 行: 排序选择器
-        components.append(
-            SortMethodSelect(state.sort_method, self.on_sort_method_change, row=3)
-        )
+        sort_select = SortMethodSelect(state.sort_method, self.on_sort_method_change, row=3)
+
+        # 动态修改自定义搜索的标签
+        if state.sort_method == "custom":
+            # 找到 "自定义搜索" 对应的选项
+            custom_option = next((opt for opt in sort_select.options if opt.value == "custom"), None)
+            
+            if custom_option:
+                # 获取基础排序算法的显示名称
+                base_sort_label = SortMethod.get_short_label_by_value(state.custom_base_sort)
+                
+                # 更新标签
+                custom_option.label = f"🛠️ 自定义 ({base_sort_label})"
+
+        components.append(sort_select)
 
         return components
 
@@ -413,14 +426,8 @@ class GenericSearchView(discord.ui.View):
             if state.active_before: custom_filters.append(f"活跃早于 {state.active_before.strftime('%Y-%m-%d')}")
             
             if custom_filters:
-                # 找到基础排序方法的标签
-                base_sort_label = "综合排序" # 默认值
-                for option in SortMethodSelect(state.custom_base_sort, lambda: None).options:
-                    if option.value == state.custom_base_sort:
-                        base_sort_label = option.label
-                        break
-                
-                filters.append(f"自定义排序: {base_sort_label}: {'; '.join(custom_filters)}")
+                # 如果有自定义筛选条件，将它们添加到主筛选列表中
+                filters.extend(custom_filters)
 
         if filters:
             description_parts.append("\n".join(filters))
