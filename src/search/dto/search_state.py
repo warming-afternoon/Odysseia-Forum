@@ -3,7 +3,6 @@ from typing import List, Optional, Set
 from pydantic import BaseModel
 
 from src.shared.default_preferences import DefaultPreferences
-import datetime
 
 
 class SearchStateDTO(BaseModel):
@@ -29,17 +28,6 @@ class SearchStateDTO(BaseModel):
     tag_logic: str = "or"  # "or" 或 "and"
     sort_method: str = "comprehensive"
     sort_order: str = "desc"  # "asc" 或 "desc"
-
-    # 基础排序算法（在自定义筛选后应用）
-    custom_base_sort: str = "comprehensive"
-    # 数值范围 (使用数学区间表示法)
-    reaction_count_range: str = DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
-    reply_count_range: str = DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
-    # 时间范围
-    created_after: Optional[datetime.datetime] = None
-    created_before: Optional[datetime.datetime] = None
-    active_after: Optional[datetime.datetime] = None
-    active_before: Optional[datetime.datetime] = None
 
     # 显示偏好
     preview_image_mode: str = DefaultPreferences.PREVIEW_IMAGE_MODE.value

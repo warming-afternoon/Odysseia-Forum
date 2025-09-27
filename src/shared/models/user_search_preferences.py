@@ -35,6 +35,3 @@ class UserSearchPreferences(SQLModel, table=True):
     # 显示偏好
     preview_image_mode: str = Field(default="thumbnail")
     results_per_page: int = Field(default=5)
-
-    # 排序算法偏好
-    sort_method: str = Field(default="comprehensive", nullable=False)
