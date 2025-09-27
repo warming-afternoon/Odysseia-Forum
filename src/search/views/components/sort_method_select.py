@@ -34,12 +34,6 @@ class SortMethodSelect(discord.ui.Select):
                 description="按帖子回复数量排列",
                 default=(current_sort == "reply_count"),
             ),
-            discord.SelectOption(
-                label="🛠️ 自定义搜索",
-                value="custom",
-                description="设置更精细的筛选条件和排序",
-                default=(current_sort == "custom"),
-            ),
         ]
         super().__init__(placeholder="选择排序方式...", options=options, row=row)
         self.update_callback = update_callback

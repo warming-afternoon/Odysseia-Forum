@@ -14,7 +14,6 @@ if TYPE_CHECKING:
     from src.core.sync_service import SyncService
 from .repository import ThreadManagerRepository
 from .views.vote_view import TagVoteView
-from .services.batch_update_service import BatchUpdateService
 
 import logging
 
@@ -37,22 +36,7 @@ class ThreadManager(commands.Cog):
         self.config = config
         self.cache_service = cache_service
         self.sync_service = sync_service
-        
-        # 2. 初始化 BatchUpdateService
-        # 从配置中读取更新间隔，如果未配置则默认为30秒
-        update_interval = self.config.get("performance", {}).get("batch_update_interval", 30)
-        self.batch_update_service = BatchUpdateService(session_factory, interval=update_interval)
-
         logger.info("ThreadManager 模块已加载")
-
-    # 3. 添加 cog_load 和 cog_unload 生命周期方法
-    async def cog_load(self):
-        """当 Cog 加载时，启动后台任务。"""
-        self.batch_update_service.start()
-
-    async def cog_unload(self):
-        """当 Cog 卸载时（例如机器人关闭），确保所有数据都被写入。"""
-        await self.batch_update_service.stop()
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道是否已索引"""
@@ -221,11 +205,14 @@ class ThreadManager(commands.Cog):
             return
 
         thread = message.channel
+        # 如果是首楼消息，则忽略，因为 sync_thread 会处理
         if thread.id == message.id:
             return
 
         if self.is_channel_indexed(thread.parent_id):
-            await self.batch_update_service.add_update(thread.id, message.created_at)
+            async with self.session_factory() as session:
+                repo = ThreadManagerRepository(session)
+                await repo.increment_reply_count(thread.id, message.created_at)
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
@@ -272,8 +259,10 @@ class ThreadManager(commands.Cog):
                         await repo.delete_thread_index(thread_id=channel.id)
                     # 缓存现在由全局事件处理，此处不再需要手动刷新
                 else:
-                    # 普通消息删除
-                    await self.batch_update_service.add_deletion(channel.id)
+                    # 普通消息删除，只更新回复数
+                    async with self.session_factory() as session:
+                        repo = ThreadManagerRepository(session)
+                        await repo.decrement_reply_count(channel.id)
         except Exception:
             logger.warning("处理消息删除事件失败", exc_info=True)
 
@@ -316,38 +305,23 @@ class ThreadManager(commands.Cog):
             logger.warning("处理反应移除事件失败", exc_info=True)
 
     async def _update_reaction_count(self, thread: discord.Thread):
-        """(协程) 更新帖子的反应数。如果记录不存在，则触发一次完整的同步进行补录。"""
+        """(协程) 更新帖子的反应数"""
         try:
             # 优先从缓存获取，失败则API调用
             first_msg = thread.get_partial_message(thread.id)
             first_msg = await first_msg.fetch()
-    
+
             reaction_count = (
                 max([r.count for r in first_msg.reactions])
                 if first_msg.reactions
                 else 0
             )
-    
+
             async with self.session_factory() as session:
                 repo = ThreadManagerRepository(session)
-                
-                update_succeeded = await repo.update_thread_reaction_count(
-                    thread.id, reaction_count
-                )
-    
-                # 如果更新失败，说明数据库中可能没有这条记录
-                if not update_succeeded:
-                    logger.warning(
-                        f"帖子 {thread.id} 的反应数更新失败（记录可能不存在），触发一次完整的同步进行补录。"
-                    )
-                    # 调用 sync_service 进行补录
-                    await self.sync_service.sync_thread(thread=thread)
-    
-        except discord.NotFound:
-            # 如果在 fetch() 过程中帖子被删除，这是一种正常情况，记录一下并忽略
-            logger.info(f"尝试更新反应数时，帖子 {thread.id} 已被删除，操作中止。")
+                await repo.update_thread_reaction_count(thread.id, reaction_count)
         except Exception:
-            logger.warning(f"更新或补录反应数时失败 (帖子ID: {thread.id})", exc_info=True)
+            logger.warning(f"更新反应数失败 (帖子ID: {thread.id})", exc_info=True)
 
     async def pre_sync_forum_tags(self, channel: discord.ForumChannel):
         """

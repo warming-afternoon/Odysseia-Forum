@@ -1,17 +1,16 @@
 import logging
-from typing import Any, List, Sequence, cast
+from typing import List, Sequence, cast
 from datetime import datetime
 from shared.models.tag_vote import TagVote
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update, ColumnElement, and_
+from sqlalchemy import update, ColumnElement
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from shared.models.thread import Thread
 from shared.models.tag import Tag
 from shared.models.thread_tag_link import ThreadTagLink
-from .dto import UpdateData
 
 logger = logging.getLogger(__name__)
 
@@ -134,18 +133,15 @@ class ThreadManagerRepository:
         await self.session.execute(stmt)
         await self.session.commit()
 
-    async def update_thread_reaction_count(self, thread_id: int, reaction_count: int) -> bool:
-        """仅更新帖子的反应数。如果更新成功（至少影响了一行），则返回 True，否则返回 False。"""
+    async def update_thread_reaction_count(self, thread_id: int, reaction_count: int):
+        """仅更新帖子的反应数"""
         stmt = (
             update(Thread)
             .where(Thread.thread_id == thread_id)  # type: ignore
             .values(reaction_count=reaction_count)
         )
-        # 执行语句并获取结果对象
-        result = await self.session.execute(stmt)
+        await self.session.execute(stmt)
         await self.session.commit()
-        # 返回 rowcount 是否大于 0
-        return result.rowcount > 0
 
     async def get_tags_for_channels(self, channel_ids: List[int]) -> Sequence[Tag]:
         """获取指定频道列表内的所有唯一标签"""
@@ -278,33 +274,30 @@ class ThreadManagerRepository:
 
         return stats
 
-    async def batch_update_thread_activity(self, updates: dict[int, UpdateData]):
-        """
-        批量更新多个帖子的活跃时间和回复数。
-        'updates' 的格式: {thread_id: {"increment": count, "last_active_at": dt | None}}
-        """
-        if not updates:
-            return
+    async def increment_reply_count(self, thread_id: int, last_active_at: datetime):
+        """将帖子的回复数加一，并更新活跃时间。"""
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)  # type: ignore
+            .values(
+                reply_count=Thread.reply_count + 1,
+                last_active_at=last_active_at,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+        # logger.debug(f"已递增帖子 {thread_id} 的回复数。")
 
-        # 在一个事务中执行所有更新
-        async with self.session.begin():
-            for thread_id, data in updates.items():
-                increment_value = data["increment"]
-                last_active_at = data["last_active_at"]
-                
-                values_to_update: dict[str, Any] = {"reply_count": Thread.reply_count + increment_value}
-                
-                # 只有在提供了有效的活跃时间时才更新它
-                if last_active_at:
-                    values_to_update["last_active_at"] = last_active_at
-
-                if not values_to_update:
-                    continue
-
-                stmt = (
-                    update(Thread)
-                    .where(Thread.thread_id == thread_id)  # type: ignore
-                    .values(**values_to_update)
-                    .execution_options(synchronize_session=False)
-                )
-                await self.session.execute(stmt)
+    async def decrement_reply_count(self, thread_id: int):
+        """将帖子的回复数减一，前提是回复数大于0。"""
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)  # type: ignore
+            .where(Thread.reply_count > 0)  # type: ignore
+            .values(reply_count=Thread.reply_count - 1)
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.execute(stmt)
+        await self.session.commit()
+        # logger.debug(f"已递减帖子 {thread_id} 的回复数。")

@@ -204,8 +204,9 @@ class Search(commands.Cog):
 
             all_channel_ids = list(self.cache_service.indexed_channel_ids)
 
-            # 从缓存服务获取预计算的合并标签
-            all_tag_names = self.cache_service.get_global_merged_tags()
+            # 获取所有频道的合并标签
+            merged_tags = self.get_merged_tags(all_channel_ids)
+            all_tag_names = [tag.name for tag in merged_tags]
 
             # 获取用户偏好 DTO
             user_prefs = await self.preferences_service.get_user_preferences(
@@ -227,7 +228,6 @@ class Search(commands.Cog):
                     page=1,
                     results_per_page=user_prefs.results_per_page,
                     preview_image_mode=user_prefs.preview_image_mode,
-                    sort_method=user_prefs.sort_method,
                 )
             else:
                 initial_state = SearchStateDTO(all_available_tags=all_tag_names, page=1)

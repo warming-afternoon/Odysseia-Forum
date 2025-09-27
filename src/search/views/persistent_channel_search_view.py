@@ -29,11 +29,7 @@ class PersistentChannelSearchView(discord.ui.View):
         """
         当用户点击“搜索本频道”按钮时，启动一个预设了频道ID的通用搜索流程。
         """
-        try:
-            await interaction.response.send_message("正在加载搜索界面...", ephemeral=True)
-        except discord.errors.InteractionResponded:
-            await interaction.followup.send("操作过快，请稍后重试。", ephemeral=True)
-            return
+        await safe_defer(interaction, ephemeral=True)
 
         if not interaction.guild:
             await self.cog.bot.api_scheduler.submit(
@@ -81,8 +77,9 @@ class PersistentChannelSearchView(discord.ui.View):
             interaction.user.id
         )
 
-        # 从 channel 对象获取标签名
-        channel_tag_names = sorted([tag.name for tag in channel.available_tags])
+        # 获取该频道的标签
+        channel_tags = self.cog.get_merged_tags([channel_id])
+        channel_tag_names = [tag.name for tag in channel_tags]
 
         # 创建初始状态
         if user_prefs:
@@ -99,7 +96,6 @@ class PersistentChannelSearchView(discord.ui.View):
                 page=1,
                 results_per_page=user_prefs.results_per_page,
                 preview_image_mode=user_prefs.preview_image_mode,
-                sort_method=user_prefs.sort_method,
             )
         else:
             initial_state = SearchStateDTO(
@@ -111,7 +107,7 @@ class PersistentChannelSearchView(discord.ui.View):
             interaction=interaction,
             search_state=initial_state,
         )
-        await generic_view.start(send_new_ephemeral=False)
+        await generic_view.start(send_new_ephemeral=True)
 
     @discord.ui.button(
         label="⚙️ 偏好设置",
