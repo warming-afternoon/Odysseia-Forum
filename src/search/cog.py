@@ -190,8 +190,8 @@ class Search(commands.Cog):
         启动全局搜索流程的通用逻辑。
         该函数会被 /全局搜索 命令和全局搜索按钮回调调用。
         """
-        await safe_defer(interaction, ephemeral=True)
         try:
+            await safe_defer(interaction, ephemeral=True)
             # 直接从缓存中获取所有可搜索的频道
             channels = self.cache_service.get_indexed_channels()
 
@@ -203,10 +203,6 @@ class Search(commands.Cog):
                 return
 
             all_channel_ids = list(self.cache_service.indexed_channel_ids)
-
-            # 获取所有频道的合并标签
-            merged_tags = self.get_merged_tags(all_channel_ids)
-            all_tag_names = [tag.name for tag in merged_tags]
 
             # 获取用户偏好 DTO
             user_prefs = await self.preferences_service.get_user_preferences(
@@ -221,7 +217,7 @@ class Search(commands.Cog):
                     exclude_authors=set(user_prefs.exclude_authors or []),
                     include_tags=set(user_prefs.include_tags or []),
                     exclude_tags=set(user_prefs.exclude_tags or []),
-                    all_available_tags=all_tag_names,
+                    all_available_tags=[],  # 初始化为空列表，延迟加载
                     keywords=user_prefs.include_keywords or "",
                     exclude_keywords=user_prefs.exclude_keywords or "",
                     exemption_markers=user_prefs.exclude_keyword_exemption_markers,
@@ -230,7 +226,7 @@ class Search(commands.Cog):
                     preview_image_mode=user_prefs.preview_image_mode,
                 )
             else:
-                initial_state = SearchStateDTO(all_available_tags=all_tag_names, page=1)
+                initial_state = SearchStateDTO(all_available_tags=[], page=1)  # 初始化为空列表
 
             view = ChannelSelectionView(
                 self, interaction, channels, all_channel_ids, initial_state
@@ -269,8 +265,8 @@ class Search(commands.Cog):
         self, interaction: discord.Interaction, author: discord.User | discord.Member
     ):
         """快速作者搜索的内部逻辑"""
-        await safe_defer(interaction, ephemeral=True)
         try:
+            await safe_defer(interaction, ephemeral=True)
             # 获取所有已索引的频道ID
             all_channel_ids = self.cache_service.get_indexed_channel_ids_list()
             if not all_channel_ids:

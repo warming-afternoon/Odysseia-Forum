@@ -4,6 +4,8 @@ from collections import defaultdict
 from datetime import datetime
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from src.core.sync_service import SyncService
+
 from ..repository import ThreadManagerRepository
 from ..dto import UpdateData
 
@@ -16,11 +18,12 @@ UpdatePayload = dict[int, UpdateData]
 class BatchUpdateService:
     """负责批量更新帖子回复数和活跃时间的服务。"""
 
-    def __init__(self, session_factory: async_sessionmaker, interval: int = 15):
+    def __init__(self, session_factory: async_sessionmaker, sync_service: SyncService, interval: int = 30):
         self.session_factory = session_factory
+        self.sync_service = sync_service
         self.interval = interval  # 每隔多少秒写入一次数据库
         
-        # 待处理的更新。使用defaultdict简化添加逻辑
+        # 待处理的更新
         self.pending_updates: defaultdict[int, UpdateData] = defaultdict(lambda: {"increment": 0, "last_active_at": None})
         
         # asyncio.Lock 用于保证并发安全
@@ -60,21 +63,47 @@ class BatchUpdateService:
             self.pending_updates[thread_id]["increment"] -= 1
 
     async def flush_to_db(self):
-        """将内存中的所有待处理更新写入数据库"""
+        """将内存中的所有待处理更新写入数据库，并处理幽灵数据。"""
         async with self.lock:
             if not self.pending_updates:
                 return # 如果没有更新，直接返回
             
-            # 复制数据到局部变量，并立即清空实例变量
             updates_to_process = self.pending_updates.copy()
             self.pending_updates.clear()
         
-        logger.debug(f"准备将 {len(updates_to_process)} 个帖子的更新写入数据库。")
+        intended_count = len(updates_to_process)
+        logger.debug(f"准备将 {intended_count} 个帖子的更新写入数据库。")
         try:
             async with self.session_factory() as session:
                 repo = ThreadManagerRepository(session)
-                await repo.batch_update_thread_activity(updates_to_process)
-            logger.debug("批量更新成功写入数据库。")
+                updated_count = await repo.batch_update_thread_activity(updates_to_process)
+                await session.commit()
+
+            logger.debug(f"批量更新成功写入数据库，影响了 {updated_count} 行。")
+
+            # 处理可能不存在于数据库里的数据
+            if updated_count < intended_count:
+                logger.info(
+                    f"批量更新消息数时发现 {intended_count - updated_count} 条幽灵数据，"
+                    "将触发数据补录。"
+                )
+                
+                # 查询比对
+                async with self.session_factory() as session:
+                    repo = ThreadManagerRepository(session)
+                    all_ids_in_batch = list(updates_to_process.keys())
+                    existing_ids = await repo.get_existing_thread_ids(all_ids_in_batch)
+
+                ghost_ids = set(all_ids_in_batch) - set(existing_ids)
+                
+                logger.info(f"需要补录的帖子ID: {list(ghost_ids)}")
+
+                # 为每个帖子触发一次完整的同步，使用 create_task 在后台执行
+                for thread_id in ghost_ids:
+                    asyncio.create_task(
+                        self.sync_service.sync_thread(thread_id, priority=10)
+                    )
+
         except Exception as e:
             logger.error("批量更新写入数据库时发生严重错误！", exc_info=e)
             # todo: 可以在这里添加错误重试逻辑，例如将 updates_to_process 放回 self.pending_updates

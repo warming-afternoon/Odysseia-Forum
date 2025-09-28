@@ -150,6 +150,12 @@ class ChannelSelectionView(discord.ui.View):
         merged_tags = self.cog.get_merged_tags(selected_ids)
         correct_tag_names = [tag.name for tag in merged_tags]
 
+        correct_tag_names_set = set(correct_tag_names)
+        
+        # 过滤正反选标签，只保留在当前所选频道中存在的标签
+        self.search_state.include_tags = self.search_state.include_tags.intersection(correct_tag_names_set)
+        self.search_state.exclude_tags = self.search_state.exclude_tags.intersection(correct_tag_names_set)
+        
         # 更新 search_state 中的频道列表和可用标签列表
         self.search_state.channel_ids = selected_ids
         self.search_state.all_available_tags = correct_tag_names
