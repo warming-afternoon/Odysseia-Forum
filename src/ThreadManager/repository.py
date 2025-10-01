@@ -340,3 +340,15 @@ class ThreadManagerRepository:
         stmt = select(Thread.thread_id).where(cast(ColumnElement, Thread.thread_id).in_(thread_ids))
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def increment_not_found_count(self, thread_id: int) -> bool:
+        """当找不到帖子时，将其 not_found_count 计数加一。"""
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id) # type: ignore
+            .values(not_found_count=Thread.not_found_count + 1)
+            .execution_options(synchronize_session=False)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount > 0

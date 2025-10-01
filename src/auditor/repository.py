@@ -1,4 +1,4 @@
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.models.thread import Thread
@@ -19,6 +19,18 @@ class AuditorRepository:
         Returns:
             一个包含所有帖子 ID 的列表。
         """
-        stmt = select(Thread.thread_id)
+        stmt = select(Thread.thread_id)  # type: ignore
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
+
+    async def delete_stale_threads(self, threshold: int) -> int:
+        """
+        物理删除那些 not_found_count 超过阈值的帖子记录。
+
+        Returns:
+            被删除的记录数量。
+        """
+        stmt = delete(Thread).where(Thread.not_found_count >= threshold)  # type: ignore
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount

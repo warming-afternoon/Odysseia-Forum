@@ -187,6 +187,7 @@ class SyncService:
             else thread.created_at,
             "reaction_count": reaction_count,
             "reply_count": thread.message_count,
+            "not_found_count": 0,
             "first_message_excerpt": excerpt,
             "thumbnail_url": thumbnail_url,
         }
@@ -211,20 +212,20 @@ class SyncService:
                 )
                 if not isinstance(fetched_channel, discord.Thread):
                     logger.warning(
-                        f"sync_thread: 获取到的 channel {thread_id} 不是一个帖子，将从索引中删除。"
+                        f"sync_thread: 获取到的 channel {thread_id} 不是一个帖子，将标记为未找到。"
                     )
                     async with self.session_factory() as session:
                         repo = ThreadManagerRepository(session=session)
-                        await repo.delete_thread_index(thread_id=thread_id)
+                        await repo.increment_not_found_count(thread_id=thread_id)
                     return
                 thread = fetched_channel
             except discord.NotFound:
                 logger.warning(
-                    f"sync_thread: 无法找到帖子 {thread_id}，可能已被删除。将从数据库中移除。"
+                    f"sync_thread: 无法找到帖子 {thread_id}，可能已被删除。将增加其 not_found_count。"
                 )
                 async with self.session_factory() as session:
                     repo = ThreadManagerRepository(session=session)
-                    await repo.delete_thread_index(thread_id=thread_id)
+                    await repo.increment_not_found_count(thread_id=thread_id)
                 return
             except Exception as e:
                 logger.error(
@@ -242,11 +243,11 @@ class SyncService:
                 )
             except discord.NotFound:
                 logger.warning(
-                    f"sync_thread (fetch_if_incomplete): 无法找到帖子 {thread.id}，可能已被删除。"
+                    f"sync_thread (fetch_if_incomplete): 无法找到帖子 {thread.id}，可能已被删除。将增加其 not_found_count。"
                 )
                 async with self.session_factory() as session:
                     repo = ThreadManagerRepository(session=session)
-                    await repo.delete_thread_index(thread_id=thread.id)
+                    await repo.increment_not_found_count(thread_id=thread.id)
                 return
 
         assert isinstance(thread, discord.Thread)

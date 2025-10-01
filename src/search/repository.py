@@ -130,6 +130,8 @@ class SearchRepository:
             # --- 步骤 1: 构建基础过滤器列表 (除了反选关键词) ---
             filters = []
             # -- 标准字段过滤 --
+            # 只搜索 not_found_count == 0 的帖子，避免显示被软删除的帖子
+            filters.append(Thread.not_found_count == 0)
             if query.channel_ids:
                 filters.append(Thread.channel_id.in_(query.channel_ids))  # type: ignore
             if query.include_authors:
