@@ -56,16 +56,11 @@ class Search(commands.Cog):
         self.bot.add_view(self.global_search_view)
         self.bot.add_view(self.persistent_channel_search_view)
 
-        # 手动创建和注册上下文菜单
+        # 创建和注册上下文菜单
         search_user_context_menu = app_commands.ContextMenu(
             name="搜索作品", callback=self.search_user_posts
         )
         self.bot.tree.add_command(search_user_context_menu)
-
-        # search_message_context_menu = app_commands.ContextMenu(
-        #     name="搜索作品", callback=self.search_message_author
-        # )
-        # self.bot.tree.add_command(search_message_context_menu)
 
     def get_merged_tags(self, channel_ids: list[int]) -> list[TagDTO]:
         """
@@ -104,7 +99,7 @@ class Search(commands.Cog):
 
             channel_id = interaction.channel.parent_id
 
-            # 创建美观的embed
+            # 创建 embed
             embed = discord.Embed(
                 title=f"🔍 {interaction.channel.parent.name} 频道搜索",
                 description=f"点击下方按钮，搜索 <#{channel_id}> 频道内的所有帖子",
@@ -155,12 +150,14 @@ class Search(commands.Cog):
             )
             embed.add_field(
                 name="使用方法",
-                value="1. 点击下方左侧按钮，选择要搜索的论坛频道\n2. 设置搜索条件（标签、关键词等）\n3. 查看搜索结果",
+                value="1. 点击下方左侧按钮，选择要搜索的论坛频道\n"
+                "2. 设置搜索条件（标签、关键词等）\n3. 查看搜索结果",
                 inline=False,
             )
             embed.add_field(
                 name="偏好配置",
-                value="1. 点击下方右侧按钮\n2. 修改搜索时的默认配置（标签、关键词、频道等）",
+                value="1. 点击下方右侧按钮\n"
+                "2. 修改搜索时的默认配置（标签、关键词、频道等）",
                 inline=False,
             )
             view = GlobalSearchView(self)
@@ -188,7 +185,7 @@ class Search(commands.Cog):
     async def _start_global_search(self, interaction: discord.Interaction):
         """
         启动全局搜索流程的通用逻辑。
-        该函数会被 /全局搜索 命令和全局搜索按钮回调调用。
+        该函数会被 "/全局搜索" 命令和全局搜索按钮点击回调调用。
         """
         try:
             await safe_defer(interaction, ephemeral=True)
@@ -232,20 +229,26 @@ class Search(commands.Cog):
                 self, interaction, channels, all_channel_ids, initial_state
             )
 
-            message_content = "请选择想搜索的论坛频道（可多选）："
+            description = "请选择想搜索的论坛频道（可多选）："
             if user_prefs and user_prefs.preferred_channels:
-                message_content = (
+                description = (
                     "已根据偏好预选了频道，可以直接点击“确定搜索”继续或进行修改。"
                 )
+                
+            embed = discord.Embed(
+                description=description, color=discord.Color.greyple()
+                )
 
-            await interaction.followup.send(message_content, view=view, ephemeral=True)
+            await interaction.followup.send(
+                content="", view=view, embed=embed, ephemeral=True
+                )
         except Exception:
             logger.error("在启动全局搜索中发生严重错误", exc_info=True)
             # 确保即使有异常，也能给用户一个反馈
             if not interaction.response.is_done():
                 await safe_defer(interaction, ephemeral=True)
             await interaction.followup.send(
-                "❌ 启动搜索时发生严重错误，请联系管理员。", ephemeral=True
+                "❌ 启动搜索时发生严重错误，请联系技术员。", ephemeral=True
             )
 
     @app_commands.command(name="全局搜索", description="开始一次仅自己可见的全局搜索")

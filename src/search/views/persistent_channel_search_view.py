@@ -58,7 +58,8 @@ class PersistentChannelSearchView(discord.ui.View):
         if not channel:  # 预防帖子父频道丢失的罕见情况
             await self.cog.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
-                    "❌ 无法找到该帖子的父频道。", ephemeral=True
+                    "❌ 无法找到该帖子的父频道\n如果重试后依然出现该提示，请联系技术员",
+                    ephemeral=True
                 ),
                 priority=1,
             )
