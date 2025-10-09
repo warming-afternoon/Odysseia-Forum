@@ -57,6 +57,7 @@ class ChannelSelectionView(discord.ui.View):
             options=options,
             min_values=0,
             max_values=len(options),
+            row=0,
         )
         self.channel_select.callback = self.on_channel_select
         self.add_item(self.channel_select)
@@ -65,7 +66,7 @@ class ChannelSelectionView(discord.ui.View):
             label="✅ 确定搜索",
             style=discord.ButtonStyle.success,
             disabled=initial_disabled,
-            row=1,
+            row=2,
         )
         self.confirm_button.callback = self.on_confirm
         self.add_item(self.confirm_button)
@@ -74,10 +75,15 @@ class ChannelSelectionView(discord.ui.View):
             label="🧹 清空选择",
             style=discord.ButtonStyle.secondary,
             disabled=initial_disabled,
-            row=1,
+            row=2,
         )
         self.clear_button.callback = self.on_clear_selection
         self.add_item(self.clear_button)
+
+    def _create_embed(self, description: str, color: discord.Color = discord.Color.greyple()) -> discord.Embed:
+        """创建一个描述embed"""
+        embed = discord.Embed(description=description, color=color)
+        return embed
 
     async def on_channel_select(self, interaction: discord.Interaction):
         """当用户在下拉菜单中做出选择时调用。"""
@@ -93,7 +99,7 @@ class ChannelSelectionView(discord.ui.View):
 
         # 更新消息以反映当前选择
         if not has_selection:
-            message_content = "请选择想搜索的论坛频道（可多选）："
+            description = "请选择想搜索的论坛频道（可多选）："
         else:
             if "all" in self.channel_select.values:
                 display_text = "所有已索引频道"
@@ -104,9 +110,10 @@ class ChannelSelectionView(discord.ui.View):
                     if str(ch.id) in self.channel_select.values
                 ]
                 display_text = ", ".join(selected_names)
-            message_content = f"**已选择:** {display_text}\n\n请点击“确定搜索”继续。"
+            description = f"**已选择:** {display_text}\n\n请点击“确定搜索”继续。"
 
-        await interaction.response.edit_message(content=message_content, view=self)
+        embed = self._create_embed(description)
+        await interaction.response.edit_message(content=None, embed=embed, view=self)
 
     # 清空按钮的回调
     async def on_clear_selection(self, interaction: discord.Interaction):
@@ -123,8 +130,9 @@ class ChannelSelectionView(discord.ui.View):
         self.clear_button.disabled = True
 
         # 更新消息
+        embed = self._create_embed("请选择想搜索的论坛频道（可多选）：")
         await interaction.response.edit_message(
-            content="请选择想搜索的论坛频道（可多选）：", view=self
+            content=None, embed=embed, view=self
         )
 
     async def on_confirm(self, interaction: discord.Interaction):
@@ -143,7 +151,8 @@ class ChannelSelectionView(discord.ui.View):
             selected_ids = self.search_state.channel_ids
 
         if not selected_ids:
-            await interaction.followup.send("请至少选择一个频道。", ephemeral=True)
+            embed = self._create_embed("请至少选择一个频道。", color=discord.Color.red())
+            await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
         # 根据用户选择的频道，重新获取合并后的专属标签
