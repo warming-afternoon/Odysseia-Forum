@@ -24,6 +24,29 @@
 		authed: true
 	};
 
+	// iOS 兼容：从回调 URL 片段中获取 token 并持久化
+	(function hydrateAuthToken(){
+		try{
+			const m = location.hash && location.hash.match(/[#&]token=([^&]+)/);
+			const fromHash = m ? decodeURIComponent(m[1]) : null;
+			const fromStorage = window.localStorage.getItem('auth_token') || null;
+			if(fromHash){
+				window.AUTH_TOKEN = fromHash;
+				window.localStorage.setItem('auth_token', fromHash);
+				// 清理 hash，避免泄露
+				history.replaceState({}, '', location.pathname + location.search);
+			}else if(fromStorage){
+				window.AUTH_TOKEN = fromStorage;
+			}
+		}catch{}
+	})();
+
+	function authHeaders(){
+		const h = {};
+		if(window.AUTH_TOKEN){ h['Authorization'] = 'Bearer ' + window.AUTH_TOKEN; }
+		return h;
+	}
+
 	/** DOM **/
 	const el = {
 		keyword: document.getElementById("keywordInput"),
@@ -640,12 +663,12 @@
 
     /** 检查认证 **/
     async function checkAuth(){
-        await fetch(window.AUTH_URL + '/checkauth', {credentials:'include'});
+        await fetch(window.AUTH_URL + '/checkauth', {credentials:'include', headers: authHeaders()});
     }
 
 	/** 数据加载 **/
 	async function loadIndex(){
-		const res = await fetch(window.AUTH_URL + '/index.json', {credentials:'include'}).catch(()=>null);
+		const res = await fetch(window.AUTH_URL + '/index.json', {credentials:'include', headers: authHeaders()}).catch(()=>null);
 		if (!res || res.status === 401) {
 			state.authed = false;
 			state.all = [];

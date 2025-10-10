@@ -71,7 +71,8 @@ export default {
           "Set-Cookie": `session=${token}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${7 * 24 * 60 * 60}${cookieDomainAttr}`,
         });
   
-        headersOut.append('Location', env.FRONTEND_URL);
+        // 为兼容 iOS 的第三方 Cookie 限制，同时在重定向 URL 片段中携带 token，前端读取后改用 Authorization 头
+        headersOut.append('Location', `${env.FRONTEND_URL}#token=${encodeURIComponent(token)}`);
 
         return new Response(null, {
           status: 302,
@@ -230,9 +231,20 @@ export default {
   }
   
   async function checkAuth(request, env) {
-    const cookie = request.headers.get("Cookie");
-    if (!cookie || !cookie.includes("session=")) return null;
-    const token = cookie.split("session=")[1].split(";")[0];
+    // 1) 优先从 Authorization Bearer 中读取（适配 iOS 无第三方 Cookie）
+    const auth = request.headers.get("Authorization") || "";
+    let token = "";
+    if (auth.startsWith("Bearer ")) {
+      token = auth.slice(7).trim();
+    }
+    // 2) 回退到 Cookie 会话
+    if (!token) {
+      const cookie = request.headers.get("Cookie") || "";
+      if (cookie && cookie.includes("session=")) {
+        token = cookie.split("session=")[1].split(";")[0];
+      }
+    }
+    if (!token) return null;
     return await verifyJWT(token, env.JWT_SECRET);
   }
   
