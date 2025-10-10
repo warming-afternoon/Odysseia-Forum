@@ -80,7 +80,49 @@
 	const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
 	function escapeHtml(s){ return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
 	function escapeAttr(s){ return String(s||"").replace(/"/g,'&quot;'); }
-	function nl2br(s){ return (s||"").replace(/\n/g,"<br>"); }
+	
+	/** 简单的 Markdown 渲染器 **/
+	function renderMarkdown(text){
+		if(!text) return "";
+		let html = escapeHtml(text);
+		
+		// 代码块 ```code```
+		html = html.replace(/```([^`]+)```/g, '<pre><code>$1</code></pre>');
+		
+		// 行内代码 `code`
+		html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+		
+		// 粗体 **bold** 或 __bold__
+		html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+		html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+		
+		// 斜体 *italic* 或 _italic_
+		html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+		html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
+		
+		// 删除线 ~~strikethrough~~
+		html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+		
+		// 链接 [text](url)
+		html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+		
+		// 标题 # Header
+		html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+		html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+		html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+		
+		// 引用 > quote
+		html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+		
+		// 无序列表 - item 或 * item
+		html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>');
+		html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+		
+		// 换行
+		html = html.replace(/\n/g, '<br>');
+		
+		return html;
+	}
 
 	/** URL 状态同步 **/
 	function readFromURL(){
@@ -295,12 +337,15 @@
 		renderPagination(state.page, pages);
 		// 基于所选频道刷新可选标签
 		refreshTagMenus();
+		
+		// 滚动到页面顶部
+		window.scrollTo({top: 0, behavior: 'smooth'});
 	}
 
 	function renderCard(item){
 		const imgHtml = item.thumbnail_url ? `<div class="media-img"><img src="${escapeAttr(item.thumbnail_url)}" alt="${escapeAttr(item.title)} 缩略图" loading="lazy" class="card-img" data-src="${escapeAttr(item.thumbnail_url)}"></div>` : `<div class="media-img"></div>`;
 		const excerptText = limitText(item.first_message_excerpt||"", item.thumbnail_url ? 500 : 800);
-		const excerptHtml = `<div class="excerpt">${nl2br(escapeHtml(excerptText))}</div>`;
+		const excerptHtml = `<div class="excerpt markdown-content">${renderMarkdown(excerptText)}</div>`;
 		const channelName = (window.CHANNELS||{})[String(item.channel_id)] || `频道 ${item.channel_id}`;
 		const created = fmtDate(item.created_at);
 		const active = fmtDate(item.last_active_at);
