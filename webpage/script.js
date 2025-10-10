@@ -455,7 +455,12 @@
 
 		el.searchBtn.addEventListener('click', ()=>{ state.page=1; state.query=el.keyword.value; syncAndRender(); });
 		el.keyword.addEventListener('input', debounce(()=>{ state.page=1; state.query=el.keyword.value; syncAndRender(true); }, 250));
-		el.applyBtn.addEventListener('click', ()=>{ state.page=1; syncAndRender(); });
+		el.applyBtn.addEventListener('click', ()=>{ 
+			state.page=1; 
+			state.timeFrom = el.timeFrom.value ? new Date(el.timeFrom.value) : null;
+			state.timeTo = el.timeTo.value ? new Date(el.timeTo.value) : null;
+			syncAndRender(); 
+		});
 		el.resetBtn.addEventListener('click', ()=>{
 			state.page=1; state.channels.clear(); state.includeTags.clear(); state.excludeTags.clear(); state.tagLogic="AND"; state.timeFrom=null; state.timeTo=null; state.query=""; state.sort="relevance"; state.perPage=24;
 			// 清 UI
