@@ -137,6 +137,17 @@ class APIScheduler:
         self._task = asyncio.create_task(self._dispatcher_loop())
         # logger.info("API 调度器开始")
 
+    def update_concurrency(self, new_concurrent_requests: int):
+        """更新并发请求数"""
+        if new_concurrent_requests <= 0:
+            raise ValueError("并发请求数必须大于0")
+        
+        # 创建新的信号量
+        old_semaphore = self._semaphore
+        self._semaphore = asyncio.Semaphore(new_concurrent_requests)
+        
+        logger.info(f"API调度器并发数已更新: {old_semaphore._value} -> {new_concurrent_requests}")
+
     async def stop(self):
         """停止调度器"""
         if not self._is_running or not self._task:

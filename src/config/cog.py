@@ -10,6 +10,7 @@ from shared.safe_defer import safe_defer
 from .embed_builder import ConfigEmbedBuilder
 from .mutex_tags_handler import MutexTagsHandler
 from src.core.tagService import TagService
+from src.webpage.index_sync import manual_sync
 
 
 if TYPE_CHECKING:
@@ -221,6 +222,52 @@ class Configuration(commands.Cog):
             )
         else:
             logger.error("配置互斥标签命令出错", exc_info=error)
+            await interaction.response.send_message(
+                f"❌ 命令执行失败: {error}", ephemeral=True
+            )
+
+    @config_group.command(name="重载配置", description="重新加载配置文件并重新导出部署网页")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def reload_config(self, interaction: discord.Interaction):
+        """重新加载配置文件并重新导出部署网页"""
+        await safe_defer(interaction, ephemeral=True)
+        
+        try:
+            # 发送开始消息
+            await interaction.followup.send("🔄 开始重载配置文件...", ephemeral=True)
+            
+            # 重载配置文件
+            success, message = self.bot.reload_config()
+            
+            if not success:
+                await interaction.followup.send(f"❌ {message}", ephemeral=True)
+                return
+            
+            # 发送配置重载成功消息
+            await interaction.followup.send("✅ 配置文件重载成功！开始重新部署网页...", ephemeral=True)
+            
+            # 执行手动同步和部署
+            await manual_sync(self.bot, self.bot.config)
+            
+            # 发送完成消息
+            await interaction.followup.send("✅ 配置重载并重新部署完成！", ephemeral=True)
+            
+        except Exception as e:
+            logger.error("重载配置时出错", exc_info=e)
+            await interaction.followup.send(
+                f"❌ 重载配置失败: {e}", ephemeral=True
+            )
+
+    @reload_config.error
+    async def on_reload_config_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "❌ 此命令需要 admin 权限。", ephemeral=True
+            )
+        else:
+            logger.error("重载配置命令出错", exc_info=error)
             await interaction.response.send_message(
                 f"❌ 命令执行失败: {error}", ephemeral=True
             )

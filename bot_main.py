@@ -69,6 +69,29 @@ class MyBot(commands.Bot):
             await self.cache_service.build_or_refresh_cache()
         logger.info("Core 缓存刷新完毕")
 
+    def reload_config(self):
+        """重新加载配置文件"""
+        try:
+            with open("config.json", "r", encoding="utf-8") as f:
+                new_config = json.load(f)
+            
+            # 更新配置
+            old_config = self.config.copy()
+            self.config = new_config
+            
+            # 更新API调度器并发数
+            concurrency = self.config.get("performance", {}).get(
+                "api_scheduler_concurrency", 40
+            )
+            self.api_scheduler.update_concurrency(concurrency)
+            
+            logger.info("配置文件重载成功")
+            return True, "配置重载成功"
+            
+        except Exception as e:
+            logger.error(f"重载配置文件失败: {e}", exc_info=True)
+            return False, f"配置重载失败: {e}"
+
     async def setup_hook(self):
         """在机器人登录前执行的初始化。"""
         # 启动API调度器
