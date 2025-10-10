@@ -33,6 +33,8 @@ class IndexSyncService:
         # 加载配置
         self.config = config or {}
         self.webpage_config = self.config.get("webpage", {})
+        self.cloudflare_config = self.webpage_config.get("cloudflare", {})
+        self.kv_config = self.cloudflare_config.get("kv", {})
 
         self.username_cache = {}
         
@@ -196,9 +198,9 @@ class IndexSyncService:
                 
                 logger.info(f"成功同步 {len(json_data)} 个帖子到 {self.output_path}")
                 
-                # 同步完成后，更新 config.js 并部署
+                # 同步完成后，更新 config.js 并上传到 Workers KV（如果启用）
                 await self.update_config_js()
-                await self.deploy_to_cloudflare()
+                await self.upload_to_workers_kv()
                 
         except Exception as e:
             logger.error(f"同步帖子数据时出错: {e}", exc_info=True)
@@ -266,92 +268,80 @@ class IndexSyncService:
         
         return None
     
-    async def deploy_to_cloudflare(self) -> None:
-        """部署到 Cloudflare Pages"""
+    async def upload_to_workers_kv(self) -> None:
+        """将 index.json 上传到 Cloudflare Workers KV"""
         try:
-            cloudflare_config = self.webpage_config.get("cloudflare", {})
-            
-            # 检查是否启用部署
-            if not cloudflare_config.get("enabled", False):
-                logger.info("Cloudflare Pages 部署未启用，跳过")
+            # 检查是否启用上传
+            if not self.cloudflare_config.get("enabled", False):
+                logger.info("Cloudflare KV 上传未启用，跳过")
                 return
             
-            api_token = cloudflare_config.get("api_token")
-            account_id = cloudflare_config.get("account_id")
-            project_name = cloudflare_config.get("project_name")
+            api_token = self.cloudflare_config.get("api_token")
+            account_id = self.cloudflare_config.get("account_id")
+            kv_namespace_id = self.kv_config.get("namespace_id")
+            kv_namespace = self.kv_config.get("namespace")  # 也支持通过绑定名
+            kv_key = self.kv_config.get("key", "index.json")
             
             # 验证配置
-            if not all([api_token, account_id, project_name]):
-                logger.warning("Cloudflare Pages 配置不完整，跳过部署")
+            if not all([api_token, account_id]) or not (kv_namespace_id or kv_namespace):
+                logger.warning("Cloudflare KV 配置不完整，跳过上传")
                 return
-            
-            logger.info(f"开始部署到 Cloudflare Pages: {project_name}")
             
             # 查找 wrangler 命令
             wrangler_cmd = self.find_wrangler_command()
-            
             if not wrangler_cmd:
                 logger.error("未找到 wrangler 命令，请确保已安装: npm install -g wrangler")
                 logger.info("如果已安装，请检查 npm 全局安装路径是否在 PATH 中")
                 return
             
-            # 设置环境变量
+            # 环境变量
             env = os.environ.copy()
             env.update({
                 "CLOUDFLARE_API_TOKEN": api_token,
                 "CLOUDFLARE_ACCOUNT_ID": account_id
             })
             
-            # 在 Windows 上使用 shell=True 可以更好地处理命令
-            if os.name == 'nt':  # Windows
-                # 构建命令字符串
-                cmd_str = f'"{wrangler_cmd}" pages deploy "{self.webpage_dir}" --project-name "{project_name}" --branch main'
-                
-                logger.debug(f"执行命令: {cmd_str}")
-                
-                # 执行部署命令
+            # 选择使用 namespace-id 或 namespace 绑定名
+            if kv_namespace_id:
+                base_cmd = f'"{wrangler_cmd}" kv key put --namespace-id={kv_namespace_id} {kv_key} --path={self.output_path} --remote'
+            else:
+                base_cmd = f'"{wrangler_cmd}" kv key put --namespace={kv_namespace} {kv_key} --path={self.output_path} --remote'
+            
+            logger.info(f"开始上传到 Workers KV 键: {kv_key}")
+            logger.debug(f"执行命令: {base_cmd}")
+            
+            if os.name == 'nt':
                 result = subprocess.run(
-                    cmd_str,
+                    base_cmd,
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=300,  # 5分钟超时
-                    shell=True
+                    timeout=180,
+                    shell=True,
                 )
-            else:  # Linux/Mac
-                cmd = [
-                    wrangler_cmd,
-                    "pages",
-                    "deploy",
-                    str(self.webpage_dir),
-                    "--project-name", project_name,
-                    "--branch", "main"
-                ]
-                
-                logger.debug(f"执行命令: {' '.join(cmd)}")
-                
-                # 执行部署命令
+            else:
+                # 在类 Unix 系统上拆分成列表（简单处理：通过 shell 执行也可行）
                 result = subprocess.run(
-                    cmd,
+                    base_cmd,
                     env=env,
                     capture_output=True,
                     text=True,
-                    timeout=300  # 5分钟超时
+                    timeout=180,
+                    shell=True,
                 )
             
             if result.returncode == 0:
-                logger.info(f"成功部署到 Cloudflare Pages")
-                logger.debug(f"部署输出: {result.stdout}")
+                logger.info("已成功上传 index.json 至 Cloudflare Workers KV")
+                logger.debug(f"上传输出: {result.stdout}")
             else:
-                logger.error(f"部署到 Cloudflare Pages 失败: {result.stderr}")
-                
+                logger.error(f"上传到 Workers KV 失败: {result.stderr}")
         except subprocess.TimeoutExpired:
-            logger.error("部署到 Cloudflare Pages 超时")
+            logger.error("上传到 Cloudflare Workers KV 超时")
         except FileNotFoundError as e:
             logger.error(f"未找到 wrangler 命令: {e}")
             logger.info("请确保已安装: npm install -g wrangler")
         except Exception as e:
-            logger.error(f"部署到 Cloudflare Pages 时出错: {e}", exc_info=True)
+            logger.error(f"上传到 Cloudflare Workers KV 时出错: {e}", exc_info=True)
     
     async def on_message(self, message: discord.Message):
         """监听用户发言事件，更新用户昵称缓存"""

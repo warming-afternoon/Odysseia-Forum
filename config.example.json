@@ -15,6 +15,9 @@
   },
 
   "webpage": {
+    "client_id": "your_client_id_here",
+    "_comment_client_id": "上面的client_id是bot的客户端ID",
+    
     "guild_id": "your_guild_id_here",
     "_comment_guild_id": "上面的guild_id是主服务器ID",
     
@@ -23,6 +26,9 @@
       "channel_id_2": "频道名称2"
     },
     "_comment_channels": "上面的channels是要展示的频道列表，格式为 频道ID: 频道名称",
+
+    "auth_url": "https://your_auth_url_here",
+    "_comment_auth_url": "上面的auth_url是认证服务的URL",
     
     "cloudflare": {
       "enabled": false,
@@ -34,8 +40,12 @@
       "account_id": "your_cloudflare_account_id",
       "_comment_account_id": "Cloudflare账户ID",
       
-      "project_name": "your_project_name",
-      "_comment_project_name": "Cloudflare Pages项目名称"
+      "kv": {
+        "namespace_id": "your_cloudflare_kv_namespace_id",
+        "_comment_namespace_id": "Cloudflare KV命名空间ID",
+        "key": "your_cloudflare_kv_key",
+        "_comment_key": "Cloudflare KV键名"
+      }
     }
   }
 }

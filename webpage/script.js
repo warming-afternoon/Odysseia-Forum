@@ -1,6 +1,12 @@
 (function(){
 	"use strict";
 
+    const url = new URL(window.location.href);
+    const error = url.searchParams.get("error");
+    if(error){
+        alert("登录失败: " + error);
+    }
+
 	/** 数据与状态 **/
 	const state = {
 		all: [],
@@ -14,7 +20,8 @@
 		excludeTags: new Set(),
 		tagLogic: "AND",
 		timeFrom: null,
-		timeTo: null
+		timeTo: null,
+		authed: true
 	};
 
 	/** DOM **/
@@ -355,6 +362,21 @@
 
 	/** 渲染 **/
 	function render(){
+		if(!state.authed){
+			el.stats.textContent = "您需要先登录才能浏览搜索结果";
+			el.results.innerHTML = `<div class="auth-required">
+				<div class="auth-card">
+					<h3>需要登录</h3>
+					<p>请先使用 Discord 登录以加载搜索索引并浏览搜索结果。</p>
+					<button id="loginBtn" class="btn primary">登录 Discord</button>
+				</div>
+			</div>`;
+			el.pagination.innerHTML = "";
+			// 绑定登录按钮
+			const btn = document.getElementById('loginBtn');
+			if(btn){ btn.addEventListener('click', ()=> login()); }
+			return;
+		}
 		const total = state.filtered.length;
 		const pages = Math.max(1, Math.ceil(total / state.perPage));
 		if(state.page>pages) state.page = pages;
@@ -610,9 +632,31 @@
 		render();
 	}
 
+
+    /** 登录 **/
+    async function login(){
+        window.location.href = "https://discord.com/api/oauth2/authorize?client_id=" + window.CLIENT_ID + "&redirect_uri=" + window.AUTH_URL + "/callback&response_type=code&scope=identify%20guilds.members.read";
+    }
+
+    /** 检查认证 **/
+    async function checkAuth(){
+        await fetch(window.AUTH_URL + '/checkauth', {credentials:'include'});
+    }
+
 	/** 数据加载 **/
 	async function loadIndex(){
-		const res = await fetch('index.json', {cache:'no-store'});
+		const res = await fetch(window.AUTH_URL + '/index.json', {credentials:'include'}).catch(()=>null);
+		if (!res || res.status === 401) {
+			state.authed = false;
+			state.all = [];
+			state.filtered = [];
+			return;
+		}
+		if (res.status !== 200) {
+			state.authed = true; // 其他错误不当作未登录
+			return;
+		}
+		state.authed = true;
 		const text = await res.text();
 		// 使用自定义 JSON 解析，将大数字 ID 保持为字符串
 		const data = JSON.parse(text, (key, value) => {
@@ -647,7 +691,7 @@
 	/** 启动 **/
 	(async function init(){
 		readFromURL();
-		await Promise.all([loadIndex(), loadBuildTime()]);
+		await Promise.all([checkAuth(), loadIndex(), loadBuildTime()]);
 		hydrateControls();
 		applyFilters();
 		render();
