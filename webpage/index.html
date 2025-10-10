@@ -42,20 +42,28 @@
 					</div>
 				</div>
 				<div class="filter-item">
+					<label for="tagLogic">标签逻辑</label>
+					<select id="tagLogic">
+						<option value="AND">全部包含 (AND)</option>
+						<option value="OR">任一即可 (OR)</option>
+					</select>
+				</div>
+			</div>
+			<div class="filter-row">
+				<div class="filter-item">
 					<label for="excludeDropdown">排除标签</label>
 					<div id="excludeDropdown" class="multi">
 						<button type="button" class="multi-toggle" aria-expanded="false"><span class="multi-label">不限</span></button>
 						<div class="multi-menu" role="listbox"></div>
 					</div>
 				</div>
-			</div>
 			<div class="filter-row">
 				<div class="filter-item">
-					<label for="timeFrom">起始时间</label>
+					<label for="timeFrom">发帖不早于</label>
 					<input id="timeFrom" type="date">
 				</div>
 				<div class="filter-item">
-					<label for="timeTo">结束时间</label>
+					<label for="timeTo">发帖不晚于</label>
 					<input id="timeTo" type="date">
 				</div>
 				<div class="filter-item">
@@ -94,7 +102,7 @@
 
 	<footer class="site-footer">
 		<div class="container">
-			<p>静态索引于 <span id="buildTime">——</span> · 本地搜索，无需网络请求</p>
+			<p>静态索引-每30分钟更新一次</p>
 		</div>
 	</footer>
 

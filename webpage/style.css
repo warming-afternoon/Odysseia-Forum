@@ -125,7 +125,8 @@ body::before{
 .badge-author{cursor:pointer;transition:.2s background,.2s transform}
 .badge-author:hover{background:linear-gradient(180deg,#1a2a3f,#152030);transform:translateY(-1px);border-color:rgba(255,255,255,.15)}
 .tags{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
-.tag{font-size:12px;padding:6px 10px;border-radius:999px;background:linear-gradient(180deg,#1a2434,#121a25);border:1px solid rgba(255,255,255,.07);color:#cfe3ff}
+.tag{font-size:12px;padding:6px 10px;border-radius:999px;background:linear-gradient(180deg,#1a2434,#121a25);border:1px solid rgba(255,255,255,.07);color:#cfe3ff;cursor:pointer;transition:.2s background,.2s transform,.2s border-color}
+.tag:hover{background:linear-gradient(180deg,#1f2d42,#172030);transform:translateY(-1px);border-color:rgba(255,255,255,.15)}
 
 /* image clickable */
 .card-img{cursor:pointer;transition:.15s opacity}

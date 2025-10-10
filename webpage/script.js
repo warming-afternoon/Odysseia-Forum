@@ -12,6 +12,7 @@
 		channels: new Set(),
 		includeTags: new Set(),
 		excludeTags: new Set(),
+		tagLogic: "AND",
 		timeFrom: null,
 		timeTo: null
 	};
@@ -24,6 +25,7 @@
 		chWrap: document.getElementById("channelDropdown"),
 		inWrap: document.getElementById("includeDropdown"),
 		exWrap: document.getElementById("excludeDropdown"),
+		tagLogic: document.getElementById("tagLogic"),
 		timeFrom: document.getElementById("timeFrom"),
 		timeTo: document.getElementById("timeTo"),
 		sort: document.getElementById("sortSelect"),
@@ -134,6 +136,7 @@
 		state.channels = new Set((p.get("ch")||"").split("|").filter(Boolean).map(x=>x.trim()));
 		state.includeTags = new Set((p.get("ti")||"").split("|").filter(Boolean).map(x=>x.trim()));
 		state.excludeTags = new Set((p.get("te")||"").split("|").filter(Boolean).map(x=>x.trim()));
+		state.tagLogic = p.get("tl") || "AND";
 		state.timeFrom = p.get("tf") ? new Date(+p.get("tf")) : null;
 		state.timeTo = p.get("tt") ? new Date(+p.get("tt")) : null;
 	}
@@ -146,6 +149,7 @@
 		if(state.channels.size) p.set("ch", [...state.channels].join("|"));
 		if(state.includeTags.size) p.set("ti", [...state.includeTags].join("|"));
 		if(state.excludeTags.size) p.set("te", [...state.excludeTags].join("|"));
+		if(state.tagLogic && state.tagLogic!=="AND") p.set("tl", state.tagLogic);
 		if(state.timeFrom) p.set("tf", String(+state.timeFrom));
 		if(state.timeTo) p.set("tt", String(+state.timeTo));
 		const url = `${location.pathname}?${p.toString()}`;
@@ -228,9 +232,9 @@
 		const excerpt = normalize(item.first_message_excerpt);
 		const combined = title + " " + excerpt;
 		
-		// 检查 author:
+		// 检查 author: 完全匹配
 		if(parsed.authors.length > 0){
-			const found = parsed.authors.some(a=> author.includes(a));
+			const found = parsed.authors.some(a=> author === a);
 			if(!found) return false;
 		}
 		
@@ -284,6 +288,7 @@
 	}
 	
 	function includesAllTags(itemTags, required){ for(const t of required){ if(!itemTags.includes(t)) return false; } return true; }
+	function includesAnyTag(itemTags, required){ for(const t of required){ if(itemTags.includes(t)) return true; } return false; }
 	function excludesAnyTags(itemTags, banned){ for(const t of banned){ if(itemTags.includes(t)) return true; } return false; }
 
 	function applyFilters(){
@@ -296,12 +301,33 @@
 		let res = state.all.filter(item=>{
 			if(chSet.size && !chSet.has(String(item.channel_id))) return false;
 			const itemTags = (item.tags||[]).map(normalize);
-			if(inc.length && !includesAllTags(itemTags, inc)) return false;
+			// 标签逻辑：AND 全部包含 / OR 任一即可
+			if(inc.length){
+				if(state.tagLogic === "AND"){
+					if(!includesAllTags(itemTags, inc)) return false;
+				} else {
+					if(!includesAnyTag(itemTags, inc)) return false;
+				}
+			}
 			if(exc.length && excludesAnyTags(itemTags, exc)) return false;
+			// 时间筛选：只基于发帖时间（created_at）
 			if(from || to){
-				const ts = new Date(item.created_at || item.last_active_at || 0);
-				if(from && ts < startOfDay(from)) return false;
-				if(to && ts > endOfDay(to)) return false;
+				if(!item.created_at) return false;
+				// 正确解析 UTC 时间
+				let createdDate;
+				if(typeof item.created_at === 'string'){
+					if(!item.created_at.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(item.created_at)){
+						createdDate = new Date(item.created_at + 'Z');
+					} else {
+						createdDate = new Date(item.created_at);
+					}
+				} else {
+					createdDate = new Date(item.created_at);
+				}
+				// 不早于：发帖时间 >= from 的开始（本地时区）
+				if(from && createdDate < startOfDay(from)) return false;
+				// 不晚于：发帖时间 <= to 的结束（本地时区）
+				if(to && createdDate > endOfDay(to)) return false;
 			}
 			// 使用高级搜索逻辑
 			if(state.query && !matchesQuery(item, parsed)) return false;
@@ -419,7 +445,9 @@
 		setupMulti(el.chWrap, ()=>{
 			state.channels = collectChecked(el.chWrap);
 			setMultiLabel(el.chWrap, new Set([...state.channels].map(id=> (window.CHANNELS?.[id]||`频道 ${id}`))));
-			// 频道变化 -> 刷新标签可选项
+			// 频道变化 -> 清空标签筛选并刷新标签可选项
+			state.includeTags.clear();
+			state.excludeTags.clear();
 			refreshTagMenus();
 		});
 		setupMulti(el.inWrap, ()=>{ state.includeTags = collectChecked(el.inWrap); setMultiLabel(el.inWrap, state.includeTags); });
@@ -429,9 +457,9 @@
 		el.keyword.addEventListener('input', debounce(()=>{ state.page=1; state.query=el.keyword.value; syncAndRender(true); }, 250));
 		el.applyBtn.addEventListener('click', ()=>{ state.page=1; syncAndRender(); });
 		el.resetBtn.addEventListener('click', ()=>{
-			state.page=1; state.channels.clear(); state.includeTags.clear(); state.excludeTags.clear(); state.timeFrom=null; state.timeTo=null; state.query=""; state.sort="relevance"; state.perPage=24;
+			state.page=1; state.channels.clear(); state.includeTags.clear(); state.excludeTags.clear(); state.tagLogic="AND"; state.timeFrom=null; state.timeTo=null; state.query=""; state.sort="relevance"; state.perPage=24;
 			// 清 UI
-			el.keyword.value=""; el.sort.value="relevance"; el.perPage.value="24"; el.timeFrom.value=""; el.timeTo.value="";
+			el.keyword.value=""; el.sort.value="relevance"; el.perPage.value="24"; el.tagLogic.value="AND"; el.timeFrom.value=""; el.timeTo.value="";
 			el.chWrap.querySelectorAll('input').forEach(i=> i.checked=false);
 			el.inWrap.querySelectorAll('input').forEach(i=> i.checked=false);
 			el.exWrap.querySelectorAll('input').forEach(i=> i.checked=false);
@@ -440,6 +468,7 @@
 		});
 		el.sort.addEventListener('change', ()=>{ state.sort=el.sort.value; state.page=1; syncAndRender(); });
 		el.perPage.addEventListener('change', ()=>{ state.perPage=+el.perPage.value||24; state.page=1; syncAndRender(); });
+		el.tagLogic.addEventListener('change', ()=>{ state.tagLogic=el.tagLogic.value; state.page=1; syncAndRender(); });
 		el.pagination.addEventListener('click', (e)=>{ const b = e.target.closest('button[data-page]'); if(!b) return; const p = +b.getAttribute('data-page'); if(!isNaN(p)) { state.page = p; syncAndRender(); } });
 		
 		// 点击作者跳转搜索
@@ -450,6 +479,24 @@
 				if(author){
 					state.query = `author:${author}`;
 					el.keyword.value = state.query;
+					state.page = 1;
+					syncAndRender();
+					window.scrollTo({top:0, behavior:'smooth'});
+				}
+				return;
+			}
+			
+			// 点击标签添加到包含标签筛选
+			const tag = e.target.closest('.tag');
+			if(tag){
+				const tagText = tag.textContent.trim().replace(/^#\s*/, '');
+				if(tagText && !state.includeTags.has(tagText)){
+					state.includeTags.add(tagText);
+					// 更新 UI
+					el.inWrap.querySelectorAll('input').forEach(i=> {
+						if(i.value === tagText) i.checked = true;
+					});
+					setMultiLabel(el.inWrap, state.includeTags);
 					state.page = 1;
 					syncAndRender();
 					window.scrollTo({top:0, behavior:'smooth'});
@@ -536,6 +583,7 @@
 		el.keyword.value = state.query;
 		el.sort.value = state.sort;
 		el.perPage.value = String(state.perPage);
+		el.tagLogic.value = state.tagLogic;
 		// 恢复频道和标签菜单
 		el.chWrap.querySelectorAll('input').forEach(i=> i.checked = state.channels.has(i.value));
 		el.inWrap.querySelectorAll('input').forEach(i=> i.checked = state.includeTags.has(i.value));
