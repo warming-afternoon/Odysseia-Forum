@@ -10,7 +10,7 @@ from shared.safe_defer import safe_defer
 from .embed_builder import ConfigEmbedBuilder
 from .mutex_tags_handler import MutexTagsHandler
 from src.core.tagService import TagService
-from src.webpage.index_sync import manual_sync
+from src.webpage.index_sync import manual_sync, get_sync_service
 
 
 if TYPE_CHECKING:
@@ -268,6 +268,91 @@ class Configuration(commands.Cog):
             )
         else:
             logger.error("重载配置命令出错", exc_info=error)
+            await interaction.response.send_message(
+                f"❌ 命令执行失败: {error}", ephemeral=True
+            )
+
+    @config_group.command(name="缓存状态", description="查看用户昵称缓存状态")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def view_cache_status(self, interaction: discord.Interaction):
+        """查看用户昵称缓存状态"""
+        await safe_defer(interaction, ephemeral=True)
+        
+        try:
+            # 获取同步服务实例
+            sync_service = get_sync_service(self.bot, self.bot.config)
+            cache_stats = sync_service.get_cache_stats()
+            
+            # 构建状态消息
+            status_message = f"📊 **用户昵称缓存状态**\n\n"
+            status_message += f"**缓存条目数**: {cache_stats['total_cached_users']}\n"
+            
+            if cache_stats['sample_entries']:
+                status_message += f"\n**示例条目** (显示前5个):\n"
+                for (guild_id, user_id), nickname in cache_stats['sample_entries'].items():
+                    status_message += f"• 服务器 {guild_id} - 用户 {user_id}: `{nickname}`\n"
+            else:
+                status_message += "\n**缓存为空**"
+            
+            await interaction.followup.send(status_message, ephemeral=True)
+            
+        except Exception as e:
+            logger.error("查看缓存状态时出错", exc_info=e)
+            await interaction.followup.send(
+                f"❌ 获取缓存状态失败: {e}", ephemeral=True
+            )
+
+    @config_group.command(name="清除缓存", description="清除所有用户昵称缓存")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def clear_cache(self, interaction: discord.Interaction):
+        """清除所有用户昵称缓存"""
+        await safe_defer(interaction, ephemeral=True)
+        
+        try:
+            # 获取同步服务实例
+            sync_service = get_sync_service(self.bot, self.bot.config)
+            cache_stats_before = sync_service.get_cache_stats()
+            
+            # 清除缓存
+            sync_service.clear_all_cache()
+            
+            await interaction.followup.send(
+                f"✅ 已清除用户昵称缓存！\n"
+                f"**清除前条目数**: {cache_stats_before['total_cached_users']}\n"
+                f"**清除后条目数**: 0", 
+                ephemeral=True
+            )
+            
+        except Exception as e:
+            logger.error("清除缓存时出错", exc_info=e)
+            await interaction.followup.send(
+                f"❌ 清除缓存失败: {e}", ephemeral=True
+            )
+
+    @view_cache_status.error
+    async def on_view_cache_status_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "❌ 此命令需要 admin 权限。", ephemeral=True
+            )
+        else:
+            logger.error("查看缓存状态命令出错", exc_info=error)
+            await interaction.response.send_message(
+                f"❌ 命令执行失败: {error}", ephemeral=True
+            )
+
+    @clear_cache.error
+    async def on_clear_cache_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
+        if isinstance(error, app_commands.MissingPermissions):
+            await interaction.response.send_message(
+                "❌ 此命令需要 admin 权限。", ephemeral=True
+            )
+        else:
+            logger.error("清除缓存命令出错", exc_info=error)
             await interaction.response.send_message(
                 f"❌ 命令执行失败: {error}", ephemeral=True
             )

@@ -100,6 +100,7 @@ body::before{
 .markdown-content em{font-style:italic;color:#d0dae7}
 .markdown-content del{text-decoration:line-through;opacity:.7}
 .markdown-content code{background:rgba(255,255,255,.1);padding:2px 5px;border-radius:3px;font-family:Consolas,Monaco,'Courier New',monospace;font-size:13px;color:#8dd3ff}
+.discord-emoji{display:inline;height:1.25em;width:auto;vertical-align:text-bottom;margin:0 .05em;object-fit:contain}
 .markdown-content pre{background:rgba(0,0,0,.3);padding:8px;border-radius:6px;overflow-x:auto;margin:6px 0}
 .markdown-content pre code{background:none;padding:0;color:#c9d7e7}
 .markdown-content a{color:var(--brand);text-decoration:none}

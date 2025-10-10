@@ -33,25 +33,34 @@ class IndexSyncService:
         # 加载配置
         self.config = config or {}
         self.webpage_config = self.config.get("webpage", {})
+
+        self.username_cache = {}
         
     async def get_user_nickname(self, guild_id: int, user_id: int) -> str:
         """
         获取用户在服务器中的昵称
-        优先使用 get_member，如果获取不到则使用 fetch_user
+        优先使用缓存，然后尝试 get_member，如果获取不到则使用 fetch_user
         """
+        # 检查缓存
+        cache_key = (guild_id, user_id)
+        if cache_key in self.username_cache:
+            return self.username_cache[cache_key]
+        
+        nickname = None
+        
         try:
             guild = self.bot.get_guild(guild_id) or await self.bot.fetch_guild(guild_id)
             if guild:
                 member = guild.get_member(user_id)
                 if member:
-                    return member.display_name or member.name
-                    
-                # 如果 get_member 获取不到，尝试 fetch_member
-                try:
-                    member = await guild.fetch_member(user_id)
-                    return member.display_name or member.name
-                except discord.NotFound:
-                    logger.warning(f"无法找到用户 {user_id} 在服务器 {guild_id} 中")
+                    nickname = member.display_name or member.name
+                else:
+                    # 如果 get_member 获取不到，尝试 fetch_member
+                    try:
+                        member = await guild.fetch_member(user_id)
+                        nickname = member.display_name or member.name
+                    except discord.NotFound:
+                        logger.warning(f"无法找到用户 {user_id} 在服务器 {guild_id} 中")
             else:
                 logger.warning(f"无法找到服务器 {guild_id}")
                 
@@ -59,12 +68,44 @@ class IndexSyncService:
             logger.error(f"获取用户 {user_id} 昵称时出错: {e}")
             
         # 如果所有方法都失败，尝试直接 fetch 用户
-        try:
-            user = await self.bot.fetch_user(user_id)
-            return user.name
-        except Exception as e:
-            logger.error(f"无法获取用户 {user_id} 信息: {e}")
-            return f"未知用户 ({user_id})"
+        if nickname is None:
+            try:
+                user = await self.bot.fetch_user(user_id)
+                nickname = user.name
+            except Exception as e:
+                logger.error(f"无法获取用户 {user_id} 信息: {e}")
+                nickname = f"未知用户 ({user_id})"
+        
+        # 缓存结果
+        self.username_cache[cache_key] = nickname
+        return nickname
+    
+    def update_user_cache(self, guild_id: int, user_id: int, nickname: str):
+        """更新用户昵称缓存"""
+        cache_key = (guild_id, user_id)
+        self.username_cache[cache_key] = nickname
+        logger.debug(f"更新用户缓存: {user_id} -> {nickname}")
+    
+    def clear_user_cache(self, user_id: int):
+        """清除指定用户的缓存"""
+        keys_to_remove = [key for key in self.username_cache.keys() if key[1] == user_id]
+        for key in keys_to_remove:
+            del self.username_cache[key]
+        logger.debug(f"清除用户 {user_id} 的缓存")
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """获取缓存统计信息"""
+        return {
+            "total_cached_users": len(self.username_cache),
+            "cache_keys": list(self.username_cache.keys()),
+            "sample_entries": dict(list(self.username_cache.items())[:5])  # 显示前5个条目作为示例
+        }
+    
+    def clear_all_cache(self):
+        """清除所有用户缓存"""
+        count = len(self.username_cache)
+        self.username_cache.clear()
+        logger.info(f"已清除所有用户缓存，共 {count} 个条目")
     
     async def get_thread_tags(self, thread_id: int) -> List[str]:
         """获取帖子的所有标签名称"""
@@ -312,9 +353,67 @@ class IndexSyncService:
         except Exception as e:
             logger.error(f"部署到 Cloudflare Pages 时出错: {e}", exc_info=True)
     
+    async def on_message(self, message: discord.Message):
+        """监听用户发言事件，更新用户昵称缓存"""
+        if not message.guild or not message.author:
+            return
+        
+        guild_id = message.guild.id
+        user_id = message.author.id
+        cache_key = (guild_id, user_id)
+        
+        # 只有在用户已经在缓存中时才更新
+        if cache_key in self.username_cache:
+            nickname = message.author.display_name or message.author.name
+            self.update_user_cache(guild_id, user_id, nickname)
+    
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """监听成员更新事件，更新用户昵称缓存"""
+        if not after.guild:
+            return
+        
+        guild_id = after.guild.id
+        user_id = after.id
+        cache_key = (guild_id, user_id)
+        
+        # 只有在用户已经在缓存中时才更新
+        if cache_key in self.username_cache:
+            nickname = after.display_name or after.name
+            self.update_user_cache(guild_id, user_id, nickname)
+    
+    async def on_member_join(self, member: discord.Member):
+        """监听成员加入事件，更新用户昵称缓存"""
+        if not member.guild:
+            return
+        
+        guild_id = member.guild.id
+        user_id = member.id
+        cache_key = (guild_id, user_id)
+        
+        # 只有在用户已经在缓存中时才更新
+        if cache_key in self.username_cache:
+            nickname = member.display_name or member.name
+            self.update_user_cache(guild_id, user_id, nickname)
+    
+    async def on_user_update(self, before: discord.User, after: discord.User):
+        """监听用户更新事件，清除相关缓存以便重新获取"""
+        # 清除所有服务器中该用户的缓存
+        self.clear_user_cache(after.id)
+    
+    def register_events(self):
+        """注册事件监听器"""
+        self.bot.add_listener(self.on_message, "on_message")
+        self.bot.add_listener(self.on_member_update, "on_member_update")
+        self.bot.add_listener(self.on_member_join, "on_member_join")
+        self.bot.add_listener(self.on_user_update, "on_user_update")
+        logger.info("用户昵称缓存事件监听器已注册")
+
     async def start_periodic_sync(self, interval_minutes: int = 30) -> None:
         """启动定时同步任务"""
         logger.info(f"启动定时同步任务，间隔 {interval_minutes} 分钟")
+        
+        # 注册事件监听器
+        self.register_events()
         
         # wait for bot to be ready
         await self.bot.wait_until_ready()

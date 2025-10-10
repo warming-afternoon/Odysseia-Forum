@@ -88,6 +88,9 @@
 		if(!text) return "";
 		let html = escapeHtml(text);
 		
+		// Discord 自定义表情 <:emoji_name:emoji_id> 或 <a:emoji_name:emoji_id> (动画表情)
+		html = html.replace(/&lt;a?:([^:]+):(\d+)&gt;/g, '<img class="discord-emoji" src="https://cdn.discordapp.com/emojis/$2.webp" alt=":$1:" title=":$1:" loading="lazy">');
+		
 		// 代码块 ```code```
 		html = html.replace(/```([^`]+)```/g, '<pre><code>$1</code></pre>');
 		
