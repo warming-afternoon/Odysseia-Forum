@@ -29,6 +29,8 @@ class IndexSyncService:
         self.output_path = Path("webpage/index.json")
         self.webpage_dir = Path("webpage")
         self.config_js_path = self.webpage_dir / "config.js"
+
+        self.username_cache_path = Path("data/username_cache.json")
         
         # 加载配置
         self.config = config or {}
@@ -37,6 +39,14 @@ class IndexSyncService:
         self.kv_config = self.cloudflare_config.get("kv", {})
 
         self.username_cache = {}
+
+        if self.username_cache_path.exists():
+            with open(self.username_cache_path, "r", encoding="utf-8") as f:
+                self.username_cache = json.load(f)
+            logger.info(f"加载用户昵称缓存: {self.username_cache_path}")
+        else:
+            logger.info(f"用户昵称缓存不存在: {self.username_cache_path}")
+            self.username_cache = {}
         
     async def get_user_nickname(self, guild_id: int, user_id: int) -> str:
         """
@@ -201,6 +211,11 @@ class IndexSyncService:
                 # 同步完成后，更新 config.js 并上传到 Workers KV（如果启用）
                 await self.update_config_js()
                 await self.upload_to_workers_kv()
+
+                # 同步完成后，保存用户昵称缓存
+                with open(self.username_cache_path, "w", encoding="utf-8") as f:
+                    json.dump(self.username_cache, f, ensure_ascii=False, indent=2)
+                logger.info(f"成功保存用户昵称缓存: {self.username_cache_path}")
                 
         except Exception as e:
             logger.error(f"同步帖子数据时出错: {e}", exc_info=True)
