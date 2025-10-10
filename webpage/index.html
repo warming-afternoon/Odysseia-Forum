@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+	<title>Odysseia 论坛搜索</title>
+	<link rel="preconnect" href="https://fonts.googleapis.com">
+	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+	<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+	<link rel="stylesheet" href="style.css">
+	<link rel="icon" href="data:,">
+</head>
+<body>
+	<header class="site-header">
+		<div class="container header-inner">
+			<h1 class="brand">Odysseia Forum</h1>
+			<div class="searchbar">
+				<input id="keywordInput" type="search" placeholder="搜索标题、作者或内容..." autocomplete="off" title="支持高级语法：author:作者名  &quot;精确匹配&quot;  -排除词">
+				<button id="searchBtn" class="btn primary" aria-label="开始搜索">搜索</button>
+			</div>
+		</div>
+		<div class="container search-tips">
+			<small>💡 高级搜索：<code>author:作者</code> 搜索作者 · <code>"精确短语"</code> 精确匹配 · <code>-排除</code> 排除关键词</small>
+		</div>
+	</header>
+
+	<main class="container">
+		<section class="filters" id="filters">
+			<div class="filter-row">
+				<div class="filter-item">
+					<label for="channelDropdown">频道</label>
+					<div id="channelDropdown" class="multi">
+						<button type="button" class="multi-toggle" aria-expanded="false"><span class="multi-label">全部频道</span></button>
+						<div class="multi-menu" role="listbox"></div>
+					</div>
+				</div>
+				<div class="filter-item">
+					<label for="includeDropdown">包含标签</label>
+					<div id="includeDropdown" class="multi">
+						<button type="button" class="multi-toggle" aria-expanded="false"><span class="multi-label">不限</span></button>
+						<div class="multi-menu" role="listbox"></div>
+					</div>
+				</div>
+				<div class="filter-item">
+					<label for="excludeDropdown">排除标签</label>
+					<div id="excludeDropdown" class="multi">
+						<button type="button" class="multi-toggle" aria-expanded="false"><span class="multi-label">不限</span></button>
+						<div class="multi-menu" role="listbox"></div>
+					</div>
+				</div>
+			</div>
+			<div class="filter-row">
+				<div class="filter-item">
+					<label for="timeFrom">起始时间</label>
+					<input id="timeFrom" type="date">
+				</div>
+				<div class="filter-item">
+					<label for="timeTo">结束时间</label>
+					<input id="timeTo" type="date">
+				</div>
+				<div class="filter-item">
+					<label for="sortSelect">排序</label>
+					<select id="sortSelect">
+						<option value="relevance">相关度</option>
+						<option value="last_active_desc">最近活跃 ↓</option>
+						<option value="created_desc">最新发布 ↓</option>
+						<option value="reply_desc">回复数 ↓</option>
+						<option value="reaction_desc">反应数 ↓</option>
+					</select>
+				</div>
+				<div class="filter-actions">
+					<button id="resetBtn" class="btn subtle">重置</button>
+					<button id="applyBtn" class="btn">应用筛选</button>
+				</div>
+			</div>
+		</section>
+
+		<section class="stats" id="stats">
+			<div id="resultCount">共 0 条结果</div>
+			<div class="view-controls">
+				<label for="perPage">每页</label>
+				<select id="perPage">
+					<option value="12">12</option>
+					<option value="24" selected>24</option>
+					<option value="48">48</option>
+				</select>
+			</div>
+		</section>
+
+		<section id="results" class="grid"></section>
+
+		<nav id="pagination" class="pagination" aria-label="分页"></nav>
+	</main>
+
+	<footer class="site-footer">
+		<div class="container">
+			<p>静态索引于 <span id="buildTime">——</span> · 本地搜索，无需网络请求</p>
+		</div>
+	</footer>
+
+	<script src="config.js"></script>
+	<script src="script.js" defer></script>
+</body>
+</html>

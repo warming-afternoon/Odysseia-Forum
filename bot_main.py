@@ -28,6 +28,7 @@ from src.preferences.preferences_service import PreferencesService
 from src.auditor.cog import Auditor
 from src.config.cog import Configuration
 from src.shared.api_scheduler import APIScheduler
+from src.webpage.index_sync import start_index_sync
 
 logger = logging.getLogger(__name__)
 
@@ -140,6 +141,9 @@ class MyBot(commands.Bot):
 
         # 3. 注册全局事件监听器
         self.add_listener(self.on_index_updated_global, "on_index_updated")
+        
+        # 4. 启动索引同步服务
+        asyncio.create_task(start_index_sync(self, config=self.config, interval_minutes=30))
 
         # --- 同步应用程序命令 ---
         try:

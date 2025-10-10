@@ -12,5 +12,30 @@
     "_comment_1": "上面的api_scheduler_concurrency是全局的api并发调用限制数",
     "indexer_concurrency": 10,
     "_comment_2": "上面的indexer_concurrency是索引模块的api并发调用限制数"
+  },
+
+  "webpage": {
+    "guild_id": "your_guild_id_here",
+    "_comment_guild_id": "上面的guild_id是主服务器ID",
+    
+    "channels": {
+      "channel_id_1": "频道名称1",
+      "channel_id_2": "频道名称2"
+    },
+    "_comment_channels": "上面的channels是要展示的频道列表，格式为 频道ID: 频道名称",
+    
+    "cloudflare": {
+      "enabled": false,
+      "_comment_enabled": "是否启用自动部署到Cloudflare Pages",
+      
+      "api_token": "your_cloudflare_api_token",
+      "_comment_api_token": "Cloudflare API Token，需要有Pages编辑权限",
+      
+      "account_id": "your_cloudflare_account_id",
+      "_comment_account_id": "Cloudflare账户ID",
+      
+      "project_name": "your_project_name",
+      "_comment_project_name": "Cloudflare Pages项目名称"
+    }
   }
 }
