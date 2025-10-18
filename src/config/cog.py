@@ -5,6 +5,8 @@ from discord.ext import commands
 from typing import TYPE_CHECKING, Optional, cast
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from shared.safe_defer import safe_defer
+
 from .mutex_tags_handler import MutexTagsHandler
 from .general_config_handler import GeneralConfigHandler
 from core.tagService import TagService
@@ -64,7 +66,7 @@ class Configuration(commands.Cog):
 
     config_group = app_commands.Group(name="配置", description="管理机器人各项配置")
 
-    @config_group.command(name="bot设置", description="打开BOT配置面板")
+    @config_group.command(name="全局设置", description="打开BOT配置面板")
     @is_admin_or_bot_admin()
     async def general_settings(self, interaction: discord.Interaction):
         """唤出私密的BOT通用配置面板"""
@@ -99,12 +101,11 @@ class Configuration(commands.Cog):
                 "❌ 此命令需要 admin 权限", ephemeral=True
             )
         else:
-            logger.error("清除缓存命令出错", exc_info=error)
+            logger.error("配置互斥标签命令出错", exc_info=error)
             await interaction.response.send_message(
                 f"❌ 命令执行失败: {error}", ephemeral=True
             )
-            
-            
+
     @config_group.command(name="重载配置", description="重新加载配置文件并重新导出部署网页")
     @app_commands.checks.has_permissions(administrator=True)
     async def reload_config(self, interaction: discord.Interaction):
@@ -235,3 +236,4 @@ class Configuration(commands.Cog):
             await interaction.response.send_message(
                 f"❌ 命令执行失败: {error}", ephemeral=True
             )
+

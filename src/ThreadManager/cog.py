@@ -65,11 +65,11 @@ class ThreadManager(commands.Cog):
 
     async def _notify_user_of_mutex_removal(
         self, thread: discord.Thread, conflicts: List[Tuple[Any, set]]
-    ):
-        """通知用户他们的帖子因为互斥规则被修改了。"""
+    ) -> bool:
+        """通知用户他们的帖子因为互斥规则被修改了。如果发送了公开通知，则返回 True。"""
         if not thread.owner:
             logger.warning(f"无法获取帖子 {thread.id} 的作者，无法发送通知。")
-            return
+            return False
 
         author = thread.owner
 
@@ -104,29 +104,33 @@ class ThreadManager(commands.Cog):
             text="系统自动保留了冲突组中优先级最高的标签\n请右键点击左侧频道列表中的帖子名，对标签进行修改\n选择其中一个标签进行保留"
         )
 
-        async def send_dm():
-            try:
-                await author.send(embed=embed)
-                logger.info(f"已向用户 {author.id} 发送互斥标签移除私信通知。")
-            except discord.Forbidden:
-                logger.warning(
-                    f"无法向用户 {author.id} 发送私信，将在原帖中发送公开通知。"
-                )
-                # 发送备用公开通知
-                await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: thread.send(
-                        content=f":crying_cat_face: \n{author.mention}，您的帖子标签将被修改，详情请见下方解释",
-                        embed=embed,
-                    ),
-                    priority=3,
-                )
-            except Exception as e:
-                logger.error(f"向用户 {author.id} 发送私信时发生未知错误。", exc_info=e)
-
-        await self.bot.api_scheduler.submit(coro_factory=send_dm, priority=3)
+        try:
+            # 尝试通过调度器发送私信
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: author.send(embed=embed), priority=5
+            )
+            logger.debug(f"已向用户 {author.id} 发送互斥标签移除私信通知")
+            return False
+        except discord.Forbidden:
+            logger.warning(f"无法向用户 {author.id} 发送私信，将在原帖中发送公开通知")
+            # 发送备用公开通知
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: thread.send(
+                    content=f":crying_cat_face: \n{author.mention}，您的帖子标签将被修改，详情请见下方解释",
+                    embed=embed,
+                ),
+                priority=5,
+            )
+            return True
+        except Exception as e:
+            logger.error(f"向用户 {author.id} 发送私信时发生未知错误。", exc_info=e)
+            return False
 
     async def _notify_management_of_mutex_conflict(
-        self, thread: discord.Thread, conflicts: List[Tuple[Any, set]]
+        self,
+        thread: discord.Thread,
+        conflicts: List[Tuple[Any, set]],
+        user_notified_publicly: bool,
     ):
         """在帖子中通知管理组发生了互斥标签冲突。"""
         management_role_id = self.bot.config.get("management_role_id")
@@ -134,30 +138,39 @@ class ThreadManager(commands.Cog):
             logger.warning("未在 config.json 中配置 management_role_id，无法发送管理通知。")
             return
 
-        content = f"🛡️ <@&{management_role_id}>"
-        
-        embed = discord.Embed(
-            title="互斥标签冲突 - 管理通知",
-            description=f"帖子 [{thread.name}]({thread.jump_url}) 存在互斥标签",
-            color=discord.Color.greyple(),
-        )
+        content = f"<@&{management_role_id}>"
+        embed = None
 
-        for i, (group, removed_tags_for_group) in enumerate(conflicts):
-            sorted_rules = sorted(group.rules, key=lambda r: r.priority)
-            highest_priority_tag = sorted_rules[0].tag_name
-            
-            value_str = (
-                f"**保留标签**: {highest_priority_tag}\n"
-                f"**移除标签**: {', '.join(f' {tag}' for tag in removed_tags_for_group)}"
+        # 仅当没有在帖子内公开通知用户时，才创建 embed
+        if not user_notified_publicly:
+            embed = discord.Embed(
+                title="检测到互斥标签",
+                description=f"帖子 [{thread.name}]({thread.jump_url}) 存在互斥标签",
+                color=discord.Color.greyple(),
             )
-            embed.add_field(
-                name=f"冲突组 {i + 1}",
-                value=value_str,
-                inline=False,
-            )
+
+            for i, (group, removed_tags_for_group) in enumerate(conflicts):
+                sorted_rules = sorted(group.rules, key=lambda r: r.priority)
+                group_tags_list = [
+                    f"优先级 {j + 1} : {rule.tag_name}"
+                    for j, rule in enumerate(sorted_rules)
+                ]
+                group_tags_str = "\n".join(group_tags_list)
+
+                embed.add_field(
+                    name=f"冲突组 {i + 1}",
+                    value=f"**规则**:\n{group_tags_str}\n**被移除的标签**: {', '.join(removed_tags_for_group)}",
+                    inline=False,
+                )
+
+        async def send_notification():
+            if embed:
+                await thread.send(content=content, embed=embed)
+            else:
+                await thread.send(content=content)
 
         await self.bot.api_scheduler.submit(
-            coro_factory=lambda: thread.send(content=content, embed=embed),
+            coro_factory=send_notification,
             priority=3,
         )
         logger.debug(f"已在帖子 {thread.id} 中发送互斥标签管理通知。")
@@ -205,12 +218,16 @@ class ThreadManager(commands.Cog):
         if tags_to_remove_ids:
             # 发送通知 (一次性发送所有冲突)
             if all_conflicts:
-                # 通知发帖人 (私信)
-                await self._notify_user_of_mutex_removal(thread, all_conflicts)
-                
+                # 通知发帖人 (私信)，并检查是否在帖子内发送了公开通知
+                user_notified_publicly = await self._notify_user_of_mutex_removal(
+                    thread, all_conflicts
+                )
+
                 # 如果配置开启，通知管理组 (在帖子内)
                 if should_notify_management:
-                    await self._notify_management_of_mutex_conflict(thread, all_conflicts)
+                    await self._notify_management_of_mutex_conflict(
+                        thread, all_conflicts, user_notified_publicly
+                    )
 
             final_tags = [
                 tag for tag in applied_tags if tag.id not in tags_to_remove_ids

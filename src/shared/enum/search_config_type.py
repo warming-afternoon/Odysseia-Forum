@@ -4,7 +4,7 @@ from enum import Enum, IntEnum
 class SearchConfigDefaults(float, Enum):
     """搜索配置默认值"""
     UCB1_EXPLORATION_FACTOR = 1.414  # sqrt(2)
-    STRENGTH_WEIGHT = 10.0
+    STRENGTH_WEIGHT = 5.0
 
 
 class SearchConfigType(IntEnum):

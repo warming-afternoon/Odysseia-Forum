@@ -54,7 +54,7 @@ class IndexSyncService:
         优先使用缓存，然后尝试 get_member，如果获取不到则使用 fetch_user
         """
         # 检查缓存
-        cache_key = (guild_id, user_id)
+        cache_key = f"{guild_id}_{user_id}"
         if cache_key in self.username_cache:
             return self.username_cache[cache_key]
         
@@ -94,13 +94,16 @@ class IndexSyncService:
     
     def update_user_cache(self, guild_id: int, user_id: int, nickname: str):
         """更新用户昵称缓存"""
-        cache_key = (guild_id, user_id)
+        cache_key = f"{guild_id}_{user_id}"
         self.username_cache[cache_key] = nickname
         logger.debug(f"更新用户缓存: {user_id} -> {nickname}")
     
     def clear_user_cache(self, user_id: int):
         """清除指定用户的缓存"""
-        keys_to_remove = [key for key in self.username_cache.keys() if key[1] == user_id]
+        keys_to_remove = [
+            key for key in self.username_cache.keys()
+            if key.split('_')[1] == str(user_id)
+        ]
         for key in keys_to_remove:
             del self.username_cache[key]
         logger.debug(f"清除用户 {user_id} 的缓存")
@@ -110,7 +113,10 @@ class IndexSyncService:
         return {
             "total_cached_users": len(self.username_cache),
             "cache_keys": list(self.username_cache.keys()),
-            "sample_entries": dict(list(self.username_cache.items())[:5])  # 显示前5个条目作为示例
+            "sample_entries": {
+                (int(k.split('_')[0]), int(k.split('_')[1])): v
+                for k, v in list(self.username_cache.items())[:5]
+            }
         }
     
     def clear_all_cache(self):
@@ -365,7 +371,7 @@ class IndexSyncService:
         
         guild_id = message.guild.id
         user_id = message.author.id
-        cache_key = (guild_id, user_id)
+        cache_key = f"{guild_id}_{user_id}"
         
         # 只有在用户已经在缓存中时才更新
         if cache_key in self.username_cache:
@@ -379,7 +385,7 @@ class IndexSyncService:
         
         guild_id = after.guild.id
         user_id = after.id
-        cache_key = (guild_id, user_id)
+        cache_key = f"{guild_id}_{user_id}"
         
         # 只有在用户已经在缓存中时才更新
         if cache_key in self.username_cache:
@@ -393,7 +399,7 @@ class IndexSyncService:
         
         guild_id = member.guild.id
         user_id = member.id
-        cache_key = (guild_id, user_id)
+        cache_key = f"{guild_id}_{user_id}"
         
         # 只有在用户已经在缓存中时才更新
         if cache_key in self.username_cache:

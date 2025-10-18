@@ -26,7 +26,7 @@ def parse_time_string(time_str: Optional[str]) -> Optional[datetime]:
     time_str = time_str.strip()
     
     # 尝试解析绝对时间 (YYYY-MM-DD)
-    absolute_pattern = r'^(\d{4})-(\d{1,2})-(\d{1,2})$'
+    absolute_pattern = r'^(\d{4})[\s-/—．.]+(\d{1,2})[\s-/—．.]+(\d{1,2})$'
     match = re.match(absolute_pattern, time_str)
     if match:
         try:
