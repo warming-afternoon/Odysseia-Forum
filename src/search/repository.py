@@ -97,7 +97,6 @@ class SearchRepository:
 
             # --- 步骤 1: 构建基础过滤器列表 (除了反选关键词) ---
             filters = []
-            # -- 标准字段过滤 --
             # 只搜索 not_found_count == 0 的帖子，避免显示被软删除的帖子
             filters.append(Thread.not_found_count == 0)
             if query.channel_ids:
@@ -106,12 +105,8 @@ class SearchRepository:
                 filters.append(Thread.author_id.in_(query.include_authors))  # type: ignore
             if query.exclude_authors:
                 filters.append(Thread.author_id.notin_(query.exclude_authors))  # type: ignore
-            if query.after_ts:
-                filters.append(Thread.created_at >= query.after_ts)
-            if query.before_ts:
-                filters.append(Thread.created_at <= query.before_ts)
 
-            # --- 自定义排序算法的范围过滤---
+            # --- 范围过滤---
             if query.reaction_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
                 self._apply_range_filter(filters, Thread.reaction_count, query.reaction_count_range)
             if query.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
@@ -122,7 +117,7 @@ class SearchRepository:
             if created_before_dt:
                 filters.append(Thread.created_at <= created_before_dt)
 
-            # 对可能为 None 的 last_active_at 进行安全处理
+            # 对可能为 None (虽然不太可能，我说)的 last_active_at 进行安全处理
             if active_after_dt or active_before_dt:
                 conditions = [Thread.last_active_at != None]
                 if active_after_dt:

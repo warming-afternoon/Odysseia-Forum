@@ -18,6 +18,8 @@ dependencies = [
     "sqlitefts",
     "rjieba",
     "alembic",
+    "fastapi",
+    "uvicorn[standard]",
     "uvloop; platform_system != 'Windows'"
 ]
 

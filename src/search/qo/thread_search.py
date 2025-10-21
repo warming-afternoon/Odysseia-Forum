@@ -16,8 +16,6 @@ class ThreadSearchQuery:
     exclude_keyword_exemption_markers: Optional[List[str]] = None
     include_authors: Optional[List[int]] = None
     exclude_authors: Optional[List[int]] = None
-    after_ts: Optional[datetime.datetime] = None
-    before_ts: Optional[datetime.datetime] = None
     tag_logic: str = "and"
     sort_method: str = "comprehensive"
     sort_order: str = "desc"

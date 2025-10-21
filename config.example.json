@@ -15,11 +15,22 @@
   },
 
   "bot_admin_user_ids": [
+      954037609313747036
   ],
   "_comment_bot_admin": "上面的 bot_admin_user_ids 列表中的用户将拥有BOT管理员权限",
 
-  "management_role_id": 1403352988944175205,
+  "management_role_id": 1337450755791261766,
   "_comment_management_role": "管理组身份组ID。用于在特定事件（如互斥标签冲突）发生时接收通知。",
+
+
+  "api": {
+    "host": "0.0.0.0",
+    "port": 10810,
+    "secret_key": "在这里填入一个保密的随机字符串密钥",
+    "enable_docs": true,
+    "_comment_api": "API 服务配置，用于启动 FastAPI 服务器",
+    "_comment_enable_docs": "是否启用 API 文档 (docs 和 redoc)，生产环境建议设置为 false"
+  },
 
   "webpage": {
     "client_id": "your_client_id_here",
