@@ -15,20 +15,27 @@ import discord
 import logging
 from discord.ext import commands
 import asyncio
+import uvicorn
 
 from shared.database import AsyncSessionFactory, init_db, close_db
 from src.ThreadManager.cog import ThreadManager
 from src.core.tagService import TagService
 from src.core.cache_service import CacheService
 from src.core.sync_service import SyncService
+from src.core.impression_cache_service import ImpressionCacheService
+from src.core.author_service import AuthorService
 from src.indexer.cog import Indexer
 from src.search.cog import Search
 from src.preferences.cog import Preferences
 from src.preferences.preferences_service import PreferencesService
 from src.auditor.cog import Auditor
 from src.config.cog import Configuration
+from src.config.repository import ConfigRepository
 from src.shared.api_scheduler import APIScheduler
 from src.webpage.index_sync import start_index_sync
+from src.api.v1.routers import preferences as preferences_api, search as search_api
+from src.api.main import app as fastapi_app
+from src.api.v1.dependencies.security import initialize_api_security
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +53,8 @@ class MyBot(commands.Bot):
         self.tag_service: TagService
         self.cache_service: CacheService
         self.sync_service: SyncService
+        self.impression_cache_service: ImpressionCacheService
+        self.author_service: AuthorService
 
         # 从配置初始化API调度器
         concurrency = self.config.get("performance", {}).get(
@@ -98,10 +107,23 @@ class MyBot(commands.Bot):
         self.api_scheduler.start()
         await init_db()
 
+        # 确保搜索配置存在
+        async with AsyncSessionFactory() as session:
+            config_repo = ConfigRepository(session)
+            await config_repo.initialize_search_configs()
+
         # 1. 初始化核心服务
         self.tag_service = TagService(AsyncSessionFactory)
         self.cache_service = CacheService(self, AsyncSessionFactory)
-        self.sync_service = SyncService(bot=self, session_factory=AsyncSessionFactory)
+        self.author_service = AuthorService(bot=self, session_factory=AsyncSessionFactory)
+        self.sync_service = SyncService(
+            bot=self,
+            session_factory=AsyncSessionFactory,
+            author_service=self.author_service
+        )
+        self.impression_cache_service = ImpressionCacheService(AsyncSessionFactory)
+        self.impression_cache_service.start()
+
 
         asyncio.create_task(self.tag_service.build_cache())
         asyncio.create_task(self.cache_service.build_or_refresh_cache())
@@ -137,6 +159,7 @@ class MyBot(commands.Bot):
                 tag_service=self.tag_service,
                 cache_service=self.cache_service,
                 preferences_service=preferences_service,
+                impression_cache_service=self.impression_cache_service,
             ),
             Preferences(
                 bot=self,
@@ -177,6 +200,7 @@ class MyBot(commands.Bot):
 
     async def close(self):
         """关闭机器人时，一并关闭调度器和数据库连接。"""
+        await self.impression_cache_service.stop()
         await self.api_scheduler.stop()
         await close_db()
         await super().close()
@@ -206,8 +230,44 @@ async def main():
         else:
             logger.info("机器人已登录，但无法获取机器人信息。")
 
+    original_setup_hook = bot.setup_hook
+    
+    # 在 setup_hook 完成后注入服务实例到 API 路由
+    async def enhanced_setup_hook():
+        await original_setup_hook()
+        
+        # 从已加载的 Cogs 中获取服务实例
+        preferences_cog = bot.get_cog("Preferences")
+        search_cog = bot.get_cog("Search")
+        
+        if preferences_cog:
+            preferences_api.preferences_cog_instance = preferences_cog
+        if search_cog:
+            search_api.search_cog_instance = search_cog
+        search_api.async_session_factory = AsyncSessionFactory
+        
+        logger.info("API 路由服务注入完成")
+
+    bot.setup_hook = enhanced_setup_hook
+
+    # 初始化 API 安全配置
+    initialize_api_security()
+
+    # 配置并并行运行 Bot 和 API 服务器
+    api_config = config.get("api", {})
+    uvicorn_config = uvicorn.Config(
+        app=fastapi_app,
+        host=api_config.get("host", "0.0.0.0"),
+        port=api_config.get("port", 10810),
+        log_level="info"
+    )
+    server = uvicorn.Server(uvicorn_config)
+
     async with bot:
-        await bot.start(config["token"])
+        await asyncio.gather(
+            bot.start(config["token"]),
+            server.serve()
+        )
 
 
 if __name__ == "__main__":

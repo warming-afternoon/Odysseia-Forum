@@ -17,13 +17,17 @@ dependencies = [
     "aiosqlite>=0.19.0",
     "sqlitefts",
     "rjieba",
+    "alembic",
+    "fastapi",
+    "uvicorn[standard]",
     "uvloop; platform_system != 'Windows'"
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "pytest-asyncio"
+    "pytest-asyncio",
+    "sqlite-utils"
 ]
 
 [tool.setuptools.packages.find]

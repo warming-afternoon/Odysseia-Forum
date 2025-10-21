@@ -9,7 +9,7 @@ if TYPE_CHECKING:
 class TagVote(SQLModel, table=True):
     """标签投票模型，记录用户对特定帖子中特定标签的评价。"""
 
-    __tablename__ = "tag_vote"
+    __tablename__ = "tag_vote"   # type: ignore
     __table_args__ = (
         UniqueConstraint(
             "user_id", "tag_id", "thread_id", name="uq_user_tag_thread_vote"

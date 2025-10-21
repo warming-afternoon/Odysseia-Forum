@@ -4,7 +4,7 @@ from collections import defaultdict
 from datetime import datetime
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from src.core.sync_service import SyncService
+from core.sync_service import SyncService
 
 from ..repository import ThreadManagerRepository
 from ..dto import UpdateData

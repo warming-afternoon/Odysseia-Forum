@@ -10,3 +10,9 @@ class DefaultPreferences(Enum):
 
     # 每页结果数量
     RESULTS_PER_PAGE = 5
+
+    # 默认排序算法
+    SORT_METHOD = "comprehensive"
+
+    # 自定义搜索中的默认数值范围
+    DEFAULT_NUMERIC_RANGE = "[0, 10000000)"

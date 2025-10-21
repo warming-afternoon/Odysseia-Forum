@@ -1,17 +1,20 @@
 import logging
 import re
 from typing import Sequence
+import rjieba
 from sqlmodel import select, func, and_, case, cast, Float
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, joinedload
 
 from shared.database import thread_fts_table
 from shared.models.thread_tag_link import ThreadTagLink
 from shared.models.thread import Thread
 from shared.models.tag import Tag
 from search.qo.thread_search import ThreadSearchQuery
-from shared.ranking_config import RankingConfig
 from core.tagService import TagService
+from shared.range_parser import parse_range_string
+from shared.enum.default_preferences import DefaultPreferences
+from shared.time_parser import parse_time_string
 
 
 class SearchRepository:
@@ -21,83 +24,65 @@ class SearchRepository:
         self.session = session
         self.tag_service = tag_service
 
-    def _apply_ranking(self, statement, resolved_include_tag_ids):
-        if resolved_include_tag_ids:
-            statement = statement.outerjoin(
-                ThreadTagLink,
-                and_(
-                    Thread.id == ThreadTagLink.thread_id,
-                    ThreadTagLink.tag_id.in_(resolved_include_tag_ids),  # type: ignore
-                ),
-            )
-            upvotes_expr = func.coalesce(cast(ThreadTagLink.upvotes, Float), 0.0)
-            downvotes_expr = func.coalesce(cast(ThreadTagLink.downvotes, Float), 0.0)
-            total_votes = upvotes_expr + downvotes_expr
-            z = RankingConfig.WILSON_CONFIDENCE_LEVEL
-            z_squared = z * z
-            p_hat = case((total_votes > 0, upvotes_expr / total_votes), else_=0.0)
-            wilson_score_expr = case(
-                (
-                    total_votes > 0,
-                    (
-                        p_hat
-                        + z_squared / (2 * total_votes)
-                        - z
-                        * func.sqrt(
-                            (p_hat * (1 - p_hat) + z_squared / (4 * total_votes))
-                            / total_votes
-                        )
-                    )
-                    / (1 + z_squared / total_votes),
-                ),
-                else_=0.0,
-            )
-            tag_weight = case(
-                (total_votes > 0, wilson_score_expr),
-                else_=RankingConfig.DEFAULT_TAG_SCORE,
-            )
-        else:
-            tag_weight = cast(RankingConfig.DEFAULT_TAG_SCORE, Float)
-            total_votes = cast(0, Float)
-        time_diff_days = func.julianday("now") - func.julianday(Thread.last_active_at)
-        time_weight = func.exp(-RankingConfig.TIME_DECAY_RATE * time_diff_days)
-        reaction_weight = func.min(
-            RankingConfig.MAX_REACTION_SCORE,
-            func.log(cast(Thread.reaction_count, Float) + 1)
-            / func.log(RankingConfig.REACTION_LOG_BASE + 1),
-        ).label("reaction_weight")
-        base_score = (
-            time_weight * RankingConfig.TIME_WEIGHT_FACTOR
-            + tag_weight * RankingConfig.TAG_WEIGHT_FACTOR
-            + reaction_weight * RankingConfig.REACTION_WEIGHT_FACTOR
-        ).label("base_score")
-        penalty_factor = case(
-            (
-                and_(
-                    tag_weight < RankingConfig.SEVERE_PENALTY_THRESHOLD,
-                    total_votes >= RankingConfig.SEVERE_PENALTY_MIN_VOTES,
-                ),
-                RankingConfig.SEVERE_PENALTY_FACTOR,
-            ),
-            (
-                and_(
-                    tag_weight < RankingConfig.MILD_PENALTY_THRESHOLD,
-                    total_votes >= RankingConfig.MILD_PENALTY_MIN_VOTES,
-                ),
-                RankingConfig.MILD_PENALTY_FACTOR,
-            ),
-            else_=1.0,
-        ).label("penalty_factor")
-        final_score = (base_score * penalty_factor).label("final_score")
+    def _apply_range_filter(self, filters, column, range_str):
+        """解析范围字符串并应用为SQLAlchemy过滤器"""
+        min_val, max_val, min_op, max_op = parse_range_string(range_str)
+        if min_val is not None and min_op is not None:
+            if min_op == ">=":
+                filters.append(column >= min_val)
+            else:
+                filters.append(column > min_val)
+
+        if max_val is not None and max_op is not None:
+            if max_op == "<=":
+                filters.append(column <= max_val)
+            else:
+                filters.append(column < max_val)
+
+    def _apply_ucb1_ranking(self, statement, total_display_count: int, exploration_factor: float, strength_weight: float):
+        """
+        应用 UCB1 算法对帖子进行排序。
+        Score = W * (x / n) + C * sqrt(ln(N) / n)
+        """
+        W = strength_weight
+        C = exploration_factor
+        N = float(max(1, total_display_count))
+        
+        # reaction_count as x
+        # display_count as n
+        x = cast(Thread.reaction_count, Float)
+        n = case(
+            (Thread.display_count > 0, cast(Thread.display_count, Float)),
+            else_=1.0 # 避免除零，并给新帖子最大探索加成
+        )
+        
+        exploitation_term = W * (x / n)
+        # N/n 可能会非常大，取对数避免溢出
+        exploration_term = C * func.sqrt(func.log(N) / n)
+        
+        final_score = (exploitation_term + exploration_term).label("final_score")
+        
         return statement, final_score
 
     async def search_threads_with_count(
-        self, query: ThreadSearchQuery, offset: int, limit: int
+        self, query: ThreadSearchQuery, offset: int, limit: int,
+        total_display_count: int, exploration_factor: float, strength_weight: float
     ) -> tuple[Sequence[Thread], int]:
         """
         根据搜索条件搜索帖子并分页
         """
         try:
+            # 解析时间字符串
+            try:
+                created_after_dt = parse_time_string(query.created_after)
+                created_before_dt = parse_time_string(query.created_before)
+                active_after_dt = parse_time_string(query.active_after)
+                active_before_dt = parse_time_string(query.active_before)
+            except ValueError as e:
+                # 理论上不应该发生，因为在 Modal 中已经验证过
+                logging.warning(f"时间字符串解析失败: {e}")
+                raise
+
             # --- 步骤 0: 解析标签 ---
             resolved_include_tag_ids = [
                 id
@@ -112,20 +97,39 @@ class SearchRepository:
 
             # --- 步骤 1: 构建基础过滤器列表 (除了反选关键词) ---
             filters = []
-            # -- 标准字段过滤 --
+            # 只搜索 not_found_count == 0 的帖子，避免显示被软删除的帖子
+            filters.append(Thread.not_found_count == 0)
             if query.channel_ids:
                 filters.append(Thread.channel_id.in_(query.channel_ids))  # type: ignore
             if query.include_authors:
                 filters.append(Thread.author_id.in_(query.include_authors))  # type: ignore
             if query.exclude_authors:
                 filters.append(Thread.author_id.notin_(query.exclude_authors))  # type: ignore
-            if query.after_ts:
-                filters.append(Thread.created_at >= query.after_ts)
-            if query.before_ts:
-                filters.append(Thread.created_at <= query.before_ts)
+
+            # --- 范围过滤---
+            if query.reaction_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
+                self._apply_range_filter(filters, Thread.reaction_count, query.reaction_count_range)
+            if query.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
+                self._apply_range_filter(filters, Thread.reply_count, query.reply_count_range)
+
+            if created_after_dt:
+                filters.append(Thread.created_at >= created_after_dt)
+            if created_before_dt:
+                filters.append(Thread.created_at <= created_before_dt)
+
+            # 对可能为 None (虽然不太可能，我说)的 last_active_at 进行安全处理
+            if active_after_dt or active_before_dt:
+                conditions = [Thread.last_active_at != None]
+                if active_after_dt:
+                    conditions.append(Thread.last_active_at >= active_after_dt)  # type: ignore
+                if active_before_dt:
+                    conditions.append(Thread.last_active_at <= active_before_dt)  # type: ignore
+                filters.append(and_(*conditions))
+
             # -- 标签过滤 --
             if resolved_include_tag_ids:
                 if query.tag_logic == "and":
+                    # TODO : 考虑精简
                     for tag_name in query.include_tags:
                         ids_for_name = self.tag_service.get_ids_by_name(tag_name)
                         if ids_for_name:
@@ -152,20 +156,35 @@ class SearchRepository:
 
                 all_exclude_parts = []
                 for keyword in exclude_keywords_list:
+                    # 使用正则表达式分词，并处理前缀
+                    tokens = [tok.strip() for tok in rjieba.cut(keyword) if tok.strip()]
+                    if not tokens:
+                        continue
+
+                    # 构建匹配部分
+                    match_parts = [f'"{tok}"' for tok in tokens[:-1]]
+                    match_parts.append(f'"{tokens[-1]}"*') # 最后一个词元加前缀
+                    match_expr = " AND ".join(match_parts)
+
+
                     # 只有在豁免标记列表非空时才构建豁免逻辑
                     if exemption_markers:
+                        # 只用关键词的第一个分词来检查豁免
+                        # 以避免 NEAR 操作符和前缀（*）的兼容性问题
+                        first_token = tokens[0]
                         exemption_clauses = [
-                            f'NEAR("{keyword}" "{marker}", 8)'
+                            f'NEAR("{first_token}" "{marker}", 4)' # 也可以适当减小距离
                             for marker in exemption_markers
                         ]
                         exemption_match_str = f"({' OR '.join(exemption_clauses)})"
+                        
                         # 构建带有 NOT 的 FTS 表达式
                         all_exclude_parts.append(
-                            f'"{keyword}" NOT {exemption_match_str}'
+                            f'({match_expr}) NOT {exemption_match_str}'
                         )
                     else:
                         # 如果没有豁免标记，直接排除关键词
-                        all_exclude_parts.append(f'"{keyword}"')
+                        all_exclude_parts.append(f'({match_expr})')
 
                 if all_exclude_parts:
                     final_exclude_expr = " OR ".join(all_exclude_parts)
@@ -193,7 +212,7 @@ class SearchRepository:
                 ]
                 for group in and_groups:
                     or_keywords = [
-                        f'"{kw.strip()}"' for kw in group.split("/") if kw.strip()
+                        f'{kw.strip()}*' for kw in group.split("/") if kw.strip()
                     ]
                     if or_keywords:
                         filters.append(
@@ -215,12 +234,19 @@ class SearchRepository:
                 return [], 0
 
             # --- 步骤 5: 获取分页数据和排序 ---
-            final_select_stmt = select(Thread).where(Thread.id.in_(base_stmt))  # type: ignore
+            final_select_stmt = select(Thread).where(Thread.id.in_(base_stmt)).options(  # type: ignore
+                selectinload(Thread.tags),  # type: ignore
+                joinedload(Thread.author)   # type: ignore
+            )
 
             order_by = None
-            if query.sort_method == "comprehensive":
-                final_select_stmt, final_score_expr = self._apply_ranking(
-                    final_select_stmt, resolved_include_tag_ids
+
+            # 如果是自定义搜索，则使用其基础排序算法，否则使用主排序算法
+            effective_sort_method = query.custom_base_sort if query.sort_method == "custom" else query.sort_method
+
+            if effective_sort_method == "comprehensive":
+                final_select_stmt, final_score_expr = self._apply_ucb1_ranking(
+                    final_select_stmt, total_display_count, exploration_factor, strength_weight
                 )
                 order_by = (
                     final_score_expr.desc()
@@ -229,8 +255,8 @@ class SearchRepository:
                 )
             else:
                 sort_col_name = (
-                    query.sort_method
-                    if hasattr(Thread, query.sort_method)
+                    effective_sort_method
+                    if hasattr(Thread, effective_sort_method)
                     else "last_active_at"
                 )
                 sort_col = getattr(Thread, sort_col_name)
@@ -242,7 +268,7 @@ class SearchRepository:
                 final_select_stmt = final_select_stmt.order_by(order_by)
 
             final_select_stmt = (
-                final_select_stmt.options(selectinload(Thread.tags))  # type: ignore
+                final_select_stmt
                 .offset(offset)
                 .limit(limit)
             )

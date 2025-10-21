@@ -187,3 +187,4 @@ config.json
 *.db
 data/
 temp/
+webpage/index.json

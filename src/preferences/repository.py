@@ -3,7 +3,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.models.user_search_preferences import UserSearchPreferences
-from src.search.dto.user_search_preferences import UserSearchPreferencesDTO
+from search.dto.user_search_preferences import UserSearchPreferencesDTO
 from core.tagService import TagService
 
 logger = logging.getLogger(__name__)

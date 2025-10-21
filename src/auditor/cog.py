@@ -6,9 +6,9 @@ from typing import List
 from discord.ext import commands, tasks
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from src.auditor.repository import AuditorRepository
-from src.shared.api_scheduler import APIScheduler
-from src.core.sync_service import SyncService
+from auditor.repository import AuditorRepository
+from shared.api_scheduler import APIScheduler
+from core.sync_service import SyncService
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +39,12 @@ class Auditor(commands.Cog):
     async def cog_load(self):
         """当 Cog 加载时，启动后台审计循环。"""
         self.audit_loop.start()
+        self.cleanup_loop.start()
 
     async def cog_unload(self):
         """当 Cog 卸载时，取消后台审计循环。"""
         self.audit_loop.cancel()
+        self.cleanup_loop.cancel()
 
     async def _reload_audit_queue(self):
         """
@@ -57,7 +59,7 @@ class Auditor(commands.Cog):
             random.shuffle(self.audit_queue)
         logger.debug(f"审计队列加载完成，共 {len(self.audit_queue)} 个帖子需要审计。")
 
-    @tasks.loop(seconds=10)  # 机器人启动10秒后开始第一次循环
+    @tasks.loop(seconds=60)
     async def audit_loop(self):
         """
         主审计循环。
@@ -73,21 +75,17 @@ class Auditor(commands.Cog):
                 logger.debug("没有需要审计的帖子，本轮审计周期跳过。")
             else:
                 for thread_id in self.audit_queue:
-                    # 在处理每个任务前检查循环是否已被取消
                     if self.audit_loop.is_being_cancelled():
                         logger.info("审计循环被中断。")
                         break
 
-                    # logger.debug(f"正在提交帖子 {thread_id} 的审计任务。")
-                    # 使用最低优先级(10)来调度同步任务，确保不影响用户交互
                     await self.api_scheduler.submit(
                         coro_factory=lambda tid=thread_id: self.sync_service.sync_thread(
                             tid
                         ),
                         priority=10,
                     )
-                    # 等待2秒，以极低的速率进行审计，避免触发API速率限制
-                    await sleep(2)
+                    await sleep(4)
 
                 if not self.audit_loop.is_being_cancelled():
                     logger.debug(
@@ -100,9 +98,27 @@ class Auditor(commands.Cog):
             if not self.audit_loop.is_being_cancelled():
                 logger.debug("本轮审计周期完成，将在1分钟后开始下一轮。")
                 await sleep(60)
+    
+    @tasks.loop(hours=6)
+    async def cleanup_loop(self):
+        """定期清理那些被多次确认找不到的帖子记录。"""
+        try:
+            logger.info("开始执行幽灵数据清理任务...")
+            async with self.session_factory() as session:
+                repo = AuditorRepository(session)
+                # 清理连续5次都找不到的帖子
+                deleted_count = await repo.delete_stale_threads(threshold=5)
+            
+            if deleted_count > 0:
+                logger.info(f"幽灵数据清理完成，共删除了 {deleted_count} 条记录。")
+            else:
+                logger.debug("幽灵数据清理完成，没有需要删除的记录。")
+
+        except Exception as e:
+            logger.error(f"幽灵数据清理任务发生严重错误: {e}", exc_info=True)
 
     @audit_loop.before_loop
-    async def before_audit_loop(self):
+    @cleanup_loop.before_loop
+    async def before_loops(self):
         """在循环开始前，等待机器人完全准备就绪。"""
         await self.bot.wait_until_ready()
-        # logger.info("机器人已就绪，即将启动后台审计循环。")

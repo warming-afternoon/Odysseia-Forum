@@ -97,7 +97,11 @@ async def init_db():
             text(
                 """
                 CREATE TRIGGER IF NOT EXISTS thread_after_update
-                AFTER UPDATE ON thread BEGIN
+                AFTER UPDATE ON thread
+                WHEN
+                    new.title IS NOT old.title OR
+                    new.first_message_excerpt IS NOT old.first_message_excerpt
+                BEGIN
                     INSERT INTO thread_fts(thread_fts, rowid, title, first_message_excerpt)
                     VALUES ('delete', old.id, old.title, old.first_message_excerpt);
                     INSERT INTO thread_fts(rowid, title, first_message_excerpt)
@@ -156,7 +160,11 @@ async def init_db_for_test(engine_instance: AsyncEngine):
             text(
                 """
                 CREATE TRIGGER IF NOT EXISTS thread_after_update
-                AFTER UPDATE ON thread BEGIN
+                AFTER UPDATE ON thread
+                WHEN
+                    new.title IS NOT old.title OR
+                    new.first_message_excerpt IS NOT old.first_message_excerpt
+                BEGIN
                     INSERT INTO thread_fts(thread_fts, rowid, title, first_message_excerpt)
                     VALUES ('delete', old.id, old.title, old.first_message_excerpt);
                     INSERT INTO thread_fts(rowid, title, first_message_excerpt)

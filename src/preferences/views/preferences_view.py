@@ -5,10 +5,12 @@ from typing import TYPE_CHECKING, Optional
 from shared.safe_defer import safe_defer
 from preferences.repository import PreferencesRepository
 from ...search.dto.user_search_preferences import UserSearchPreferencesDTO
-from ...search.views.components.keyword_button import KeywordModal
-from .components.time_range_modal import TimeRangeModal
+from ...search.views.components.keyword_modal import KeywordModal
+from shared.views.components.time_range_modal import TimeRangeModal
 from .components.results_per_page_modal import ResultsPerPageModal
-from shared.default_preferences import DefaultPreferences
+from shared.enum.default_preferences import DefaultPreferences
+from ...search.views.components.sort_method_select import SortMethodSelect
+from search.constants import SortMethod
 
 if TYPE_CHECKING:
     from ..preferences_service import PreferencesService
@@ -104,16 +106,13 @@ class PreferencesView(discord.ui.View):
 
         # 时间偏好
         time_info = []
-        if prefs.after_date:
-            time_info.append(f"**开始时间：** {prefs.after_date.strftime('%Y-%m-%d')}")
-        if prefs.before_date:
-            time_info.append(f"**结束时间：** {prefs.before_date.strftime('%Y-%m-%d')}")
+        if prefs.created_after: time_info.append(f"**发帖晚于:** {prefs.created_after}")
+        if prefs.created_before: time_info.append(f"**发帖早于:** {prefs.created_before}")
+        if prefs.active_after: time_info.append(f"**活跃晚于:** {prefs.active_after}")
+        if prefs.active_before: time_info.append(f"**活跃早于:** {prefs.active_before}")
+        
         if time_info:
-            embed.add_field(
-                name="⏱️ 时间设置",
-                value="      ".join(time_info),
-                inline=False,
-            )
+            embed.add_field(name="⏱️ 时间设置", value="\n".join(time_info), inline=False)
 
         # 预览图设置
         current_preview_mode = (
@@ -144,6 +143,30 @@ class PreferencesView(discord.ui.View):
             inline=True,
         )
 
+        # 排序偏好
+        current_sort_method = (
+            prefs.sort_method
+            if prefs and prefs.sort_method
+            else DefaultPreferences.SORT_METHOD.value
+        )
+        sort_method_display = SortMethod.get_label_by_value(current_sort_method, "未知")
+
+        # 如果为自定义排序，则附加显示基础算法
+        if current_sort_method == "custom":
+            current_base_sort = (
+                prefs.custom_base_sort
+                if prefs and prefs.custom_base_sort
+                else DefaultPreferences.SORT_METHOD.value
+            )
+            base_sort_display = SortMethod.get_label_by_value(current_base_sort, "未知")
+            sort_method_display += f" (基础: {base_sort_display})"
+
+        embed.add_field(
+            name="🔀 排序算法",
+            value=f"{sort_method_display}",
+            inline=False,
+        )
+
         # 作者偏好
         author_info = []
         if prefs.include_authors:
@@ -167,12 +190,44 @@ class PreferencesView(discord.ui.View):
         """根据当前状态更新组件（主要是预览图按钮）"""
         self.clear_items()
 
-        # 第一行
+        # --- 第一行: 主排序算法 ---
+        current_sort_method = (
+            self.preferences.sort_method
+            if self.preferences and self.preferences.sort_method
+            else DefaultPreferences.SORT_METHOD.value
+        )
+        self.add_item(
+            SortMethodSelect(
+                current_sort=current_sort_method,
+                update_callback=self.handle_sort_method_change,
+                row=0,
+            )
+        )
+
+        # --- 第二行: 基础排序算法 (条件性显示) ---
+        if current_sort_method == "custom":
+            current_base_sort = (
+                self.preferences.custom_base_sort
+                if self.preferences and self.preferences.custom_base_sort
+                else DefaultPreferences.SORT_METHOD.value
+            )
+            self.add_item(
+                SortMethodSelect(
+                    current_sort=current_base_sort,
+                    update_callback=self.handle_base_sort_change,
+                    row=1,
+                    exclude_values=["custom"], # 排除自定义选项
+                    placeholder="选择自定义搜索的基础排序算法...",
+                )
+            )
+
+        # 第三行
         self.add_item(
             discord.ui.Button(
                 label="🏷️ 标签",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_tags",
+                row=2,
             )
         )
         self.add_item(
@@ -180,6 +235,7 @@ class PreferencesView(discord.ui.View):
                 label="📝 关键词",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_keywords",
+                row=2,
             )
         )
         self.add_item(
@@ -187,6 +243,7 @@ class PreferencesView(discord.ui.View):
                 label="🔍 频道",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_channels",
+                row=2,
             )
         )
         self.add_item(
@@ -194,10 +251,11 @@ class PreferencesView(discord.ui.View):
                 label="⏱️ 时间",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_time",
+                row=2,
             )
         )
 
-        # 第二行
+        # 第四行
         current_preview_mode = (
             self.preferences.preview_image_mode
             if self.preferences and self.preferences.preview_image_mode
@@ -211,7 +269,7 @@ class PreferencesView(discord.ui.View):
                 label=preview_button_label,
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_preview",
-                row=1,
+                row=3,
             )
         )
         self.add_item(
@@ -219,17 +277,17 @@ class PreferencesView(discord.ui.View):
                 label="📊 每页结果数",
                 style=discord.ButtonStyle.secondary,
                 custom_id="prefs_page_size",
-                row=1,
+                row=3,
             )
         )
-
-        # 第三行
+ 
+        # 第五行
         self.add_item(
             discord.ui.Button(
                 label="🗑️ 清空所有设置",
                 style=discord.ButtonStyle.danger,
                 custom_id="prefs_clear",
-                row=2,
+                row=4,
             )
         )
 
@@ -299,22 +357,15 @@ class PreferencesView(discord.ui.View):
             return  # 服务自己处理响应
 
         elif custom_id == "prefs_time":
-            current_after = (
-                self.preferences.after_date.strftime("%Y-%m-%d")
-                if self.preferences and self.preferences.after_date
-                else ""
-            )
-            current_before = (
-                self.preferences.before_date.strftime("%Y-%m-%d")
-                if self.preferences and self.preferences.before_date
-                else ""
-            )
-
-            modal = TimeRangeModal(self.service, self, current_after, current_before)
-            await self.service.bot.api_scheduler.submit(
-                coro_factory=lambda: interaction.response.send_modal(modal), priority=1
-            )
-            return  # Modal 流程自己处理响应
+            initial_values = {
+                "created_after": self.preferences.created_after if self.preferences else None,
+                "created_before": self.preferences.created_before if self.preferences else None,
+                "active_after": self.preferences.active_after if self.preferences else None,
+                "active_before": self.preferences.active_before if self.preferences else None,
+            }
+            modal = TimeRangeModal(self.handle_prefs_time_modal_submit, initial_values)
+            await interaction.response.send_modal(modal)
+            return
 
         elif custom_id == "prefs_page_size":
             current_page_size = (
@@ -360,3 +411,48 @@ class PreferencesView(discord.ui.View):
         except Exception as e:
             logger.error(f"保存关键词偏好失败: {e}", exc_info=True)
             await modal_interaction.followup.send(f"❌ 保存失败: {e}", ephemeral=True)
+
+    async def handle_sort_method_change(
+        self, interaction: discord.Interaction, sort_method: str
+    ):
+        """处理主排序方式选择的回调"""
+        await safe_defer(interaction)
+        try:
+            # 保存时，如果新方法不是 custom，可以考虑重置 base_sort
+            update_data = {"sort_method": sort_method}
+            if sort_method != "custom":
+                update_data["custom_base_sort"] = "comprehensive"
+            
+            await self.service.save_user_preferences(interaction.user.id, update_data)
+            await self.refresh(interaction) # 刷新视图以显示或隐藏新行
+        except Exception as e:
+            logger.error(f"保存排序方式失败: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ 保存失败: {e}", ephemeral=True)
+
+    # 处理基础排序算法变化的回调
+    async def handle_base_sort_change(
+        self, interaction: discord.Interaction, sort_method: str
+    ):
+        """处理基础排序方式选择的回调"""
+        await safe_defer(interaction)
+        try:
+            # 注意这里 service 的方法是通用的，可以直接用
+            await self.service.save_user_preferences(
+                interaction.user.id, {"custom_base_sort": sort_method}
+            )
+            await self.refresh(interaction) # 刷新视图以更新embed中的文本
+        except Exception as e:
+            logger.error(f"保存基础排序方式失败: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ 保存失败: {e}", ephemeral=True)
+
+    async def handle_prefs_time_modal_submit(
+        self, interaction: discord.Interaction, values: dict
+    ):
+        """回调：接收原始字符串并调用服务进行保存。"""
+        await safe_defer(interaction)
+        try:
+            await self.service.save_time_preferences(interaction.user.id, values)
+            await self.refresh(interaction)
+        except Exception as e:
+            logger.error(f"保存时间偏好失败: {e}", exc_info=True)
+            await interaction.followup.send(f"❌ 保存失败: {e}", ephemeral=True)

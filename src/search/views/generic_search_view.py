@@ -1,20 +1,24 @@
 import discord
 import re
 
-from typing import List, TYPE_CHECKING, Set
+from typing import List, TYPE_CHECKING, Set, Optional
 
 from search.dto.search_state import SearchStateDTO
 from shared.safe_defer import safe_defer
-from shared.view.tag_select import TagSelect
+from shared.views.tag_select import TagSelect
 from ..qo.thread_search import ThreadSearchQuery
 from .results_view import SearchResultsView
-from .components.keyword_button import KeywordButton, KeywordModal
+from .components.keyword_modal import KeywordButton, KeywordModal
 from .components.tag_logic_button import TagLogicButton
 from .components.sort_order_button import SortOrderButton
 from .components.sort_method_select import SortMethodSelect
 from .timeout_view import TimeoutView
 from .combined_search_view import CombinedSearchView
 from .components.tag_page_button import TagPageButton
+from .custom_search_settings_view import CustomSearchSettingsView
+from ..dto.search_state import SearchStateDTO
+from shared.enum.default_preferences import DefaultPreferences
+from search.constants import SortMethod
 
 if TYPE_CHECKING:
     from ..cog import Search
@@ -38,6 +42,7 @@ class GenericSearchView(discord.ui.View):
         # --- UI状态 ---
         self.tags_per_page = 25
         self.last_search_results: dict | None = None
+        self.custom_settings_message: Optional[discord.WebhookMessage] = None
 
     async def start(self, send_new_ephemeral: bool = False):
         """
@@ -46,12 +51,21 @@ class GenericSearchView(discord.ui.View):
         Args:
             send_new_ephemeral (bool): 如果为 True，则发送一个新的私密消息，而不是编辑原始消息
         """
+        # 正常更新并发送主搜索视图
         await self.update_view(
             self.original_interaction, send_new_ephemeral=send_new_ephemeral
         )
 
+        # 检查是否需要立即弹出自定义设置视图
+        if (self.search_state.sort_method == "custom"
+            and self.custom_settings_message is None):
+            
+            settings_view = CustomSearchSettingsView(self)
+            
+            self.custom_settings_message = await settings_view.start()
+
     def get_filter_components(self) -> List[discord.ui.Item]:
-        """准备所有筛选UI组件的列表，但不添加到视图中。"""
+        """准备所有筛选UI组件的列表，但不添加到视图中"""
         components = []
         state = self.search_state
         all_tags = state.all_available_tags
@@ -115,9 +129,21 @@ class GenericSearchView(discord.ui.View):
         )
 
         # 第 3 行: 排序选择器
-        components.append(
-            SortMethodSelect(state.sort_method, self.on_sort_method_change, row=3)
-        )
+        sort_select = SortMethodSelect(state.sort_method, self.on_sort_method_change, row=3)
+
+        # 动态修改自定义搜索的标签
+        if state.sort_method == "custom":
+            # 找到 "自定义搜索" 对应的选项
+            custom_option = next((opt for opt in sort_select.options if opt.value == "custom"), None)
+            
+            if custom_option:
+                # 获取基础排序算法的显示名称
+                base_sort_label = SortMethod.get_short_label_by_value(state.custom_base_sort)
+                
+                # 更新标签
+                custom_option.label = f"🛠️ 自定义 ({base_sort_label})"
+
+        components.append(sort_select)
 
         return components
 
@@ -216,7 +242,7 @@ class GenericSearchView(discord.ui.View):
         search_qo = self.build_query_object()
 
         # 从 self.search_state 中获取显示参数
-        results = await self.cog._search_and_display(
+        results = await self.cog.search_and_display(
             interaction=interaction,
             search_qo=search_qo,
             page=state.page,
@@ -239,20 +265,20 @@ class GenericSearchView(discord.ui.View):
         await self.update_view(interaction, rerun_search=True)
 
     async def on_filter_change(self, interaction: discord.Interaction):
-        """当任何筛选条件改变时调用此方法，重置页码并重新搜索"""
+        """当任何筛选条件改变时调用此方法，设置最后交互，重置页码并重新搜索"""
         self.last_interaction = interaction
         self.search_state.page = 1
         await self.update_view(interaction, rerun_search=True)
 
     async def on_sort_order_change(self, interaction: discord.Interaction):
-        """处理排序顺序改变的逻辑"""
+        """排序正/倒序切换"""
         self.search_state.sort_order = (
             "asc" if self.search_state.sort_order == "desc" else "desc"
         )
         await self.on_filter_change(interaction)
 
     async def on_tag_logic_change(self, interaction: discord.Interaction):
-        """处理标签匹配逻辑改变的逻辑"""
+        """标签匹配部分匹配/全部匹配切换"""
         self.search_state.tag_logic = (
             "or" if self.search_state.tag_logic == "and" else "and"
         )
@@ -261,9 +287,34 @@ class GenericSearchView(discord.ui.View):
     async def on_sort_method_change(
         self, interaction: discord.Interaction, new_method: str
     ):
-        """处理排序方法改变的逻辑"""
+        """排序算法切换"""
+        # 清理可能存在的旧配置视图
+        if self.custom_settings_message:
+            try:
+                await self.custom_settings_message.delete()
+            except (discord.errors.NotFound, discord.errors.HTTPException):
+                pass  # 消息可能已被删除，忽略错误
+            finally:
+                self.custom_settings_message = None
+        
         self.search_state.sort_method = new_method
+
+        if new_method == "custom":
+            # 更新主视图以反映标签变化，但不重新搜索
+            await self.update_view(interaction, rerun_search=False)
+
+            # 弹出自定义设置视图
+            settings_view = CustomSearchSettingsView(self)
+            self.custom_settings_message = await settings_view.start()
+            
+            return
+            
         await self.on_filter_change(interaction)
+
+    async def trigger_search_from_custom_settings(self, updated_state: "SearchStateDTO"):
+        """由 CustomSearchSettingsView 回调，应用设置并刷新主视图"""
+        self.search_state = updated_state
+        await self.on_filter_change(self.last_interaction)
 
     async def on_tag_page_change(self, interaction: discord.Interaction, action: str):
         """处理标签翻页"""
@@ -273,7 +324,7 @@ class GenericSearchView(discord.ui.View):
         elif action == "next":
             self.search_state.tag_page = min(max_page, self.search_state.tag_page + 1)
 
-        # 翻页后，只需更新视图，不需要重新搜索
+        # 标签翻页只需更新视图，不需要重新搜索
         await self.update_view(interaction, rerun_search=False)
 
     async def handle_keyword_update(
@@ -299,7 +350,7 @@ class GenericSearchView(discord.ui.View):
         await self.on_filter_change(interaction)
 
     async def show_keyword_modal(self, interaction: discord.Interaction):
-        """创建并显示关键词模态框"""
+        """创建并显示 KeywordModal """
         modal = KeywordModal(
             initial_keywords=self.search_state.keywords,
             initial_exclude_keywords=self.search_state.exclude_keywords,
@@ -339,6 +390,13 @@ class GenericSearchView(discord.ui.View):
             tag_logic=state.tag_logic,
             sort_method=state.sort_method,
             sort_order=state.sort_order,
+            custom_base_sort=state.custom_base_sort,
+            reaction_count_range=state.reaction_count_range,
+            reply_count_range=state.reply_count_range,
+            created_after=state.created_after,
+            created_before=state.created_before,
+            active_after=state.active_after,
+            active_before=state.active_before,
         )
 
     def build_summary_embed(self, results: dict) -> discord.Embed:
@@ -363,6 +421,23 @@ class GenericSearchView(discord.ui.View):
             filters.append(f"包含关键词: {state.keywords}")
         if state.exclude_keywords:
             filters.append(f"排除关键词: {state.exclude_keywords}")
+        
+        # 时间范围
+        if state.created_after:
+            filters.append(f"发帖晚于: {state.created_after}")
+        if state.created_before:
+            filters.append(f"发帖早于: {state.created_before}")
+        if state.active_after:
+            filters.append(f"活跃晚于: {state.active_after}")
+        if state.active_before:
+            filters.append(f"活跃早于: {state.active_before}")
+
+        # 数值范围
+        if state.reaction_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
+            filters.append(f"反应数: {state.reaction_count_range}")
+        if state.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
+            filters.append(f"回复数: {state.reply_count_range}")
+
 
         if filters:
             description_parts.append("\n".join(filters))
