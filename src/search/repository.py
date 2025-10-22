@@ -10,6 +10,7 @@ from shared.database import thread_fts_table
 from shared.models.thread_tag_link import ThreadTagLink
 from shared.models.thread import Thread
 from shared.models.tag import Tag
+from shared.models.author import Author
 from search.qo.thread_search import ThreadSearchQuery
 from core.tagService import TagService
 from shared.range_parser import parse_range_string
@@ -39,7 +40,13 @@ class SearchRepository:
             else:
                 filters.append(column < max_val)
 
-    def _apply_ucb1_ranking(self, statement, total_display_count: int, exploration_factor: float, strength_weight: float):
+    def _apply_ucb1_ranking(
+        self,
+        statement,
+        total_display_count: int,
+        exploration_factor: float,
+        strength_weight: float
+    ):
         """
         应用 UCB1 算法对帖子进行排序。
         Score = W * (x / n) + C * sqrt(ln(N) / n)
@@ -65,8 +72,13 @@ class SearchRepository:
         return statement, final_score
 
     async def search_threads_with_count(
-        self, query: ThreadSearchQuery, offset: int, limit: int,
-        total_display_count: int, exploration_factor: float, strength_weight: float
+        self,
+        query: ThreadSearchQuery,
+        offset: int,
+        limit: int,
+        total_display_count: int,
+        exploration_factor: float,
+        strength_weight: float
     ) -> tuple[Sequence[Thread], int]:
         """
         根据搜索条件搜索帖子并分页
@@ -101,16 +113,51 @@ class SearchRepository:
             filters.append(Thread.not_found_count == 0)
             if query.channel_ids:
                 filters.append(Thread.channel_id.in_(query.channel_ids))  # type: ignore
-            if query.include_authors:
-                filters.append(Thread.author_id.in_(query.include_authors))  # type: ignore
+            
+            final_include_author_ids = set(query.include_authors) if query.include_authors else set()
+
+            # --- 作者名模糊搜索 ---
+            if query.author_name_query:
+                search_pattern = f"%{query.author_name_query}%"
+                author_subquery = (
+                    select(Author.id)
+                    .where(
+                        Author.global_name.like(search_pattern) | # type: ignore
+                        Author.display_name.like(search_pattern) # type: ignore
+                    )
+                )
+                author_result = await self.session.execute(author_subquery)
+                matched_author_ids = set(author_result.scalars().all())
+
+                if query.include_authors:
+                    # 如果同时指定了ID和模糊搜索，则取交集
+                    final_include_author_ids.intersection_update(matched_author_ids)
+                else:
+                    final_include_author_ids = matched_author_ids
+
+            # 应用作者过滤器
+            if final_include_author_ids:
+                filters.append(
+                    Thread.author_id.in_(list(final_include_author_ids))  # type: ignore
+                )
             if query.exclude_authors:
-                filters.append(Thread.author_id.notin_(query.exclude_authors))  # type: ignore
+                filters.append(
+                    Thread.author_id.notin_(query.exclude_authors)  # type: ignore
+                )
 
             # --- 范围过滤---
-            if query.reaction_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
-                self._apply_range_filter(filters, Thread.reaction_count, query.reaction_count_range)
-            if query.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
-                self._apply_range_filter(filters, Thread.reply_count, query.reply_count_range)
+            if query.reaction_count_range != (
+                DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+            ):
+                self._apply_range_filter(
+                    filters, Thread.reaction_count, query.reaction_count_range
+                )
+            if query.reply_count_range != (
+                DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+            ):
+                self._apply_range_filter(
+                    filters, Thread.reply_count, query.reply_count_range
+                )
 
             if created_after_dt:
                 filters.append(Thread.created_at >= created_after_dt)
@@ -139,7 +186,9 @@ class SearchRepository:
                         Thread.tags.any(Tag.id.in_(resolved_include_tag_ids))  # type: ignore
                     )  # type: ignore
             if resolved_exclude_tag_ids:
-                filters.append(~Thread.tags.any(Tag.id.in_(resolved_exclude_tag_ids)))  # type: ignore
+                filters.append(
+                    ~Thread.tags.any(Tag.id.in_(resolved_exclude_tag_ids))  # type: ignore
+                )
 
             # --- 步骤 2: 单独处理反选关键词 ---
             if query.exclude_keywords:
@@ -242,11 +291,18 @@ class SearchRepository:
             order_by = None
 
             # 如果是自定义搜索，则使用其基础排序算法，否则使用主排序算法
-            effective_sort_method = query.custom_base_sort if query.sort_method == "custom" else query.sort_method
+            effective_sort_method = (
+                query.custom_base_sort
+                if query.sort_method == "custom"
+                else query.sort_method
+            )
 
             if effective_sort_method == "comprehensive":
                 final_select_stmt, final_score_expr = self._apply_ucb1_ranking(
-                    final_select_stmt, total_display_count, exploration_factor, strength_weight
+                    final_select_stmt,
+                    total_display_count,
+                    exploration_factor,
+                    strength_weight
                 )
                 order_by = (
                     final_score_expr.desc()

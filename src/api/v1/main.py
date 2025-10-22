@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from .routers import preferences, search
+from .routers import preferences, search, meta
 
 app = FastAPI(
     title="Odysseia Forum API v1",
@@ -9,6 +9,7 @@ app = FastAPI(
 
 app.include_router(preferences.router)
 app.include_router(search.router)
+app.include_router(meta.router)
 
 @app.get("/health", summary="健康检查", tags=["系统"])
 async def health_check():

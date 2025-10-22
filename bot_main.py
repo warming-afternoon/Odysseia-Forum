@@ -33,7 +33,7 @@ from src.config.cog import Configuration
 from src.config.repository import ConfigRepository
 from src.shared.api_scheduler import APIScheduler
 from src.webpage.index_sync import start_index_sync
-from src.api.v1.routers import preferences as preferences_api, search as search_api
+from src.api.v1.routers import preferences as preferences_api, search as search_api, meta as meta_api
 from src.api.main import app as fastapi_app
 from src.api.v1.dependencies.security import initialize_api_security
 
@@ -245,6 +245,7 @@ async def main():
         if search_cog:
             search_api.search_cog_instance = search_cog
         search_api.async_session_factory = AsyncSessionFactory
+        meta_api.cache_service_instance = bot.cache_service
         
         logger.info("API 路由服务注入完成")
 
