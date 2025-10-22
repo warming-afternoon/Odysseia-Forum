@@ -98,7 +98,7 @@ class Auditor(commands.Cog):
             if not self.audit_loop.is_being_cancelled():
                 logger.debug("本轮审计周期完成，将在1分钟后开始下一轮。")
                 await sleep(60)
-    
+
     @tasks.loop(hours=6)
     async def cleanup_loop(self):
         """定期清理那些被多次确认找不到的帖子记录。"""
@@ -108,7 +108,7 @@ class Auditor(commands.Cog):
                 repo = AuditorRepository(session)
                 # 清理连续5次都找不到的帖子
                 deleted_count = await repo.delete_stale_threads(threshold=5)
-            
+
             if deleted_count > 0:
                 logger.info(f"幽灵数据清理完成，共删除了 {deleted_count} 条记录。")
             else:

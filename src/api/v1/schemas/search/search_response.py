@@ -4,10 +4,12 @@ from datetime import datetime
 from ..base import PaginatedResponse
 from .author import AuthorDetail
 
+
 class ThreadDetail(BaseModel):
     """
     API 响应中单个帖子的详细信息模型
     """
+
     thread_id: int = Field(description="帖子的 Discord ID")
     channel_id: int = Field(description="帖子所在频道的 Discord ID")
     title: str = Field(description="帖子标题")
@@ -24,6 +26,8 @@ class ThreadDetail(BaseModel):
     class Config:
         from_attributes = True
 
+
 class SearchResponse(PaginatedResponse[ThreadDetail]):
-    """ 搜索接口的最终响应体 """
+    """搜索接口的最终响应体"""
+
     pass

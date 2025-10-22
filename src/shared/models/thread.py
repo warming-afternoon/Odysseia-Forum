@@ -18,7 +18,9 @@ class Thread(SQLModel, table=True):
     thread_id: int = Field(index=True, unique=True)
     title: str
     author_id: int = Field(index=True)
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), nullable=False,index=True)
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc), nullable=False, index=True
+    )
 
     last_active_at: Optional[datetime] = Field(default=None, index=True)
     reaction_count: int = Field(default=0, index=True)
@@ -31,17 +33,17 @@ class Thread(SQLModel, table=True):
         default=True,
         index=True,
         nullable=False,
-        description="帖子是否应出现在搜索结果中"
+        description="帖子是否应出现在搜索结果中",
     )
-    
+
     # 审计用字段
     # 大于 0 则搜索不到，大于 5 则删除
     not_found_count: int = Field(
         default=0,
         index=True,
-        description="审计拉取帖子数据 NotFound 时 +1, 拉取成功时归零"
-        )
-    
+        description="审计拉取帖子数据 NotFound 时 +1, 拉取成功时归零",
+    )
+
     # UCB1算法相关字段
     display_count: int = Field(
         default=0,
@@ -51,13 +53,13 @@ class Thread(SQLModel, table=True):
 
     tags: List["Tag"] = Relationship(back_populates="threads", link_model=ThreadTagLink)
     votes: List["TagVote"] = Relationship(back_populates="thread")
-    
+
     # 作者关系
     author: Optional["Author"] = Relationship(
         sa_relationship_kwargs={
             "primaryjoin": "Thread.author_id == Author.id",
             "foreign_keys": "[Thread.author_id]",
             "uselist": False,
-            "lazy": "joined"
+            "lazy": "joined",
         }
     )

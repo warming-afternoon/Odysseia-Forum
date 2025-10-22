@@ -1,6 +1,6 @@
 import asyncio
 import discord
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Optional
 
 from search.dto.search_state import SearchStateDTO
 from shared.safe_defer import safe_defer
@@ -24,35 +24,67 @@ class CustomSearchSettingsView(discord.ui.View):
 
     def update_components(self):
         self.clear_items()
-        self.add_item(discord.ui.Button(label="设置数值范围", style=discord.ButtonStyle.secondary, custom_id="set_num_range", row=0))
-        self.add_item(discord.ui.Button(label="设置时间范围", style=discord.ButtonStyle.secondary, custom_id="set_time_range", row=0))
-        
+        self.add_item(
+            discord.ui.Button(
+                label="设置数值范围",
+                style=discord.ButtonStyle.secondary,
+                custom_id="set_num_range",
+                row=0,
+            )
+        )
+        self.add_item(
+            discord.ui.Button(
+                label="设置时间范围",
+                style=discord.ButtonStyle.secondary,
+                custom_id="set_time_range",
+                row=0,
+            )
+        )
+
         # 移除自定义选项本身，只保留基础排序
-        base_sort_select = SortMethodSelect(self.state.custom_base_sort, self.on_base_sort_change, row=1)
-        base_sort_select.options = [opt for opt in base_sort_select.options if opt.value != "custom"]
+        base_sort_select = SortMethodSelect(
+            self.state.custom_base_sort, self.on_base_sort_change, row=1
+        )
+        base_sort_select.options = [
+            opt for opt in base_sort_select.options if opt.value != "custom"
+        ]
         self.add_item(base_sort_select)
-        self.add_item(discord.ui.Button(label="🗑️ 清空范围设置", style=discord.ButtonStyle.danger, custom_id="clear_ranges", row=2))
+        self.add_item(
+            discord.ui.Button(
+                label="🗑️ 清空范围设置",
+                style=discord.ButtonStyle.danger,
+                custom_id="clear_ranges",
+                row=2,
+            )
+        )
         # 绑定回调
         for item in self.children:
             if isinstance(item, discord.ui.Button):
                 item.callback = self.button_callback
-    
-    def build_embed(self):
-        embed = discord.Embed(title="🛠️ 自定义搜索设置", description="以选择的排序算法作为基础，并应用更精细的筛选条件", color=discord.Color.blue())
-        
-        # 数值范围
-        reaction_display = f"{self.state.reaction_count_range}" \
-            if self.state.reaction_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value \
-            else "未设置"
-            
-        reply_display = f"{self.state.reply_count_range}" \
-            if self.state.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value \
-            else "未设置"
 
-        num_range_value = (
-            f"反应数: {reaction_display}\n"
-            f"回复数: {reply_display}"
+    def build_embed(self):
+        embed = discord.Embed(
+            title="🛠️ 自定义搜索设置",
+            description="以选择的排序算法作为基础，并应用更精细的筛选条件",
+            color=discord.Color.blue(),
         )
+
+        # 数值范围
+        reaction_display = (
+            f"{self.state.reaction_count_range}"
+            if self.state.reaction_count_range
+            != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+            else "未设置"
+        )
+
+        reply_display = (
+            f"{self.state.reply_count_range}"
+            if self.state.reply_count_range
+            != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+            else "未设置"
+        )
+
+        num_range_value = f"反应数: {reaction_display}\n回复数: {reply_display}"
         embed.add_field(name="🔢 数值范围", value=num_range_value, inline=False)
 
         # 时间范围
@@ -65,7 +97,7 @@ class CustomSearchSettingsView(discord.ui.View):
             time_range_parts.append(f"活跃晚于: {self.state.active_after}")
         if self.state.active_before:
             time_range_parts.append(f"活跃早于: {self.state.active_before}")
-        
+
         time_range_value = "\n".join(time_range_parts) if time_range_parts else "未设置"
         embed.add_field(name="📅 时间范围", value=time_range_value, inline=False)
 
@@ -73,7 +105,9 @@ class CustomSearchSettingsView(discord.ui.View):
 
     async def start(self) -> Optional[discord.WebhookMessage]:
         """发送配置视图并返回消息对象"""
-        return await self.original_interaction.followup.send(embed=self.build_embed(), view=self, ephemeral=True, wait=True)
+        return await self.original_interaction.followup.send(
+            embed=self.build_embed(), view=self, ephemeral=True, wait=True
+        )
 
     async def button_callback(self, interaction: discord.Interaction):
         if not interaction.data:
@@ -87,8 +121,12 @@ class CustomSearchSettingsView(discord.ui.View):
 
         if custom_id == "clear_ranges":
             # 清空所有数值和时间范围设置
-            self.state.reaction_count_range = DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
-            self.state.reply_count_range = DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+            self.state.reaction_count_range = (
+                DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+            )
+            self.state.reply_count_range = (
+                DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+            )
             self.state.created_after = None
             self.state.created_before = None
             self.state.active_after = None
@@ -97,17 +135,21 @@ class CustomSearchSettingsView(discord.ui.View):
             await safe_defer(interaction)
 
             # 创建一个后台任务去执行父视图的搜索
-            asyncio.create_task(self.parent.trigger_search_from_custom_settings(self.state))
+            asyncio.create_task(
+                self.parent.trigger_search_from_custom_settings(self.state)
+            )
 
             # 使用当前交互来更新本视图的消息
             self.update_components()
-            await interaction.edit_original_response(embed=self.build_embed(), view=self)
+            await interaction.edit_original_response(
+                embed=self.build_embed(), view=self
+            )
             return
 
-
-
         if custom_id == "set_num_range":
-            await interaction.response.send_modal(NumberRangeModal(self.state, self.handle_num_modal_submit))
+            await interaction.response.send_modal(
+                NumberRangeModal(self.state, self.handle_num_modal_submit)
+            )
         elif custom_id == "set_time_range":
             initial_values = {
                 "created_after": self.state.created_after,
@@ -118,12 +160,14 @@ class CustomSearchSettingsView(discord.ui.View):
             modal = TimeRangeModal(self.handle_time_modal_submit, initial_values)
             await interaction.response.send_modal(modal)
 
-    async def on_base_sort_change(self, interaction: discord.Interaction, new_method: str):
+    async def on_base_sort_change(
+        self, interaction: discord.Interaction, new_method: str
+    ):
         self.state.custom_base_sort = new_method
-        
+
         # 响应下拉菜单的交互
         await safe_defer(interaction)
-        
+
         # 创建后台任务去执行父视图的搜索
         asyncio.create_task(self.parent.trigger_search_from_custom_settings(self.state))
 
@@ -133,23 +177,29 @@ class CustomSearchSettingsView(discord.ui.View):
 
     async def handle_num_modal_submit(self, values: dict):
         """处理来自 NumberRangeModal 的数据"""
-        self.state.reaction_count_range = values.get("reaction_count_range", DefaultPreferences.DEFAULT_NUMERIC_RANGE.value)
-        self.state.reply_count_range = values.get("reply_count_range", DefaultPreferences.DEFAULT_NUMERIC_RANGE.value)
-        
+        self.state.reaction_count_range = values.get(
+            "reaction_count_range", DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+        )
+        self.state.reply_count_range = values.get(
+            "reply_count_range", DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
+        )
+
         # 创建一个后台任务去执行父视图的搜索
         asyncio.create_task(self.parent.trigger_search_from_custom_settings(self.state))
 
         # 使用点击按钮时保存的交互来更新本视图的消息
         self.update_components()
         if self.last_settings_interaction:
-            await self.last_settings_interaction.edit_original_response(embed=self.build_embed(), view=self)
+            await self.last_settings_interaction.edit_original_response(
+                embed=self.build_embed(), view=self
+            )
 
     async def on_timeout(self):
         """视图超时后，删除该私密消息以清理界面"""
         # 通知父视图，此自定义设置窗口已失效
         if self.parent:
             self.parent.custom_settings_message = None
-        
+
         # 当用户与此视图交互过时，我们有权限删除它。
         if self.last_settings_interaction:
             try:
@@ -157,7 +207,7 @@ class CustomSearchSettingsView(discord.ui.View):
             except (discord.errors.NotFound, discord.errors.HTTPException):
                 # 消息可能已被手动删除或因其他原因无法访问，这是正常情况，无需报错。
                 pass
-    
+
     async def handle_time_modal_submit(
         self, interaction: discord.Interaction, values: dict
     ):

@@ -20,13 +20,15 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
             required=False,
             default=initial_keywords,
         )
-        
-        self.add_item(Label(
-            text="包含关键词（逗号或斜杠分隔）",
-            description="输入 'A/B/C'，返回帖子将包含 A B C 中任意一个。  "
-            "\n\n输入'C, D'，返回帖子同时包含 C 和 D",
-            component=self.include_input
-        ))
+
+        self.add_item(
+            Label(
+                text="包含关键词（逗号或斜杠分隔）",
+                description="输入 'A/B/C'，返回帖子将包含 A B C 中任意一个。  "
+                "\n\n输入'C, D'，返回帖子同时包含 C 和 D",
+                component=self.include_input,
+            )
+        )
 
         # 排除关键词
         self.exclude_input = discord.ui.TextInput(
@@ -34,12 +36,14 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
             required=False,
             default=initial_exclude_keywords,
         )
-        
-        self.add_item(Label(
-            text="排除关键词（逗号分隔）",
-            description="屏蔽包含任一关键词的卡贴",
-            component=self.exclude_input
-        ))
+
+        self.add_item(
+            Label(
+                text="排除关键词（逗号分隔）",
+                description="屏蔽包含任一关键词的卡贴",
+                component=self.exclude_input,
+            )
+        )
 
         # 豁免标记
         self.exemption_markers_input = discord.ui.TextInput(
@@ -47,12 +51,14 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
             required=False,
             default=initial_exemption_markers,
         )
-        
-        self.add_item(Label(
-            text="排除关键词的豁免标记（逗号分隔）",
-            description="解除对排除关键词附近存在标记词的卡帖的屏蔽",
-            component=self.exemption_markers_input
-        ))
+
+        self.add_item(
+            Label(
+                text="排除关键词的豁免标记（逗号分隔）",
+                description="解除对排除关键词附近存在标记词的卡帖的屏蔽",
+                component=self.exemption_markers_input,
+            )
+        )
 
     async def on_submit(self, interaction: discord.Interaction):
         # 从 Label 的 .component 属性获取 TextInput
@@ -61,8 +67,10 @@ class KeywordModal(discord.ui.Modal, title="设置关键词过滤"):
         exclude_label_item = cast(Label, self.children[1])
         exclude_input = cast(discord.ui.TextInput, exclude_label_item.component)
         exemption_label_item = cast(Label, self.children[2])
-        exemption_markers_input = cast(discord.ui.TextInput, exemption_label_item.component)
-        
+        exemption_markers_input = cast(
+            discord.ui.TextInput, exemption_label_item.component
+        )
+
         await self.submit_callback(
             interaction,
             include_input.value,

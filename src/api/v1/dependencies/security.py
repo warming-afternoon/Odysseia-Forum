@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import sys
 from fastapi import Security, HTTPException, status
 from fastapi.security import APIKeyHeader
@@ -9,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 # 全局变量，在应用启动时初始化
 _API_SECRET_KEY = None
+
 
 def initialize_api_security():
     """在应用启动时调用，初始化 API 安全配置"""
@@ -25,17 +25,19 @@ def initialize_api_security():
         logger.critical("程序退出")
         sys.exit(1)
 
+
 # 定义 API 密钥在请求头中的名称
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
 
 async def get_api_key(api_key: str = Security(api_key_header)):
     """依赖函数，用于校验请求头中的 X-API-Key"""
     if _API_SECRET_KEY is None:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API 安全服务未初始化"
+            detail="API 安全服务未初始化",
         )
-    
+
     if api_key == _API_SECRET_KEY:
         return api_key
     else:

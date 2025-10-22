@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import Optional, List
-import datetime
 from shared.enum.default_preferences import DefaultPreferences
 
 
@@ -16,6 +15,7 @@ class ThreadSearchQuery:
     exclude_keyword_exemption_markers: Optional[List[str]] = None
     include_authors: Optional[List[int]] = None
     exclude_authors: Optional[List[int]] = None
+    author_name: Optional[str] = None
     tag_logic: str = "and"
     sort_method: str = "comprehensive"
     sort_order: str = "desc"

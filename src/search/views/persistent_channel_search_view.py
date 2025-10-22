@@ -1,9 +1,7 @@
 import discord
 from typing import TYPE_CHECKING
 
-from shared.safe_defer import safe_defer
 from .generic_search_view import GenericSearchView
-from ..dto.search_state import SearchStateDTO
 
 if TYPE_CHECKING:
     from ..cog import Search
@@ -30,7 +28,9 @@ class PersistentChannelSearchView(discord.ui.View):
         当用户点击“搜索本频道”按钮时，启动一个预设了频道ID的通用搜索流程。
         """
         try:
-            await interaction.response.send_message("正在加载搜索界面...", ephemeral=True)
+            await interaction.response.send_message(
+                "正在加载搜索界面...", ephemeral=True
+            )
         except discord.errors.InteractionResponded:
             await interaction.followup.send("操作过快，请稍后重试。", ephemeral=True)
             return
@@ -59,7 +59,7 @@ class PersistentChannelSearchView(discord.ui.View):
             await self.cog.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
                     "❌ 无法找到该帖子的父频道\n如果重试后依然出现该提示，请联系技术员",
-                    ephemeral=True
+                    ephemeral=True,
                 ),
                 priority=1,
             )
@@ -82,13 +82,15 @@ class PersistentChannelSearchView(discord.ui.View):
 
         # 定义需要强制覆盖用户偏好的字段
         overrides = {
-            'channel_ids': [channel_id],
-            'all_available_tags': channel_tag_names,
-            'page': 1,
+            "channel_ids": [channel_id],
+            "all_available_tags": channel_tag_names,
+            "page": 1,
         }
-        
+
         # 使用 cog 中的辅助函数创建初始状态，确保所有偏好（包括时间）都被加载
-        initial_state = await self.cog._create_initial_state_from_prefs(interaction.user.id, overrides)
+        initial_state = await self.cog._create_initial_state_from_prefs(
+            interaction.user.id, overrides
+        )
 
         generic_view = GenericSearchView(
             cog=self.cog,

@@ -18,17 +18,24 @@ UpdatePayload = dict[int, UpdateData]
 class BatchUpdateService:
     """负责批量更新帖子回复数和活跃时间的服务。"""
 
-    def __init__(self, session_factory: async_sessionmaker, sync_service: SyncService, interval: int = 30):
+    def __init__(
+        self,
+        session_factory: async_sessionmaker,
+        sync_service: SyncService,
+        interval: int = 30,
+    ):
         self.session_factory = session_factory
         self.sync_service = sync_service
         self.interval = interval  # 每隔多少秒写入一次数据库
-        
+
         # 待处理的更新
-        self.pending_updates: defaultdict[int, UpdateData] = defaultdict(lambda: {"increment": 0, "last_active_at": None})
-        
+        self.pending_updates: defaultdict[int, UpdateData] = defaultdict(
+            lambda: {"increment": 0, "last_active_at": None}
+        )
+
         # asyncio.Lock 用于保证并发安全
         self.lock = asyncio.Lock()
-        
+
         self._task: asyncio.Task | None = None
         logger.debug("BatchUpdateService 已初始化。")
 
@@ -42,7 +49,7 @@ class BatchUpdateService:
         """停止后台任务并执行最后一次数据刷新。"""
         if self._task and not self._task.done():
             self._task.cancel()
-        
+
         logger.debug("正在执行最后的批量数据刷新...")
         await self.flush_to_db()
         logger.debug("最后的批量数据刷新完成。")
@@ -66,17 +73,19 @@ class BatchUpdateService:
         """将内存中的所有待处理更新写入数据库，并处理幽灵数据。"""
         async with self.lock:
             if not self.pending_updates:
-                return # 如果没有更新，直接返回
-            
+                return  # 如果没有更新，直接返回
+
             updates_to_process = self.pending_updates.copy()
             self.pending_updates.clear()
-        
+
         intended_count = len(updates_to_process)
         logger.debug(f"准备将 {intended_count} 个帖子的更新写入数据库。")
         try:
             async with self.session_factory() as session:
                 repo = ThreadManagerRepository(session)
-                updated_count = await repo.batch_update_thread_activity(updates_to_process)
+                updated_count = await repo.batch_update_thread_activity(
+                    updates_to_process
+                )
                 await session.commit()
 
             logger.debug(f"批量更新成功写入数据库，影响了 {updated_count} 行。")
@@ -87,7 +96,7 @@ class BatchUpdateService:
                     f"批量更新消息数时发现 {intended_count - updated_count} 条幽灵数据，"
                     "将触发数据补录。"
                 )
-                
+
                 # 查询比对
                 async with self.session_factory() as session:
                     repo = ThreadManagerRepository(session)
@@ -95,7 +104,7 @@ class BatchUpdateService:
                     existing_ids = await repo.get_existing_thread_ids(all_ids_in_batch)
 
                 ghost_ids = set(all_ids_in_batch) - set(existing_ids)
-                
+
                 logger.info(f"需要补录的帖子ID: {list(ghost_ids)}")
 
                 # 为每个帖子触发一次完整的同步，使用 create_task 在后台执行

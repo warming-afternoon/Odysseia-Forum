@@ -7,7 +7,7 @@ from sqlmodel import SQLModel
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
-from src.shared.models import *
+from src.shared.models import *  # noqa: F403
 from src.shared.fts5_tokenizer import register_jieba_tokenizer
 
 
@@ -60,7 +60,7 @@ def run_migrations_online() -> None:
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
-    
+
     # 为 Alembic 连接注册分词器
     @event.listens_for(connectable, "connect")
     def on_connect(dbapi_connection, connection_record):
@@ -73,9 +73,7 @@ def run_migrations_online() -> None:
             raise
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

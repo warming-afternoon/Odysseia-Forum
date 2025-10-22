@@ -70,36 +70,46 @@ class ConfigRepository:
         await self.session.rollback()
         return False
 
-    async def get_search_config(self, config_type: SearchConfigType) -> Optional[BotConfig]:
+    async def get_search_config(
+        self, config_type: SearchConfigType
+    ) -> Optional[BotConfig]:
         """根据类型获取一个具体的搜索配置。"""
         result = await self.session.execute(
-            select(BotConfig).where(BotConfig.type == config_type) # type: ignore
+            select(BotConfig).where(BotConfig.type == config_type)  # type: ignore
         )
         return result.scalar_one_or_none()
 
-    async def update_search_config_float(self, config_type: SearchConfigType, new_value: float, user_id: int) -> BotConfig:
+    async def update_search_config_float(
+        self, config_type: SearchConfigType, new_value: float, user_id: int
+    ) -> BotConfig:
         """更新或创建浮点数类型的搜索配置。"""
-        return await self.update_search_config(config_type, {"value_float": new_value}, user_id)
+        return await self.update_search_config(
+            config_type, {"value_float": new_value}, user_id
+        )
 
-    async def update_search_config(self, config_type: SearchConfigType, new_values: dict, user_id: int) -> BotConfig:
+    async def update_search_config(
+        self, config_type: SearchConfigType, new_values: dict, user_id: int
+    ) -> BotConfig:
         """
         通用更新方法，可更新 BotConfig 中的字段。
         new_values 字典的键应为 BotConfig 模型的字段名，例如 "value_float" 或 "value_int"。
         """
         # 动态构建要更新的值，并加入 update_user_id
         update_data = new_values.copy()
-        update_data['update_user_id'] = user_id
-        
+        update_data["update_user_id"] = user_id
+
         stmt = (
             update(BotConfig)
-            .where(BotConfig.type == config_type) # type: ignore
+            .where(BotConfig.type == config_type)  # type: ignore
             .values(**update_data)
         )
         result = await self.session.execute(stmt)
 
         if result.rowcount == 0:
-            raise RuntimeError(f"类型为 {config_type.name} 的搜索配置未找到，无法更新。")
-        
+            raise RuntimeError(
+                f"类型为 {config_type.name} 的搜索配置未找到，无法更新。"
+            )
+
         config_entry = await self.get_search_config(config_type)
         if not config_entry:
             raise RuntimeError(f"更新后未找到类型为 {config_type.name} 的搜索配置。")
@@ -112,7 +122,7 @@ class ConfigRepository:
         """获取所有可供用户配置的搜索配置项。"""
         # 这里可以根据需要过滤掉一些内部配置项，目前我们全返回
         result = await self.session.execute(
-            select(BotConfig).order_by(BotConfig.type) # type: ignore
+            select(BotConfig).order_by(BotConfig.type)  # type: ignore
         )
         return list(result.scalars().all())
 
@@ -120,51 +130,58 @@ class ConfigRepository:
         """
         幂等地初始化或验证核心搜索配置项是否存在于数据库中
         """
-        
+
         # 初始化总展示次数 (N)
-        stmt_n = insert(BotConfig).values(
-            type=SearchConfigType.TOTAL_DISPLAY_COUNT,
-            type_str=SearchConfigType.TOTAL_DISPLAY_COUNT.name,
-            value_int=0,
-            tips="UCB1算法中的全局总展示次数 (N)",
-        ).on_conflict_do_nothing(
-            index_elements=['type']
+        stmt_n = (
+            insert(BotConfig)
+            .values(
+                type=SearchConfigType.TOTAL_DISPLAY_COUNT,
+                type_str=SearchConfigType.TOTAL_DISPLAY_COUNT.name,
+                value_int=0,
+                tips="UCB1算法中的全局总展示次数 (N)",
+            )
+            .on_conflict_do_nothing(index_elements=["type"])
         )
         await self.session.execute(stmt_n)
 
         # 初始化探索因子 (C)
-        stmt_c = insert(BotConfig).values(
-            type=SearchConfigType.UCB1_EXPLORATION_FACTOR,
-            type_str=SearchConfigType.UCB1_EXPLORATION_FACTOR.name,
-            value_float=SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value,
-            tips="UCB1算法的探索因子C，值越大越倾向于探索新内容",
-        ).on_conflict_do_nothing(
-            index_elements=['type']
+        stmt_c = (
+            insert(BotConfig)
+            .values(
+                type=SearchConfigType.UCB1_EXPLORATION_FACTOR,
+                type_str=SearchConfigType.UCB1_EXPLORATION_FACTOR.name,
+                value_float=SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value,
+                tips="UCB1算法的探索因子C，值越大越倾向于探索新内容",
+            )
+            .on_conflict_do_nothing(index_elements=["type"])
         )
         await self.session.execute(stmt_c)
 
         # 初始化实力分权重 (W)
-        stmt_w = insert(BotConfig).values(
-            type=SearchConfigType.STRENGTH_WEIGHT,
-            type_str=SearchConfigType.STRENGTH_WEIGHT.name,
-            value_float=SearchConfigDefaults.STRENGTH_WEIGHT.value,
-            tips="UCB1算法中实力分(x/n)的权重W",
-        ).on_conflict_do_nothing(
-            index_elements=['type']
+        stmt_w = (
+            insert(BotConfig)
+            .values(
+                type=SearchConfigType.STRENGTH_WEIGHT,
+                type_str=SearchConfigType.STRENGTH_WEIGHT.name,
+                value_float=SearchConfigDefaults.STRENGTH_WEIGHT.value,
+                tips="UCB1算法中实力分(x/n)的权重W",
+            )
+            .on_conflict_do_nothing(index_elements=["type"])
         )
         await self.session.execute(stmt_w)
 
         # 初始化互斥标签冲突通知配置
-        stmt_mutex_notify = insert(BotConfig).values(
-            type=SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT,
-            type_str=SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT.name,
-            value_int=1,  # 默认开启 (0=关闭, 1=开启)
-            tips="当检测到帖子应用了互斥TAG时，是否通知管理组 (0=关, 1=开)",
-        ).on_conflict_do_nothing(
-            index_elements=['type']
+        stmt_mutex_notify = (
+            insert(BotConfig)
+            .values(
+                type=SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT,
+                type_str=SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT.name,
+                value_int=1,  # 默认开启 (0=关闭, 1=开启)
+                tips="当检测到帖子应用了互斥TAG时，是否通知管理组 (0=关, 1=开)",
+            )
+            .on_conflict_do_nothing(index_elements=["type"])
         )
         await self.session.execute(stmt_mutex_notify)
-
 
         await self.session.commit()
         logger.info("核心搜索配置已初始化或验证。")

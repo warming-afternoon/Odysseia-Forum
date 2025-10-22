@@ -2,7 +2,6 @@ import discord
 import re  # 导入正则表达式模块
 from shared.models.thread import Thread as ThreadModel
 from datetime import timezone
-from typing import List
 
 
 class ThreadEmbedBuilder:
@@ -15,7 +14,11 @@ class ThreadEmbedBuilder:
             return text
 
         keywords = set()
-        and_groups = [group.strip() for group in keywords_str.replace("，", ",").split(",") if group.strip()]
+        and_groups = [
+            group.strip()
+            for group in keywords_str.replace("，", ",").split(",")
+            if group.strip()
+        ]
         for group in and_groups:
             or_keywords = [kw.strip() for kw in group.split("/") if kw.strip()]
             keywords.update(or_keywords)
@@ -26,17 +29,19 @@ class ThreadEmbedBuilder:
         # 构造正则表达式，使用 | (OR) 来匹配任何一个关键词
         # re.escape确保关键词中的特殊字符（如+、*）被正确处理
         # re.IGNORECASE 使匹配不区分大小写
-        pattern = re.compile(f"({'|'.join(re.escape(kw) for kw in keywords)})", re.IGNORECASE)
-        
+        pattern = re.compile(
+            f"({'|'.join(re.escape(kw) for kw in keywords)})", re.IGNORECASE
+        )
+
         # 使用 pattern.sub 进行替换, 在关键词两侧添加空格以增强可读性
-        return pattern.sub(r' **\1** ', text)
+        return pattern.sub(r" **\1** ", text)
 
     @staticmethod
     async def build(
         thread: "ThreadModel",
         guild: discord.Guild,
         preview_mode: str = "thumbnail",
-        keywords_str: str = ""
+        keywords_str: str = "",
     ) -> discord.Embed:
         """根据Thread ORM对象构建嵌入消息"""
 
@@ -81,7 +86,7 @@ class ThreadEmbedBuilder:
         excerpt_display = (
             excerpt[:200] + "..." if len(excerpt) > 200 else (excerpt or "无内容")
         )
-        
+
         # 高亮摘要
         highlighted_excerpt = ThreadEmbedBuilder._highlight_keywords(
             excerpt_display, keywords_str

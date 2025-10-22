@@ -33,7 +33,11 @@ from src.config.cog import Configuration
 from src.config.repository import ConfigRepository
 from src.shared.api_scheduler import APIScheduler
 from src.webpage.index_sync import start_index_sync
-from src.api.v1.routers import preferences as preferences_api, search as search_api
+from src.api.v1.routers import (
+    preferences as preferences_api,
+    search as search_api,
+    meta as meta_api,
+)
 from src.api.main import app as fastapi_app
 from src.api.v1.dependencies.security import initialize_api_security
 
@@ -83,20 +87,19 @@ class MyBot(commands.Bot):
         try:
             with open("config.json", "r", encoding="utf-8") as f:
                 new_config = json.load(f)
-            
+
             # 更新配置
-            old_config = self.config.copy()
             self.config = new_config
-            
+
             # 更新API调度器并发数
             concurrency = self.config.get("performance", {}).get(
                 "api_scheduler_concurrency", 40
             )
             self.api_scheduler.update_concurrency(concurrency)
-            
+
             logger.info("配置文件重载成功")
             return True, "配置重载成功"
-            
+
         except Exception as e:
             logger.error(f"重载配置文件失败: {e}", exc_info=True)
             return False, f"配置重载失败: {e}"
@@ -115,15 +118,16 @@ class MyBot(commands.Bot):
         # 1. 初始化核心服务
         self.tag_service = TagService(AsyncSessionFactory)
         self.cache_service = CacheService(self, AsyncSessionFactory)
-        self.author_service = AuthorService(bot=self, session_factory=AsyncSessionFactory)
+        self.author_service = AuthorService(
+            bot=self, session_factory=AsyncSessionFactory
+        )
         self.sync_service = SyncService(
             bot=self,
             session_factory=AsyncSessionFactory,
-            author_service=self.author_service
+            author_service=self.author_service,
         )
         self.impression_cache_service = ImpressionCacheService(AsyncSessionFactory)
         self.impression_cache_service.start()
-
 
         asyncio.create_task(self.tag_service.build_cache())
         asyncio.create_task(self.cache_service.build_or_refresh_cache())
@@ -187,9 +191,11 @@ class MyBot(commands.Bot):
 
         # 3. 注册全局事件监听器
         self.add_listener(self.on_index_updated_global, "on_index_updated")
-        
+
         # 4. 启动索引同步服务
-        asyncio.create_task(start_index_sync(self, config=self.config, interval_minutes=30))
+        asyncio.create_task(
+            start_index_sync(self, config=self.config, interval_minutes=30)
+        )
 
         # --- 同步应用程序命令 ---
         try:
@@ -231,21 +237,22 @@ async def main():
             logger.info("机器人已登录，但无法获取机器人信息。")
 
     original_setup_hook = bot.setup_hook
-    
+
     # 在 setup_hook 完成后注入服务实例到 API 路由
     async def enhanced_setup_hook():
         await original_setup_hook()
-        
+
         # 从已加载的 Cogs 中获取服务实例
         preferences_cog = bot.get_cog("Preferences")
         search_cog = bot.get_cog("Search")
-        
+
         if preferences_cog:
             preferences_api.preferences_cog_instance = preferences_cog
         if search_cog:
             search_api.search_cog_instance = search_cog
         search_api.async_session_factory = AsyncSessionFactory
-        
+        meta_api.cache_service_instance = bot.cache_service
+
         logger.info("API 路由服务注入完成")
 
     bot.setup_hook = enhanced_setup_hook
@@ -259,15 +266,12 @@ async def main():
         app=fastapi_app,
         host=api_config.get("host", "0.0.0.0"),
         port=api_config.get("port", 10810),
-        log_level="info"
+        log_level="info",
     )
     server = uvicorn.Server(uvicorn_config)
 
     async with bot:
-        await asyncio.gather(
-            bot.start(config["token"]),
-            server.serve()
-        )
+        await asyncio.gather(bot.start(config["token"]), server.serve())
 
 
 if __name__ == "__main__":

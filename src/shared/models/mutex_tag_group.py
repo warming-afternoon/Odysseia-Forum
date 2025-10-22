@@ -16,9 +16,7 @@ class MutexTagGroup(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
 
     override_tag_name: Optional[str] = Field(
-        default=None, 
-        index=True,
-        description="用于覆盖默认优先级逻辑的标签名"
+        default=None, index=True, description="用于覆盖默认优先级逻辑的标签名"
     )
 
     # 反向关系，用于ORM查询，方便地获取一个组下的所有规则

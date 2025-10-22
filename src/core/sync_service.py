@@ -185,7 +185,7 @@ class SyncService:
                 image_url_match = re.search(
                     r"https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp)",
                     first_msg.content or "",
-                    re.IGNORECASE
+                    re.IGNORECASE,
                 )
                 if image_url_match:
                     thumbnail_url = image_url_match.group(0)
@@ -195,7 +195,7 @@ class SyncService:
                 self.author_service.get_or_fetch_author(
                     author_id=final_author_id,
                     guild=thread.guild,
-                    source_member=source_user_for_author_service
+                    source_member=source_user_for_author_service,
                 )
             )
 

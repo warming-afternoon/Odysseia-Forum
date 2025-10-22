@@ -118,34 +118,44 @@ async def seeded_db_session(
         # 测试数据
         threads_to_create = [
             Thread(
-                channel_id=1, thread_id=101,
+                channel_id=1,
+                thread_id=101,
                 title="关于百合破坏的讨论",
-                author_id=1, created_at=datetime.now()
+                author_id=1,
+                created_at=datetime.now(),
             ),
             Thread(
-                channel_id=1, thread_id=102,
+                channel_id=1,
+                thread_id=102,
                 title="🈲百合破坏",
-                author_id=2, created_at=datetime.now()
+                author_id=2,
+                created_at=datetime.now(),
             ),
             Thread(
-                channel_id=1, thread_id=103,
+                channel_id=1,
+                thread_id=103,
                 title="小说推荐",
-                author_id=3, created_at=datetime.now()
+                author_id=3,
+                created_at=datetime.now(),
             ),
             Thread(
-                channel_id=1, thread_id=104,
+                channel_id=1,
+                thread_id=104,
                 title="禁：请勿讨论百合破坏话题",
-                author_id=4, created_at=datetime.now()
+                author_id=4,
+                created_at=datetime.now(),
             ),
             Thread(
-                channel_id=1, thread_id=105,
+                channel_id=1,
+                thread_id=105,
                 title="纯爱小说分享",
-                author_id=5, created_at=datetime.now()
+                author_id=5,
+                created_at=datetime.now(),
             ),
         ]
         session.add_all(threads_to_create)
         await session.commit()
-        
+
         yield session
 
         # 在每个测试结束后清理数据，确保测试之间的独立性
@@ -203,7 +213,13 @@ async def seeded_db_session(
             [],
             0,
             set(),
-            {"关于百合破坏的讨论", "🈲百合破坏", "禁：请勿讨论百合破坏话题", "小说推荐", "纯爱小说分享"},
+            {
+                "关于百合破坏的讨论",
+                "🈲百合破坏",
+                "禁：请勿讨论百合破坏话题",
+                "小说推荐",
+                "纯爱小说分享",
+            },
         ),
         (
             "7_multiple_keywords_with_exemption",
@@ -252,14 +268,18 @@ async def test_search_exclusion_scenarios(
 
     # 4. 断言结果
     returned_titles = {t.title for t in threads}
-    
+
     print(f"--- 运行测试: {test_id} ---")
     print(f"排除关键词: '{exclude_keywords}'")
     print(f"返回的标题: {returned_titles}")
     print(f"预期数量: {expected_count}, 实际: {total_threads}")
     print(f"预期存在: {expected_present}")
     print(f"预期不存在: {expected_absent}")
-    
+
     assert total_threads == expected_count, f"测试 '{test_id}' 失败：总数不匹配"
-    assert returned_titles.issuperset(expected_present), f"测试 '{test_id}' 失败：部分预期结果缺失"
-    assert not returned_titles.intersection(expected_absent), f"测试 '{test_id}' 失败：返回了不应出现的结果"
+    assert returned_titles.issuperset(expected_present), (
+        f"测试 '{test_id}' 失败：部分预期结果缺失"
+    )
+    assert not returned_titles.intersection(expected_absent), (
+        f"测试 '{test_id}' 失败：返回了不应出现的结果"
+    )

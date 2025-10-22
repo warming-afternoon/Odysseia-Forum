@@ -2,7 +2,7 @@ import asyncio
 import logging
 from collections import Counter
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from sqlmodel import select, update
+from sqlmodel import update
 from sqlalchemy import case, func
 
 from shared.models.thread import Thread
@@ -11,10 +11,12 @@ from shared.enum.search_config_type import SearchConfigType
 
 logger = logging.getLogger(__name__)
 
+
 class ImpressionCacheService:
     """
     处理帖子展示次数的内存缓存和定期数据库回写服务。
     """
+
     def __init__(self, session_factory: async_sessionmaker, flush_interval: int = 60):
         self.session_factory = session_factory
         self.flush_interval = flush_interval  # 默认1分钟回写一次
@@ -29,7 +31,9 @@ class ImpressionCacheService:
             return
         self._is_running = True
         self._task = asyncio.create_task(self._periodic_flush())
-        logger.info(f"ImpressionCacheService 已启动，每 {self.flush_interval} 秒回写一次数据库。")
+        logger.info(
+            f"ImpressionCacheService 已启动，每 {self.flush_interval} 秒回写一次数据库。"
+        )
 
     async def stop(self):
         """停止服务并执行最后一次回写。"""
@@ -58,42 +62,52 @@ class ImpressionCacheService:
         async with self._lock:
             for thread_id in thread_ids:
                 self._impression_cache[thread_id] += 1
-    
+
     async def flush_to_db(self):
         """将内存中的缓存数据写入数据库。"""
         async with self._lock:
             if not self._impression_cache:
                 return
-            
+
             # 复制并清空缓存，以便在DB操作期间可以继续接收新的计数
             data_to_flush = self._impression_cache.copy()
             self._impression_cache.clear()
-        
+
         total_increment = sum(data_to_flush.values())
 
         async with self.session_factory() as session:
             try:
                 # 针对 SQLite 的批量更新
                 # 使用 CASE 表达式来为不同的 thread_id 设置不同的增量值
-                whens = {tid: Thread.display_count + count for tid, count in data_to_flush.items()}
-                case_statement = case(whens, value=Thread.id, else_=Thread.display_count)
-                
+                whens = {
+                    tid: Thread.display_count + count
+                    for tid, count in data_to_flush.items()
+                }
+                case_statement = case(
+                    whens, value=Thread.id, else_=Thread.display_count
+                )
+
                 await session.execute(
                     update(Thread)
                     .where(Thread.id.in_(data_to_flush.keys()))  # type: ignore
                     .values(display_count=case_statement)
                 )
 
-
                 # 更新全局总展示次数 N
                 await session.execute(
                     update(BotConfig)
                     .where(BotConfig.type == SearchConfigType.TOTAL_DISPLAY_COUNT)  # type: ignore
-                    .values(value_int=(func.coalesce(BotConfig.value_int, 0) + total_increment))
+                    .values(
+                        value_int=(
+                            func.coalesce(BotConfig.value_int, 0) + total_increment
+                        )
+                    )
                 )
-                
+
                 await session.commit()
-                logger.debug(f"成功回写 {len(data_to_flush)} 个帖子的展示次数，总增量为 {total_increment}。")
+                logger.debug(
+                    f"成功回写 {len(data_to_flush)} 个帖子的展示次数，总增量为 {total_increment}。"
+                )
             except Exception as e:
                 logger.error(f"回写展示次数到数据库失败: {e}", exc_info=True)
                 # 失败后将数据还回缓存，下次重试

@@ -1,6 +1,5 @@
 from typing import Optional, List
 from pydantic import BaseModel
-from datetime import datetime
 
 
 class UserSearchPreferencesDTO(BaseModel):
@@ -35,10 +34,9 @@ class UserSearchPreferencesDTO(BaseModel):
 
     # 排序算法偏好
     sort_method: str = "comprehensive"
-    
+
     # 自定义排序的基础算法
     custom_base_sort: str = "comprehensive"
-
 
     class Config:
         from_attributes = True

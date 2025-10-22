@@ -2,7 +2,7 @@ import logging
 import discord
 from discord import app_commands
 from discord.ext import commands
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, cast
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from shared.safe_defer import safe_defer
@@ -18,17 +18,19 @@ if TYPE_CHECKING:
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
+
 # 自定义权限检查函数
 def is_admin_or_bot_admin():
     """
     一个自定义的检查函数，用于验证用户是否为服务器管理员或在 config.json 中定义的机器人管理员。
     """
+
     async def predicate(interaction: discord.Interaction) -> bool:
         # 为了让类型检查器知道 interaction.client 是我们自定义的 MyBot 类型，这里进行类型转换
         bot = cast("MyBot", interaction.client)
-        
+
         # 确保 bot 实例和 config 属性存在
-        if not hasattr(bot, 'config'):
+        if not hasattr(bot, "config"):
             return False
 
         # 检查用户是否为在配置文件中指定的机器人管理员
@@ -38,11 +40,16 @@ def is_admin_or_bot_admin():
 
         # 检查用户是否为服务器管理员
         # 在服务器（guild）上下文中，interaction.user 是 discord.Member 类型，拥有 guild_permissions 属性
-        if isinstance(interaction.user, discord.Member) and interaction.user.guild_permissions.administrator:
+        if (
+            isinstance(interaction.user, discord.Member)
+            and interaction.user.guild_permissions.administrator
+        ):
             return True
-          
+
         return False
+
     return app_commands.check(predicate)
+
 
 class Configuration(commands.Cog):
     """管理机器人各项配置"""
@@ -78,10 +85,10 @@ class Configuration(commands.Cog):
     ):
         if isinstance(error, app_commands.CheckFailure):
             await interaction.response.send_message(
-                "❌ 你没有权限使用此命令。需要服务器管理员或被指定为机器人管理员。", ephemeral=True
+                "❌ 你没有权限使用此命令。需要服务器管理员或被指定为机器人管理员。",
+                ephemeral=True,
             )
         else:
-            
             await interaction.response.send_message(
                 f"❌ 命令执行失败: {error}", ephemeral=True
             )
@@ -106,37 +113,41 @@ class Configuration(commands.Cog):
                 f"❌ 命令执行失败: {error}", ephemeral=True
             )
 
-    @config_group.command(name="重载配置", description="重新加载配置文件并重新导出部署网页")
+    @config_group.command(
+        name="重载配置", description="重新加载配置文件并重新导出部署网页"
+    )
     @app_commands.checks.has_permissions(administrator=True)
     async def reload_config(self, interaction: discord.Interaction):
         """重新加载配置文件并重新导出部署网页"""
         await safe_defer(interaction, ephemeral=True)
-        
+
         try:
             # 发送开始消息
             await interaction.followup.send("🔄 开始重载配置文件...", ephemeral=True)
-            
+
             # 重载配置文件
             success, message = self.bot.reload_config()
-            
+
             if not success:
                 await interaction.followup.send(f"❌ {message}", ephemeral=True)
                 return
-            
+
             # 发送配置重载成功消息
-            await interaction.followup.send("✅ 配置文件重载成功！开始重新部署网页...", ephemeral=True)
-            
+            await interaction.followup.send(
+                "✅ 配置文件重载成功！开始重新部署网页...", ephemeral=True
+            )
+
             # 执行手动同步和部署
             await manual_sync(self.bot, self.bot.config)
-            
+
             # 发送完成消息
-            await interaction.followup.send("✅ 配置重载并重新部署完成！", ephemeral=True)
-            
+            await interaction.followup.send(
+                "✅ 配置重载并重新部署完成！", ephemeral=True
+            )
+
         except Exception as e:
             logger.error("重载配置时出错", exc_info=e)
-            await interaction.followup.send(
-                f"❌ 重载配置失败: {e}", ephemeral=True
-            )
+            await interaction.followup.send(f"❌ 重载配置失败: {e}", ephemeral=True)
 
     @reload_config.error
     async def on_reload_config_error(
@@ -157,57 +168,57 @@ class Configuration(commands.Cog):
     async def view_cache_status(self, interaction: discord.Interaction):
         """查看用户昵称缓存状态"""
         await safe_defer(interaction, ephemeral=True)
-        
+
         try:
             # 获取同步服务实例
             sync_service = get_sync_service(self.bot, self.bot.config)
             cache_stats = sync_service.get_cache_stats()
-            
+
             # 构建状态消息
-            status_message = f"📊 **用户昵称缓存状态**\n\n"
+            status_message = "📊 **用户昵称缓存状态**\n\n"
             status_message += f"**缓存条目数**: {cache_stats['total_cached_users']}\n"
-            
-            if cache_stats['sample_entries']:
-                status_message += f"\n**示例条目** (显示前5个):\n"
-                for (guild_id, user_id), nickname in cache_stats['sample_entries'].items():
-                    status_message += f"• 服务器 {guild_id} - 用户 {user_id}: `{nickname}`\n"
+
+            if cache_stats["sample_entries"]:
+                status_message += "\n**示例条目** (显示前5个):\n"
+                for (guild_id, user_id), nickname in cache_stats[
+                    "sample_entries"
+                ].items():
+                    status_message += (
+                        f"• 服务器 {guild_id} - 用户 {user_id}: `{nickname}`\n"
+                    )
             else:
                 status_message += "\n**缓存为空**"
-            
+
             await interaction.followup.send(status_message, ephemeral=True)
-            
+
         except Exception as e:
             logger.error("查看缓存状态时出错", exc_info=e)
-            await interaction.followup.send(
-                f"❌ 获取缓存状态失败: {e}", ephemeral=True
-            )
+            await interaction.followup.send(f"❌ 获取缓存状态失败: {e}", ephemeral=True)
 
     @config_group.command(name="清除缓存", description="清除所有用户昵称缓存")
     @app_commands.checks.has_permissions(administrator=True)
     async def clear_cache(self, interaction: discord.Interaction):
         """清除所有用户昵称缓存"""
         await safe_defer(interaction, ephemeral=True)
-        
+
         try:
             # 获取同步服务实例
             sync_service = get_sync_service(self.bot, self.bot.config)
             cache_stats_before = sync_service.get_cache_stats()
-            
+
             # 清除缓存
             sync_service.clear_all_cache()
-            
+
             await interaction.followup.send(
                 f"✅ 已清除用户昵称缓存！\n"
                 f"**清除前条目数**: {cache_stats_before['total_cached_users']}\n"
-                f"**清除后条目数**: 0", 
-                ephemeral=True
+                f"**清除后条目数**: 0",
+                ephemeral=True,
             )
-            
+
         except Exception as e:
             logger.error("清除缓存时出错", exc_info=e)
-            await interaction.followup.send(
-                f"❌ 清除缓存失败: {e}", ephemeral=True
-            )
+            await interaction.followup.send(f"❌ 清除缓存失败: {e}", ephemeral=True)
 
     @view_cache_status.error
     async def on_view_cache_status_error(
@@ -236,4 +247,3 @@ class Configuration(commands.Cog):
             await interaction.response.send_message(
                 f"❌ 命令执行失败: {error}", ephemeral=True
             )
-

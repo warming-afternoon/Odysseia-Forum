@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 class AuthorService:
     """
     负责获取和缓存作者信息到数据库的服务。
@@ -23,7 +24,7 @@ class AuthorService:
         self,
         author_id: int,
         guild: discord.Guild,
-        source_member: discord.Member | discord.User | None = None
+        source_member: discord.Member | discord.User | None = None,
     ):
         """
         获取或抓取作者信息并存入数据库。
@@ -34,7 +35,7 @@ class AuthorService:
         # 优先使用直接传入的 source_member/user 对象
         if source_member and source_member.id == author_id:
             user_obj = source_member
-        
+
         # 尝试从服务器成员缓存中获取
         if not user_obj:
             user_obj = guild.get_member(author_id)
@@ -49,15 +50,17 @@ class AuthorService:
                 # 使用调度器来避免速率限制
                 user_obj = await self.bot.api_scheduler.submit(
                     coro_factory=lambda: self.bot.fetch_user(author_id),
-                    priority=8 # 优先级略低于帖子同步
+                    priority=8,  # 优先级略低于帖子同步
                 )
             except discord.NotFound:
                 logger.warning(f"无法通过 API找到 ID 为 {author_id} 的用户。")
                 return
             except Exception as e:
-                logger.error(f"通过API获取用户 {author_id} 信息时出错: {e}", exc_info=True)
+                logger.error(
+                    f"通过API获取用户 {author_id} 信息时出错: {e}", exc_info=True
+                )
                 return
-        
+
         if not user_obj:
             logger.warning(f"所有方法都无法获取 ID 为 {author_id} 的用户对象。")
             return
@@ -74,8 +77,7 @@ class AuthorService:
         # 使用 INSERT ... ON CONFLICT DO UPDATE (Upsert)
         stmt = sqlite_insert(Author).values(author_data)
         update_stmt = stmt.on_conflict_do_update(
-            index_elements=["id"],
-            set_=author_data
+            index_elements=["id"], set_=author_data
         )
 
         try:
