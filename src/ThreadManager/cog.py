@@ -39,13 +39,13 @@ class ThreadManager(commands.Cog):
         self.config = config
         self.cache_service = cache_service
         self.sync_service = sync_service
-        
+
         # 从配置中读取更新间隔，如果未配置则默认为30秒
-        update_interval = self.config.get("performance", {}).get("batch_update_interval", 30)
+        update_interval = self.config.get("performance", {}).get(
+            "batch_update_interval", 30
+        )
         self.batch_update_service = BatchUpdateService(
-            session_factory,
-            sync_service=self.sync_service,
-            interval=update_interval
+            session_factory, sync_service=self.sync_service, interval=update_interval
         )
 
         logger.info("ThreadManager 模块已加载")
@@ -135,7 +135,9 @@ class ThreadManager(commands.Cog):
         """在帖子中通知管理组发生了互斥标签冲突。"""
         management_role_id = self.bot.config.get("management_role_id")
         if not management_role_id:
-            logger.warning("未在 config.json 中配置 management_role_id，无法发送管理通知。")
+            logger.warning(
+                "未在 config.json 中配置 management_role_id，无法发送管理通知。"
+            )
             return
 
         content = f"<@&{management_role_id}>"
@@ -175,7 +177,6 @@ class ThreadManager(commands.Cog):
         )
         logger.debug(f"已在帖子 {thread.id} 中发送互斥标签管理通知。")
 
-
     async def apply_mutex_tag_rules(self, thread: discord.Thread) -> bool:
         """检查并应用互斥标签规则。如果进行了修改，则返回 True。"""
         applied_tags = thread.applied_tags
@@ -188,11 +189,12 @@ class ThreadManager(commands.Cog):
         async with self.session_factory() as session:
             repo = ConfigRepository(session)
             groups = await repo.get_all_mutex_groups_with_rules()
-            
-            # 检查是否需要发送管理通知
-            notify_config = await repo.get_search_config(SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT)
-            should_notify_management = notify_config and notify_config.value_int == 1
 
+            # 检查是否需要发送管理通知
+            notify_config = await repo.get_search_config(
+                SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT
+            )
+            should_notify_management = notify_config and notify_config.value_int == 1
 
         tags_to_remove_ids = set()
         all_conflicts = []  # 收集所有冲突信息
@@ -392,20 +394,20 @@ class ThreadManager(commands.Cog):
             # 优先从缓存获取，失败则API调用
             first_msg = thread.get_partial_message(thread.id)
             first_msg = await first_msg.fetch()
-    
+
             reaction_count = (
                 max([r.count for r in first_msg.reactions])
                 if first_msg.reactions
                 else 0
             )
-    
+
             async with self.session_factory() as session:
                 repo = ThreadManagerRepository(session)
-                
+
                 update_succeeded = await repo.update_thread_reaction_count(
                     thread.id, reaction_count
                 )
-    
+
                 # 如果更新失败，说明数据库中可能没有这条记录
                 if not update_succeeded:
                     logger.warning(
@@ -413,12 +415,14 @@ class ThreadManager(commands.Cog):
                     )
                     # 调用 sync_service 进行补录
                     await self.sync_service.sync_thread(thread=thread)
-    
+
         except discord.NotFound:
             # 如果在 fetch() 过程中帖子被删除，这是一种正常情况，记录一下并忽略
             logger.info(f"尝试更新反应数时，帖子 {thread.id} 已被删除，操作中止。")
         except Exception:
-            logger.warning(f"更新或补录反应数时失败 (帖子ID: {thread.id})", exc_info=True)
+            logger.warning(
+                f"更新或补录反应数时失败 (帖子ID: {thread.id})", exc_info=True
+            )
 
     async def pre_sync_forum_tags(self, channel: discord.ForumChannel):
         """

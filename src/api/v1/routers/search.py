@@ -14,23 +14,22 @@ search_cog_instance: Search | None = None
 async_session_factory: async_sessionmaker | None = None
 
 router = APIRouter(
-    prefix="/search",
-    tags=["帖子搜索"],
-    dependencies=[Depends(get_api_key)]
+    prefix="/search", tags=["帖子搜索"], dependencies=[Depends(get_api_key)]
 )
+
 
 @router.post("/", response_model=SearchResponse, summary="执行帖子搜索")
 async def execute_search(request: SearchRequest):
     """
     根据指定的条件搜索帖子，并返回包含作者信息的分页结果。
-    
+
     - **request**: 搜索请求参数，包含所有搜索条件
     - **return**: 分页的搜索结果，包含帖子列表和总数
     """
     if not search_cog_instance or not async_session_factory:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Search 服务尚未初始化"
+            detail="Search 服务尚未初始化",
         )
 
     query_object = ThreadSearchQuery(
@@ -58,18 +57,40 @@ async def execute_search(request: SearchRequest):
         async with async_session_factory() as session:
             repo = SearchRepository(session, search_cog_instance.tag_service)
             config_repo = ConfigRepository(session)
-            
-            total_disp_conf = await config_repo.get_search_config(SearchConfigType.TOTAL_DISPLAY_COUNT)
-            ucb_factor_conf = await config_repo.get_search_config(SearchConfigType.UCB1_EXPLORATION_FACTOR)
-            strength_conf = await config_repo.get_search_config(SearchConfigType.STRENGTH_WEIGHT)
 
-            total_display_count = total_disp_conf.value_int if total_disp_conf and total_disp_conf.value_int is not None else 1
-            exploration_factor = ucb_factor_conf.value_float if ucb_factor_conf and ucb_factor_conf.value_float is not None else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
-            strength_weight = strength_conf.value_float if strength_conf and strength_conf.value_float is not None else SearchConfigDefaults.STRENGTH_WEIGHT.value
+            total_disp_conf = await config_repo.get_search_config(
+                SearchConfigType.TOTAL_DISPLAY_COUNT
+            )
+            ucb_factor_conf = await config_repo.get_search_config(
+                SearchConfigType.UCB1_EXPLORATION_FACTOR
+            )
+            strength_conf = await config_repo.get_search_config(
+                SearchConfigType.STRENGTH_WEIGHT
+            )
+
+            total_display_count = (
+                total_disp_conf.value_int
+                if total_disp_conf and total_disp_conf.value_int is not None
+                else 1
+            )
+            exploration_factor = (
+                ucb_factor_conf.value_float
+                if ucb_factor_conf and ucb_factor_conf.value_float is not None
+                else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
+            )
+            strength_weight = (
+                strength_conf.value_float
+                if strength_conf and strength_conf.value_float is not None
+                else SearchConfigDefaults.STRENGTH_WEIGHT.value
+            )
 
             threads, total_threads = await repo.search_threads_with_count(
-                query_object, request.offset, request.limit,
-                total_display_count, exploration_factor, strength_weight
+                query_object,
+                request.offset,
+                request.limit,
+                total_display_count,
+                exploration_factor,
+                strength_weight,
             )
 
         results = []
@@ -79,7 +100,9 @@ async def execute_search(request: SearchRequest):
                 thread_id=thread.thread_id,
                 channel_id=thread.channel_id,
                 title=thread.title,
-                author=AuthorDetail.model_validate(thread.author) if thread.author else None,
+                author=AuthorDetail.model_validate(thread.author)
+                if thread.author
+                else None,
                 created_at=thread.created_at,
                 last_active_at=thread.last_active_at,
                 reaction_count=thread.reaction_count,
@@ -87,7 +110,7 @@ async def execute_search(request: SearchRequest):
                 display_count=thread.display_count,
                 first_message_excerpt=thread.first_message_excerpt,
                 thumbnail_url=thread.thumbnail_url,
-                tags=[tag.name for tag in thread.tags]
+                tags=[tag.name for tag in thread.tags],
             )
             results.append(thread_detail)
 
@@ -95,12 +118,12 @@ async def execute_search(request: SearchRequest):
             total=total_threads,
             limit=request.limit,
             offset=request.offset,
-            results=results
+            results=results,
         )
     except Exception as e:
         # 生产环境中应使用 logger.exception
         print(f"搜索时发生内部错误: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="执行搜索时发生内部错误"
+            detail="执行搜索时发生内部错误",
         )

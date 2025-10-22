@@ -21,7 +21,6 @@ from .views.persistent_channel_search_view import PersistentChannelSearchView
 from ..preferences.preferences_service import PreferencesService
 from .views.thread_embed_builder import ThreadEmbedBuilder
 from .dto.search_state import SearchStateDTO
-from shared.time_parser import parse_time_string
 
 
 if TYPE_CHECKING:
@@ -188,7 +187,9 @@ class Search(commands.Cog):
                 priority=1,
             )
 
-    async def _create_initial_state_from_prefs(self, user_id: int, overrides: dict) -> SearchStateDTO:
+    async def _create_initial_state_from_prefs(
+        self, user_id: int, overrides: dict
+    ) -> SearchStateDTO:
         """
         从用户偏好创建一个 SearchStateDTO，并应用指定的覆盖值。
         """
@@ -197,31 +198,31 @@ class Search(commands.Cog):
         # 从用户偏好加载基础数据
         if user_prefs:
             prefs_data = {
-                'channel_ids': user_prefs.preferred_channels or [],
-                'include_authors': set(user_prefs.include_authors or []),
-                'exclude_authors': set(user_prefs.exclude_authors or []),
-                'include_tags': set(user_prefs.include_tags or []),
-                'exclude_tags': set(user_prefs.exclude_tags or []),
-                'keywords': user_prefs.include_keywords or "",
-                'exclude_keywords': user_prefs.exclude_keywords or "",
-                'exemption_markers': user_prefs.exclude_keyword_exemption_markers,
-                'results_per_page': user_prefs.results_per_page,
-                'preview_image_mode': user_prefs.preview_image_mode,
-                'sort_method': user_prefs.sort_method,
-                'custom_base_sort': user_prefs.custom_base_sort,
-                'created_after': user_prefs.created_after,
-                'created_before': user_prefs.created_before,
-                'active_after': user_prefs.active_after,
-                'active_before': user_prefs.active_before,
+                "channel_ids": user_prefs.preferred_channels or [],
+                "include_authors": set(user_prefs.include_authors or []),
+                "exclude_authors": set(user_prefs.exclude_authors or []),
+                "include_tags": set(user_prefs.include_tags or []),
+                "exclude_tags": set(user_prefs.exclude_tags or []),
+                "keywords": user_prefs.include_keywords or "",
+                "exclude_keywords": user_prefs.exclude_keywords or "",
+                "exemption_markers": user_prefs.exclude_keyword_exemption_markers,
+                "results_per_page": user_prefs.results_per_page,
+                "preview_image_mode": user_prefs.preview_image_mode,
+                "sort_method": user_prefs.sort_method,
+                "custom_base_sort": user_prefs.custom_base_sort,
+                "created_after": user_prefs.created_after,
+                "created_before": user_prefs.created_before,
+                "active_after": user_prefs.active_after,
+                "active_before": user_prefs.active_before,
             }
         else:
             prefs_data = {}
 
         # 应用覆盖值 (overrides 会覆盖 prefs_data 中的同名键)
         final_data = {**prefs_data, **overrides}
-        
+
         return SearchStateDTO(**final_data)
-        
+
     async def _start_global_search(self, interaction: discord.Interaction):
         """
         启动全局搜索流程的通用逻辑。
@@ -242,8 +243,7 @@ class Search(commands.Cog):
             all_channel_ids = list(self.cache_service.indexed_channel_ids)
 
             initial_state = await self._create_initial_state_from_prefs(
-                interaction.user.id,
-                overrides={'all_available_tags': [], 'page': 1}
+                interaction.user.id, overrides={"all_available_tags": [], "page": 1}
             )
 
             view = ChannelSelectionView(
@@ -255,14 +255,14 @@ class Search(commands.Cog):
                 description = (
                     "已根据偏好预选了频道，可以直接点击“确定搜索”继续或进行修改。"
                 )
-                
+
             embed = discord.Embed(
                 description=description, color=discord.Color.greyple()
-                )
+            )
 
             await interaction.followup.send(
                 content="", view=view, embed=embed, ephemeral=True
-                )
+            )
         except Exception:
             logger.error("在启动全局搜索中发生严重错误", exc_info=True)
             # 确保即使有异常，也能给用户一个反馈
@@ -305,15 +305,17 @@ class Search(commands.Cog):
 
             # 定义需要强制覆盖用户偏好的字段
             overrides = {
-                'channel_ids': all_channel_ids,
-                'include_authors': {author.id},
-                'exclude_authors': set(),
-                'all_available_tags': author_tag_names,
-                'include_tags': set(),
-                'exclude_tags': set(),
-                'page': 1,
+                "channel_ids": all_channel_ids,
+                "include_authors": {author.id},
+                "exclude_authors": set(),
+                "all_available_tags": author_tag_names,
+                "include_tags": set(),
+                "exclude_tags": set(),
+                "page": 1,
             }
-            search_state = await self._create_initial_state_from_prefs(interaction.user.id, overrides)
+            search_state = await self._create_initial_state_from_prefs(
+                interaction.user.id, overrides
+            )
 
             # 创建通用搜索视图
             view = GenericSearchView(self, interaction, search_state)
@@ -366,20 +368,42 @@ class Search(commands.Cog):
                 config_repo = ConfigRepository(session)
 
                 # 获取 UCB1 配置
-                total_disp_conf = await config_repo.get_search_config(SearchConfigType.TOTAL_DISPLAY_COUNT)
-                ucb_factor_conf = await config_repo.get_search_config(SearchConfigType.UCB1_EXPLORATION_FACTOR)
-                strength_conf = await config_repo.get_search_config(SearchConfigType.STRENGTH_WEIGHT)
-                
-                total_display_count = total_disp_conf.value_int if total_disp_conf and total_disp_conf.value_int is not None else 1
-                exploration_factor = ucb_factor_conf.value_float if ucb_factor_conf and ucb_factor_conf.value_float is not None else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
-                strength_weight = strength_conf.value_float if strength_conf and strength_conf.value_float is not None else SearchConfigDefaults.STRENGTH_WEIGHT.value
+                total_disp_conf = await config_repo.get_search_config(
+                    SearchConfigType.TOTAL_DISPLAY_COUNT
+                )
+                ucb_factor_conf = await config_repo.get_search_config(
+                    SearchConfigType.UCB1_EXPLORATION_FACTOR
+                )
+                strength_conf = await config_repo.get_search_config(
+                    SearchConfigType.STRENGTH_WEIGHT
+                )
+
+                total_display_count = (
+                    total_disp_conf.value_int
+                    if total_disp_conf and total_disp_conf.value_int is not None
+                    else 1
+                )
+                exploration_factor = (
+                    ucb_factor_conf.value_float
+                    if ucb_factor_conf and ucb_factor_conf.value_float is not None
+                    else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
+                )
+                strength_weight = (
+                    strength_conf.value_float
+                    if strength_conf and strength_conf.value_float is not None
+                    else SearchConfigDefaults.STRENGTH_WEIGHT.value
+                )
 
                 offset = (page - 1) * per_page
                 limit = per_page
 
                 threads, total_threads = await repo.search_threads_with_count(
-                    search_qo, offset, limit,
-                    total_display_count, exploration_factor, strength_weight
+                    search_qo,
+                    offset,
+                    limit,
+                    total_display_count,
+                    exploration_factor,
+                    strength_weight,
                 )
 
             if threads:
@@ -399,7 +423,7 @@ class Search(commands.Cog):
                         thread,
                         interaction.guild,
                         preview_mode,
-                        keywords_str=search_qo.keywords or ""
+                        keywords_str=search_qo.keywords or "",
                     )
                     embeds.append(embed)
 

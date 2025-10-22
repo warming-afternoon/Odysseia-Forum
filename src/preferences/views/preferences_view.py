@@ -106,11 +106,15 @@ class PreferencesView(discord.ui.View):
 
         # 时间偏好
         time_info = []
-        if prefs.created_after: time_info.append(f"**发帖晚于:** {prefs.created_after}")
-        if prefs.created_before: time_info.append(f"**发帖早于:** {prefs.created_before}")
-        if prefs.active_after: time_info.append(f"**活跃晚于:** {prefs.active_after}")
-        if prefs.active_before: time_info.append(f"**活跃早于:** {prefs.active_before}")
-        
+        if prefs.created_after:
+            time_info.append(f"**发帖晚于:** {prefs.created_after}")
+        if prefs.created_before:
+            time_info.append(f"**发帖早于:** {prefs.created_before}")
+        if prefs.active_after:
+            time_info.append(f"**活跃晚于:** {prefs.active_after}")
+        if prefs.active_before:
+            time_info.append(f"**活跃早于:** {prefs.active_before}")
+
         if time_info:
             embed.add_field(name="⏱️ 时间设置", value="\n".join(time_info), inline=False)
 
@@ -216,7 +220,7 @@ class PreferencesView(discord.ui.View):
                     current_sort=current_base_sort,
                     update_callback=self.handle_base_sort_change,
                     row=1,
-                    exclude_values=["custom"], # 排除自定义选项
+                    exclude_values=["custom"],  # 排除自定义选项
                     placeholder="选择自定义搜索的基础排序算法...",
                 )
             )
@@ -280,7 +284,7 @@ class PreferencesView(discord.ui.View):
                 row=3,
             )
         )
- 
+
         # 第五行
         self.add_item(
             discord.ui.Button(
@@ -358,10 +362,18 @@ class PreferencesView(discord.ui.View):
 
         elif custom_id == "prefs_time":
             initial_values = {
-                "created_after": self.preferences.created_after if self.preferences else None,
-                "created_before": self.preferences.created_before if self.preferences else None,
-                "active_after": self.preferences.active_after if self.preferences else None,
-                "active_before": self.preferences.active_before if self.preferences else None,
+                "created_after": self.preferences.created_after
+                if self.preferences
+                else None,
+                "created_before": self.preferences.created_before
+                if self.preferences
+                else None,
+                "active_after": self.preferences.active_after
+                if self.preferences
+                else None,
+                "active_before": self.preferences.active_before
+                if self.preferences
+                else None,
             }
             modal = TimeRangeModal(self.handle_prefs_time_modal_submit, initial_values)
             await interaction.response.send_modal(modal)
@@ -422,9 +434,9 @@ class PreferencesView(discord.ui.View):
             update_data = {"sort_method": sort_method}
             if sort_method != "custom":
                 update_data["custom_base_sort"] = "comprehensive"
-            
+
             await self.service.save_user_preferences(interaction.user.id, update_data)
-            await self.refresh(interaction) # 刷新视图以显示或隐藏新行
+            await self.refresh(interaction)  # 刷新视图以显示或隐藏新行
         except Exception as e:
             logger.error(f"保存排序方式失败: {e}", exc_info=True)
             await interaction.followup.send(f"❌ 保存失败: {e}", ephemeral=True)
@@ -440,7 +452,7 @@ class PreferencesView(discord.ui.View):
             await self.service.save_user_preferences(
                 interaction.user.id, {"custom_base_sort": sort_method}
             )
-            await self.refresh(interaction) # 刷新视图以更新embed中的文本
+            await self.refresh(interaction)  # 刷新视图以更新embed中的文本
         except Exception as e:
             logger.error(f"保存基础排序方式失败: {e}", exc_info=True)
             await interaction.followup.send(f"❌ 保存失败: {e}", ephemeral=True)

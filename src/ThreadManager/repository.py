@@ -1,10 +1,10 @@
 import logging
-from typing import Any, List, Sequence, cast
+from typing import List, Sequence, cast
 from datetime import datetime
 from shared.models.tag_vote import TagVote
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import update, ColumnElement, and_, case
+from sqlalchemy import update, ColumnElement, case
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
@@ -134,7 +134,9 @@ class ThreadManagerRepository:
         await self.session.execute(stmt)
         await self.session.commit()
 
-    async def update_thread_reaction_count(self, thread_id: int, reaction_count: int) -> bool:
+    async def update_thread_reaction_count(
+        self, thread_id: int, reaction_count: int
+    ) -> bool:
         """仅更新帖子的反应数。如果更新成功（至少影响了一行），则返回 True，否则返回 False。"""
         stmt = (
             update(Thread)
@@ -281,10 +283,10 @@ class ThreadManagerRepository:
     async def batch_update_thread_activity(self, updates: dict[int, UpdateData]) -> int:
         """
         批量更新多个帖子的活跃时间和回复数。
-        
+
         Args:
             updates(dict[int, UpdateData]): {thread_id: {"increment": count, "last_active_at": datetime | None}}
-        
+
         Returns:
             (int) 成功更新的行数。
         """
@@ -300,7 +302,7 @@ class ThreadManagerRepository:
                 for thread_id, data in updates.items()
             },
             value=Thread.thread_id,
-            else_=Thread.reply_count  # 保持原值，如果ID不在case中
+            else_=Thread.reply_count,  # 保持原值，如果ID不在case中
         )
 
         values_to_update = {"reply_count": reply_count_case}
@@ -326,7 +328,7 @@ class ThreadManagerRepository:
             .values(**values_to_update)
             .execution_options(synchronize_session=False)
         )
-        
+
         result = await self.session.execute(stmt)
         return result.rowcount
 
@@ -336,8 +338,10 @@ class ThreadManagerRepository:
         """
         if not thread_ids:
             return []
-            
-        stmt = select(Thread.thread_id).where(cast(ColumnElement, Thread.thread_id).in_(thread_ids))
+
+        stmt = select(Thread.thread_id).where(
+            cast(ColumnElement, Thread.thread_id).in_(thread_ids)
+        )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())
 
@@ -345,7 +349,7 @@ class ThreadManagerRepository:
         """当找不到帖子时，将其 not_found_count 计数加一。"""
         stmt = (
             update(Thread)
-            .where(Thread.thread_id == thread_id) # type: ignore
+            .where(Thread.thread_id == thread_id)  # type: ignore
             .values(not_found_count=Thread.not_found_count + 1)
             .execution_options(synchronize_session=False)
         )

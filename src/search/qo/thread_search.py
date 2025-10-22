@@ -1,6 +1,5 @@
 from dataclasses import dataclass, field
 from typing import Optional, List
-import datetime
 from shared.enum.default_preferences import DefaultPreferences
 
 

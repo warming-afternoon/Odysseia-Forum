@@ -2,7 +2,6 @@ import json
 from fastapi import FastAPI
 from fastapi.middleware.gzip import GZipMiddleware
 from .v1.routers import preferences, search
-from .v1.main import app as app_v1
 
 # 读取配置来决定是否启用文档
 try:
@@ -21,7 +20,7 @@ app = FastAPI(
     description="Odysseia 论坛机器人 API 服务",
     version="1.0.0",
     docs_url=docs_url,
-    redoc_url=redoc_url
+    redoc_url=redoc_url,
 )
 
 # 启用 GZip 压缩
@@ -30,11 +29,13 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(preferences.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 
+
 # 包含 v1 的健康检查端点
 @app.get("/v1/health", summary="健康检查", tags=["系统"])
 async def health_check():
     """API 服务健康检查端点"""
     return {"status": "ok"}
+
 
 @app.get("/", summary="API 根路径", tags=["系统"])
 async def root():
@@ -46,6 +47,6 @@ async def root():
         "endpoints": {
             "health": "/v1/health",
             "preferences": "/v1/preferences",
-            "search": "/v1/search"
-        }
+            "search": "/v1/search",
+        },
     }

@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 
 from shared.database import thread_fts_table
-from shared.models.thread_tag_link import ThreadTagLink
 from shared.models.thread import Thread
 from shared.models.tag import Tag
 from shared.models.author import Author
@@ -45,7 +44,7 @@ class SearchRepository:
         statement,
         total_display_count: int,
         exploration_factor: float,
-        strength_weight: float
+        strength_weight: float,
     ):
         """
         应用 UCB1 算法对帖子进行排序。
@@ -54,21 +53,21 @@ class SearchRepository:
         W = strength_weight
         C = exploration_factor
         N = float(max(1, total_display_count))
-        
+
         # reaction_count as x
         # display_count as n
         x = cast(Thread.reaction_count, Float)
         n = case(
             (Thread.display_count > 0, cast(Thread.display_count, Float)),
-            else_=1.0 # 避免除零，并给新帖子最大探索加成
+            else_=1.0,  # 避免除零，并给新帖子最大探索加成
         )
-        
+
         exploitation_term = W * (x / n)
         # N/n 可能会非常大，取对数避免溢出
         exploration_term = C * func.sqrt(func.log(N) / n)
-        
+
         final_score = (exploitation_term + exploration_term).label("final_score")
-        
+
         return statement, final_score
 
     async def search_threads_with_count(
@@ -78,7 +77,7 @@ class SearchRepository:
         limit: int,
         total_display_count: int,
         exploration_factor: float,
-        strength_weight: float
+        strength_weight: float,
     ) -> tuple[Sequence[Thread], int]:
         """
         根据搜索条件搜索帖子并分页
@@ -113,18 +112,17 @@ class SearchRepository:
             filters.append(Thread.not_found_count == 0)
             if query.channel_ids:
                 filters.append(Thread.channel_id.in_(query.channel_ids))  # type: ignore
-            
-            final_include_author_ids = set(query.include_authors) if query.include_authors else set()
+
+            final_include_author_ids = (
+                set(query.include_authors) if query.include_authors else set()
+            )
 
             # --- 作者名模糊搜索 ---
             if query.author_name_query:
                 search_pattern = f"%{query.author_name_query}%"
-                author_subquery = (
-                    select(Author.id)
-                    .where(
-                        Author.global_name.like(search_pattern) | # type: ignore
-                        Author.display_name.like(search_pattern) # type: ignore
-                    )
+                author_subquery = select(Author.id).where(
+                    Author.global_name.like(search_pattern)  # type: ignore
+                    | Author.display_name.like(search_pattern)  # type: ignore
                 )
                 author_result = await self.session.execute(author_subquery)
                 matched_author_ids = set(author_result.scalars().all())
@@ -166,7 +164,7 @@ class SearchRepository:
 
             # 对可能为 None (虽然不太可能，我说)的 last_active_at 进行安全处理
             if active_after_dt or active_before_dt:
-                conditions = [Thread.last_active_at != None]
+                conditions = [Thread.last_active_at != None]  # noqa: E711
                 if active_after_dt:
                     conditions.append(Thread.last_active_at >= active_after_dt)  # type: ignore
                 if active_before_dt:
@@ -212,9 +210,8 @@ class SearchRepository:
 
                     # 构建匹配部分
                     match_parts = [f'"{tok}"' for tok in tokens[:-1]]
-                    match_parts.append(f'"{tokens[-1]}"*') # 最后一个词元加前缀
+                    match_parts.append(f'"{tokens[-1]}"*')  # 最后一个词元加前缀
                     match_expr = " AND ".join(match_parts)
-
 
                     # 只有在豁免标记列表非空时才构建豁免逻辑
                     if exemption_markers:
@@ -222,18 +219,18 @@ class SearchRepository:
                         # 以避免 NEAR 操作符和前缀（*）的兼容性问题
                         first_token = tokens[0]
                         exemption_clauses = [
-                            f'NEAR("{first_token}" "{marker}", 4)' # 也可以适当减小距离
+                            f'NEAR("{first_token}" "{marker}", 4)'  # 也可以适当减小距离
                             for marker in exemption_markers
                         ]
                         exemption_match_str = f"({' OR '.join(exemption_clauses)})"
-                        
+
                         # 构建带有 NOT 的 FTS 表达式
                         all_exclude_parts.append(
-                            f'({match_expr}) NOT {exemption_match_str}'
+                            f"({match_expr}) NOT {exemption_match_str}"
                         )
                     else:
                         # 如果没有豁免标记，直接排除关键词
-                        all_exclude_parts.append(f'({match_expr})')
+                        all_exclude_parts.append(f"({match_expr})")
 
                 if all_exclude_parts:
                     final_exclude_expr = " OR ".join(all_exclude_parts)
@@ -261,7 +258,7 @@ class SearchRepository:
                 ]
                 for group in and_groups:
                     or_keywords = [
-                        f'{kw.strip()}*' for kw in group.split("/") if kw.strip()
+                        f"{kw.strip()}*" for kw in group.split("/") if kw.strip()
                     ]
                     if or_keywords:
                         filters.append(
@@ -283,9 +280,13 @@ class SearchRepository:
                 return [], 0
 
             # --- 步骤 5: 获取分页数据和排序 ---
-            final_select_stmt = select(Thread).where(Thread.id.in_(base_stmt)).options(  # type: ignore
-                selectinload(Thread.tags),  # type: ignore
-                joinedload(Thread.author)   # type: ignore
+            final_select_stmt = (
+                select(Thread)
+                .where(Thread.id.in_(base_stmt))  # type: ignore
+                .options(
+                    selectinload(Thread.tags),  # type: ignore
+                    joinedload(Thread.author),  # type: ignore
+                )
             )
 
             order_by = None
@@ -302,7 +303,7 @@ class SearchRepository:
                     final_select_stmt,
                     total_display_count,
                     exploration_factor,
-                    strength_weight
+                    strength_weight,
                 )
                 order_by = (
                     final_score_expr.desc()
@@ -323,11 +324,7 @@ class SearchRepository:
             if order_by is not None:
                 final_select_stmt = final_select_stmt.order_by(order_by)
 
-            final_select_stmt = (
-                final_select_stmt
-                .offset(offset)
-                .limit(limit)
-            )
+            final_select_stmt = final_select_stmt.offset(offset).limit(limit)
 
             result = await self.session.execute(final_select_stmt)
             threads = result.scalars().all()

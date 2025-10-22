@@ -80,7 +80,9 @@ class ChannelSelectionView(discord.ui.View):
         self.clear_button.callback = self.on_clear_selection
         self.add_item(self.clear_button)
 
-    def _create_embed(self, description: str, color: discord.Color = discord.Color.greyple()) -> discord.Embed:
+    def _create_embed(
+        self, description: str, color: discord.Color = discord.Color.greyple()
+    ) -> discord.Embed:
         """创建一个描述embed"""
         embed = discord.Embed(description=description, color=color)
         return embed
@@ -131,9 +133,7 @@ class ChannelSelectionView(discord.ui.View):
 
         # 更新消息
         embed = self._create_embed("请选择想搜索的论坛频道（可多选）：")
-        await interaction.response.edit_message(
-            content=None, embed=embed, view=self
-        )
+        await interaction.response.edit_message(content=None, embed=embed, view=self)
 
     async def on_confirm(self, interaction: discord.Interaction):
         """当用户点击“确定”按钮后，切换到通用的搜索视图。"""
@@ -151,7 +151,9 @@ class ChannelSelectionView(discord.ui.View):
             selected_ids = self.search_state.channel_ids
 
         if not selected_ids:
-            embed = self._create_embed("请至少选择一个频道。", color=discord.Color.red())
+            embed = self._create_embed(
+                "请至少选择一个频道。", color=discord.Color.red()
+            )
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
 
@@ -160,11 +162,15 @@ class ChannelSelectionView(discord.ui.View):
         correct_tag_names = [tag.name for tag in merged_tags]
 
         correct_tag_names_set = set(correct_tag_names)
-        
+
         # 过滤正反选标签，只保留在当前所选频道中存在的标签
-        self.search_state.include_tags = self.search_state.include_tags.intersection(correct_tag_names_set)
-        self.search_state.exclude_tags = self.search_state.exclude_tags.intersection(correct_tag_names_set)
-        
+        self.search_state.include_tags = self.search_state.include_tags.intersection(
+            correct_tag_names_set
+        )
+        self.search_state.exclude_tags = self.search_state.exclude_tags.intersection(
+            correct_tag_names_set
+        )
+
         # 更新 search_state 中的频道列表和可用标签列表
         self.search_state.channel_ids = selected_ids
         self.search_state.all_available_tags = correct_tag_names

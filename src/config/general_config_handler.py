@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 class GeneralConfigHandler:
     def __init__(self, bot: "MyBot", session_factory: async_sessionmaker):
         self.bot = bot
@@ -29,45 +30,62 @@ class GeneralConfigHandler:
         async with self.session_factory() as session:
             repo = ConfigRepository(session)
             all_configs = await repo.get_all_configurable_search_configs()
-            
+
         # 默认选中第一个可配置项
         initial_selection = SearchConfigType.UCB1_EXPLORATION_FACTOR
-        
+
         view = ConfigPanelView(self, all_configs, initial_selection)
-        embed = ConfigEmbedBuilder.build_config_panel_embed(view.selected_config, all_configs)
+        embed = ConfigEmbedBuilder.build_config_panel_embed(
+            view.selected_config, all_configs
+        )
 
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
-    async def handle_selection_change(self, interaction: discord.Interaction, view: ConfigPanelView):
+    async def handle_selection_change(
+        self, interaction: discord.Interaction, view: ConfigPanelView
+    ):
         """处理下拉菜单的选择变化"""
         await safe_defer(interaction, ephemeral=True)
-        
-        view.update_components() # 更新视图（主要是下拉框的默认值和按钮状态）
-        embed = ConfigEmbedBuilder.build_config_panel_embed(view.selected_config, view.all_configs)
-        
+
+        view.update_components()  # 更新视图（主要是下拉框的默认值和按钮状态）
+        embed = ConfigEmbedBuilder.build_config_panel_embed(
+            view.selected_config, view.all_configs
+        )
+
         await interaction.edit_original_response(embed=embed, view=view)
 
-    async def handle_edit_button(self, interaction: discord.Interaction, selected_config: BotConfig):
+    async def handle_edit_button(
+        self, interaction: discord.Interaction, selected_config: BotConfig
+    ):
         """处理编辑按钮点击，弹出模态框"""
         modal = EditConfigModal(self, selected_config)
         await interaction.response.send_modal(modal)
 
-    async def process_modal_submit(self, interaction: discord.Interaction, config_type: SearchConfigType, new_values: Dict):
+    async def process_modal_submit(
+        self,
+        interaction: discord.Interaction,
+        config_type: SearchConfigType,
+        new_values: Dict,
+    ):
         """处理模态框提交，更新数据库并刷新视图"""
         await safe_defer(interaction, ephemeral=True)
         try:
             async with self.session_factory() as session:
                 repo = ConfigRepository(session)
-                await repo.update_search_config(config_type, new_values, interaction.user.id)
+                await repo.update_search_config(
+                    config_type, new_values, interaction.user.id
+                )
                 # 重新获取所有配置以刷新视图
                 all_configs = await repo.get_all_configurable_search_configs()
 
             await interaction.followup.send("✅ 配置已成功更新！", ephemeral=True)
-            
+
             # 刷新原始面板
             original_message = await interaction.original_response()
             view = ConfigPanelView(self, all_configs, config_type)
-            embed = ConfigEmbedBuilder.build_config_panel_embed(view.selected_config, all_configs)
+            embed = ConfigEmbedBuilder.build_config_panel_embed(
+                view.selected_config, all_configs
+            )
             await original_message.edit(embed=embed, view=view)
 
         except Exception as e:

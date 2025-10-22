@@ -3,6 +3,8 @@ from typing import List, Optional, Set
 from pydantic import BaseModel
 
 from shared.enum.default_preferences import DefaultPreferences
+
+
 class SearchStateDTO(BaseModel):
     """用于封装 GenericSearchView 所有搜索参数和UI状态的数据传输对象。"""
 

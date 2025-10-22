@@ -1,6 +1,5 @@
 from typing import Optional, List
 from sqlmodel import Field, SQLModel, JSON, Column
-from datetime import datetime
 
 
 class UserSearchPreferences(SQLModel, table=True):

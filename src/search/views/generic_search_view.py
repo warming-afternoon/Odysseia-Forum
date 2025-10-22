@@ -16,7 +16,6 @@ from .timeout_view import TimeoutView
 from .combined_search_view import CombinedSearchView
 from .components.tag_page_button import TagPageButton
 from .custom_search_settings_view import CustomSearchSettingsView
-from ..dto.search_state import SearchStateDTO
 from shared.enum.default_preferences import DefaultPreferences
 from search.constants import SortMethod
 
@@ -57,11 +56,12 @@ class GenericSearchView(discord.ui.View):
         )
 
         # 检查是否需要立即弹出自定义设置视图
-        if (self.search_state.sort_method == "custom"
-            and self.custom_settings_message is None):
-            
+        if (
+            self.search_state.sort_method == "custom"
+            and self.custom_settings_message is None
+        ):
             settings_view = CustomSearchSettingsView(self)
-            
+
             self.custom_settings_message = await settings_view.start()
 
     def get_filter_components(self) -> List[discord.ui.Item]:
@@ -129,17 +129,23 @@ class GenericSearchView(discord.ui.View):
         )
 
         # 第 3 行: 排序选择器
-        sort_select = SortMethodSelect(state.sort_method, self.on_sort_method_change, row=3)
+        sort_select = SortMethodSelect(
+            state.sort_method, self.on_sort_method_change, row=3
+        )
 
         # 动态修改自定义搜索的标签
         if state.sort_method == "custom":
             # 找到 "自定义搜索" 对应的选项
-            custom_option = next((opt for opt in sort_select.options if opt.value == "custom"), None)
-            
+            custom_option = next(
+                (opt for opt in sort_select.options if opt.value == "custom"), None
+            )
+
             if custom_option:
                 # 获取基础排序算法的显示名称
-                base_sort_label = SortMethod.get_short_label_by_value(state.custom_base_sort)
-                
+                base_sort_label = SortMethod.get_short_label_by_value(
+                    state.custom_base_sort
+                )
+
                 # 更新标签
                 custom_option.label = f"🛠️ 自定义 ({base_sort_label})"
 
@@ -296,7 +302,7 @@ class GenericSearchView(discord.ui.View):
                 pass  # 消息可能已被删除，忽略错误
             finally:
                 self.custom_settings_message = None
-        
+
         self.search_state.sort_method = new_method
 
         if new_method == "custom":
@@ -306,12 +312,14 @@ class GenericSearchView(discord.ui.View):
             # 弹出自定义设置视图
             settings_view = CustomSearchSettingsView(self)
             self.custom_settings_message = await settings_view.start()
-            
+
             return
-            
+
         await self.on_filter_change(interaction)
 
-    async def trigger_search_from_custom_settings(self, updated_state: "SearchStateDTO"):
+    async def trigger_search_from_custom_settings(
+        self, updated_state: "SearchStateDTO"
+    ):
         """由 CustomSearchSettingsView 回调，应用设置并刷新主视图"""
         self.search_state = updated_state
         await self.on_filter_change(self.last_interaction)
@@ -350,7 +358,7 @@ class GenericSearchView(discord.ui.View):
         await self.on_filter_change(interaction)
 
     async def show_keyword_modal(self, interaction: discord.Interaction):
-        """创建并显示 KeywordModal """
+        """创建并显示 KeywordModal"""
         modal = KeywordModal(
             initial_keywords=self.search_state.keywords,
             initial_exclude_keywords=self.search_state.exclude_keywords,
@@ -421,7 +429,7 @@ class GenericSearchView(discord.ui.View):
             filters.append(f"包含关键词: {state.keywords}")
         if state.exclude_keywords:
             filters.append(f"排除关键词: {state.exclude_keywords}")
-        
+
         # 时间范围
         if state.created_after:
             filters.append(f"发帖晚于: {state.created_after}")
@@ -437,7 +445,6 @@ class GenericSearchView(discord.ui.View):
             filters.append(f"反应数: {state.reaction_count_range}")
         if state.reply_count_range != DefaultPreferences.DEFAULT_NUMERIC_RANGE.value:
             filters.append(f"回复数: {state.reply_count_range}")
-
 
         if filters:
             description_parts.append("\n".join(filters))

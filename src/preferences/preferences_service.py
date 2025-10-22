@@ -2,7 +2,6 @@ from __future__ import annotations
 import logging
 import discord
 from discord import app_commands
-from datetime import datetime, timezone
 from typing import Dict, List, Optional, TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -198,7 +197,9 @@ class PreferencesService:
             )
             # logger.info(f"用户 {user_id} 的默认搜索频道已保存: {channel_ids}")
 
-    async def save_time_preferences(self, user_id: int, time_data: Dict[str, Optional[str]]) -> None:
+    async def save_time_preferences(
+        self, user_id: int, time_data: Dict[str, Optional[str]]
+    ) -> None:
         """
         保存用户的时间范围偏好设置 (created_after/before, active_after/before)
         直接存储字符串
