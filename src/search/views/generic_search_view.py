@@ -453,7 +453,13 @@ class GenericSearchView(discord.ui.View):
             summary = f"🔍 找到 {results['total']} 个帖子 (第{results['page']}/{results['max_page']}页)"
             color = discord.Color.green()
         else:
-            summary = results.get("error", "没有找到符合条件的结果。")
+            error_value = results.get("error")
+            if error_value is True:
+                summary = "搜索过程中发生错误，请稍后重试。"
+            elif isinstance(error_value, str):
+                summary = error_value
+            else:
+                summary = "没有找到符合条件的结果。"
             color = discord.Color.orange()
 
         description_parts.append(summary)

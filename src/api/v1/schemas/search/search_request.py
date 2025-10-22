@@ -39,7 +39,7 @@ class SearchRequest(BaseModel):
     exclude_authors: Optional[List[int]] = Field(
         default=None, description="屏蔽这些作者的帖子，作者ID列表"
     )
-    author_name_query: Optional[str] = Field(
+    author_name: Optional[str] = Field(
         default=None, description="模糊搜索作者的全局用户名或昵称"
     )
     created_after: Optional[str] = Field(

@@ -118,8 +118,8 @@ class SearchRepository:
             )
 
             # --- 作者名模糊搜索 ---
-            if query.author_name_query:
-                search_pattern = f"%{query.author_name_query}%"
+            if query.author_name:
+                search_pattern = f"%{query.author_name}%"
                 author_subquery = select(Author.id).where(
                     Author.global_name.like(search_pattern)  # type: ignore
                     | Author.display_name.like(search_pattern)  # type: ignore

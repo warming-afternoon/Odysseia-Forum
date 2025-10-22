@@ -69,18 +69,22 @@ class Search(commands.Cog):
 
     def get_merged_tags(self, channel_ids: list[int]) -> list[TagDTO]:
         """
-        获取多个频道的合并tags，重名tag会被合并显示。
-        返回一个 TagDTO 对象列表
+        获取多个频道的合并tags列表，重名tag会被合并显示
         """
-        all_tags_names = set()
-
-        for channel_id in channel_ids:
-            channel = self.cache_service.indexed_channels.get(channel_id)
-            if channel:
-                all_tags_names.update(tag.name for tag in channel.available_tags)
+        # 空列表表示搜索全部频道，直接使用预计算的全局标签缓存
+        if not channel_ids:
+            all_tags_names = self.cache_service.get_global_merged_tags()
+        else:
+            # 从指定频道获取标签并合并
+            all_tags_names_set = set()
+            for channel_id in channel_ids:
+                channel = self.cache_service.indexed_channels.get(channel_id)
+                if channel:
+                    all_tags_names_set.update(tag.name for tag in channel.available_tags)
+            all_tags_names = sorted(list(all_tags_names_set))
 
         # 返回 TagDTO 对象列表，确保后续代码可以安全地访问 .id 和 .name
-        return [TagDTO(id=0, name=tag_name) for tag_name in sorted(all_tags_names)]
+        return [TagDTO(id=0, name=tag_name) for tag_name in all_tags_names]
 
     @app_commands.command(
         name="创建频道搜索", description="在当前帖子内创建频道搜索按钮"
@@ -250,15 +254,7 @@ class Search(commands.Cog):
                 self, interaction, channels, all_channel_ids, initial_state
             )
 
-            description = "请选择想搜索的论坛频道（可多选）："
-            if initial_state.channel_ids:
-                description = (
-                    "已根据偏好预选了频道，可以直接点击“确定搜索”继续或进行修改。"
-                )
-
-            embed = discord.Embed(
-                description=description, color=discord.Color.greyple()
-            )
+            embed = view.build_embed()
 
             await interaction.followup.send(
                 content="", view=view, embed=embed, ephemeral=True
