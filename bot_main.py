@@ -59,6 +59,7 @@ class MyBot(commands.Bot):
         self.sync_service: SyncService
         self.impression_cache_service: ImpressionCacheService
         self.author_service: AuthorService
+        self.config_service: ConfigService
 
         # 从配置初始化API调度器
         concurrency = self.config.get("performance", {}).get(
@@ -110,10 +111,11 @@ class MyBot(commands.Bot):
         self.api_scheduler.start()
         await init_db()
 
-        # 确保搜索配置存在
+        # 确保搜索配置存在并初始化缓存
         async with AsyncSessionFactory() as session:
-            config_repo = ConfigService(session)
-            await config_repo.initialize_search_configs()
+            self.config_service = ConfigService(session)
+            await self.config_service.initialize_search_configs()
+            await self.config_service.build_or_refresh_cache()
 
         # 1. 初始化核心服务
         self.tag_service = TagService(AsyncSessionFactory)
@@ -126,7 +128,9 @@ class MyBot(commands.Bot):
             session_factory=AsyncSessionFactory,
             author_service=self.author_service,
         )
-        self.impression_cache_service = ImpressionCacheService(AsyncSessionFactory)
+        self.impression_cache_service = ImpressionCacheService(
+            bot=self, session_factory=AsyncSessionFactory
+        )
         self.impression_cache_service.start()
 
         asyncio.create_task(self.tag_service.build_cache())
@@ -164,6 +168,7 @@ class MyBot(commands.Bot):
                 cache_service=self.cache_service,
                 preferences_service=preferences_service,
                 impression_cache_service=self.impression_cache_service,
+                config_service=self.config_service,
             ),
             Preferences(
                 bot=self,
@@ -182,6 +187,7 @@ class MyBot(commands.Bot):
                 session_factory=AsyncSessionFactory,
                 api_scheduler=self.api_scheduler,
                 tag_service=self.tag_service,
+                config_service=self.config_service,
             ),
         ]
         await asyncio.gather(
@@ -252,6 +258,7 @@ async def main():
             search_api.search_cog_instance = search_cog
         search_api.async_session_factory = AsyncSessionFactory
         meta_api.cache_service_instance = bot.cache_service
+        search_api.config_service_instance = bot.config_service
 
         logger.info("API 路由服务注入完成")
 

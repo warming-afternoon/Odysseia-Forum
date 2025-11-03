@@ -1,5 +1,6 @@
 import logging
 import discord
+import asyncio
 from typing import TYPE_CHECKING, Dict
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -19,17 +20,16 @@ logger = logging.getLogger(__name__)
 
 
 class GeneralConfigHandler:
-    def __init__(self, bot: "MyBot", session_factory: async_sessionmaker):
+    def __init__(self, bot: "MyBot", session_factory: async_sessionmaker, config_service: ConfigService):
         self.bot = bot
         self.session_factory = session_factory
+        self.config_service = config_service
 
     async def start_flow(self, interaction: discord.Interaction):
         """启动通用配置流程"""
         await safe_defer(interaction, ephemeral=True)
 
-        async with self.session_factory() as session:
-            repo = ConfigService(session)
-            all_configs = await repo.get_all_configurable_search_configs()
+        all_configs = await self.config_service.get_all_configurable_search_configs()
 
         # 默认选中第一个可配置项
         initial_selection = SearchConfigType.UCB1_EXPLORATION_FACTOR
@@ -67,26 +67,31 @@ class GeneralConfigHandler:
         config_type: SearchConfigType,
         new_values: Dict,
     ):
-        """处理模态框提交，更新数据库并刷新视图"""
+        """处理模态框提交，更新数据库，发布事件，并刷新视图"""
         await safe_defer(interaction, ephemeral=True)
         try:
-            async with self.session_factory() as session:
-                repo = ConfigService(session)
-                await repo.update_search_config(
-                    config_type, new_values, interaction.user.id
-                )
-                # 重新获取所有配置以刷新视图
-                all_configs = await repo.get_all_configurable_search_configs()
+            # 更新数据库
+            updated = await self.config_service.update_search_config(
+                config_type, new_values, interaction.user.id
+            )
+            if not updated:
+                await interaction.followup.send("❌ 更新配置失败，未找到对应配置项。", ephemeral=True)
+                return
 
-            await interaction.followup.send("✅ 配置已成功更新！", ephemeral=True)
+            # 发布事件，通知所有监听者
+            self.bot.dispatch("config_updated")
 
-            # 刷新原始面板
+            await interaction.followup.send("✅ 配置已成功更新！正在刷新面板...", ephemeral=True)
+            
+            # 刷新UI
+            all_configs = await self.config_service.get_all_configurable_search_configs()
+
             original_message = await interaction.original_response()
             view = ConfigPanelView(self, all_configs, config_type)
             embed = ConfigEmbedBuilder.build_config_panel_embed(
                 view.selected_config, all_configs
             )
-            await original_message.edit(embed=embed, view=view)
+            await original_message.edit(content=None, embed=embed, view=view)
 
         except Exception as e:
             logger.error(f"更新配置时出错: {e}", exc_info=True)
