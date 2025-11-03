@@ -23,7 +23,7 @@ class ThreadDetail(BaseModel):
     thumbnail_url: Optional[str] = Field(description="帖子缩略图 URL")
     tags: List[str] = Field(description="帖子关联的标签列表")
 
-    @field_serializer('thread_id', 'channel_id')
+    @field_serializer("thread_id", "channel_id")
     def serialize_id(self, value: int) -> str:
         """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
         return str(value)
