@@ -12,7 +12,7 @@ class ThreadEmbedBuilder:
         """辅助函数，使用预编译的 pattern 在文本中高亮关键词"""
         if not highlight_pattern or not text:
             return text
-        
+
         # 直接使用传入的 pattern 对象进行替换
         return highlight_pattern.sub(r" **\1** ", text)
 
@@ -22,7 +22,7 @@ class ThreadEmbedBuilder:
         guild: discord.Guild,
         preview_mode: str = "thumbnail",
         keywords_str: str = "",
-        highlight_pattern: re.Pattern | None = None, # 接收 pattern 对象
+        highlight_pattern: re.Pattern | None = None,  # 接收 pattern 对象
     ) -> discord.Embed:
         """根据Thread ORM对象构建嵌入消息"""
 

@@ -84,7 +84,9 @@ class Search(commands.Cog):
             for channel_id in channel_ids:
                 channel = self.cache_service.indexed_channels.get(channel_id)
                 if channel:
-                    all_tags_names_set.update(tag.name for tag in channel.available_tags)
+                    all_tags_names_set.update(
+                        tag.name for tag in channel.available_tags
+                    )
             all_tags_names = sorted(list(all_tags_names_set))
 
         # 返回 TagDTO 对象列表，确保后续代码可以安全地访问 .id 和 .name
@@ -100,7 +102,7 @@ class Search(commands.Cog):
             return None
 
         # 同时按逗号和斜杠分割，并去除空白
-        raw_keywords = re.split(r'[，,/\s]+', keywords_str)
+        raw_keywords = re.split(r"[，,/\s]+", keywords_str)
         cleaned_keywords = {kw.strip() for kw in raw_keywords if kw.strip()}
 
         if not cleaned_keywords:
@@ -393,7 +395,7 @@ class Search(commands.Cog):
             strength_conf = await self.config_service.get_config_from_cache(
                 SearchConfigType.STRENGTH_WEIGHT
             )
-            
+
             total_display_count = (
                 total_disp_conf.value_int
                 if total_disp_conf and total_disp_conf.value_int is not None
@@ -409,7 +411,7 @@ class Search(commands.Cog):
                 if strength_conf and strength_conf.value_float is not None
                 else SearchConfigDefaults.STRENGTH_WEIGHT.value
             )
-            
+
             async with self.session_factory() as session:
                 repo = SearchService(session, self.tag_service)
                 offset = (page - 1) * per_page
@@ -437,7 +439,9 @@ class Search(commands.Cog):
                 logger.warning("搜索时，无法获取 guild 对象，无法构建结果 embeds")
             else:
                 # 预编译正则表达式
-                highlight_pattern = self._compile_highlight_regex(search_qo.keywords or "")
+                highlight_pattern = self._compile_highlight_regex(
+                    search_qo.keywords or ""
+                )
 
                 embed_tasks = [
                     ThreadEmbedBuilder.build(

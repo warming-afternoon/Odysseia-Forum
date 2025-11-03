@@ -4,7 +4,6 @@ from sqlmodel import Field, SQLModel, BigInteger, Column
 from sqlalchemy.types import Float
 
 
-
 class BotConfig(SQLModel, table=True):
     """存储机器人全局配置，如 UCB1 参数和统计数据"""
 

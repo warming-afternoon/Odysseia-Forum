@@ -43,7 +43,9 @@ class MutexTagsHandler:
 
         await interaction.followup.send(embed=embed, view=view, ephemeral=True)
 
-    async def build_embed(self, selected_priority_tags: Optional[List[str]] = None) -> discord.Embed:
+    async def build_embed(
+        self, selected_priority_tags: Optional[List[str]] = None
+    ) -> discord.Embed:
         """构建显示当前规则的Embed。"""
         embed = discord.Embed(
             title="⚔️ 互斥标签组配置",
@@ -58,19 +60,20 @@ class MutexTagsHandler:
             embed.add_field(name="当前没有互斥组", value="点击'新增'来创建第一个吧！")
         else:
             for group in groups:
-                
                 group_name = f"互斥组 ID: {group.id}"
                 if group.override_tag_name:
                     group_name += f" (覆盖标签: `{group.override_tag_name}`)"
 
                 sorted_rules = sorted(group.rules, key=lambda r: r.priority)
                 value_str = " ➡️ ".join(f"`{rule.tag_name}`" for rule in sorted_rules)
-                embed.add_field(
-                    name=group_name, value=value_str, inline=False
-                )
+                embed.add_field(name=group_name, value=value_str, inline=False)
         return embed
 
-    def _create_step1_view(self, father_interaction: discord.Interaction, selected_tags: Optional[List[str]] = None) -> AddMutexGroupView:
+    def _create_step1_view(
+        self,
+        father_interaction: discord.Interaction,
+        selected_tags: Optional[List[str]] = None,
+    ) -> AddMutexGroupView:
         """创建一个用于步骤1的视图实例。"""
         return AddMutexGroupView(
             handler=self,
@@ -80,7 +83,9 @@ class MutexTagsHandler:
             selected_priority_tags=selected_tags,
         )
 
-    async def handle_add_group_start(self, interaction: discord.Interaction, father_interaction: discord.Interaction):
+    async def handle_add_group_start(
+        self, interaction: discord.Interaction, father_interaction: discord.Interaction
+    ):
         """处理从主面板点击“新增”的流程，发送一个新的临时消息。"""
         await safe_defer(interaction, ephemeral=True)
         view = self._create_step1_view(father_interaction)
@@ -88,14 +93,20 @@ class MutexTagsHandler:
             embed=view.build_embed(), view=view, ephemeral=True
         )
 
-    async def handle_back_to_step1(self, interaction: discord.Interaction, view: AddMutexGroupView):
+    async def handle_back_to_step1(
+        self, interaction: discord.Interaction, view: AddMutexGroupView
+    ):
         """处理从步骤2点击“上一步”的流程，编辑现有消息返回步骤1。"""
         await safe_defer(interaction, ephemeral=True)
-        
-        new_view = self._create_step1_view(view.father_interaction, view.selected_tags)
-        await interaction.edit_original_response(embed=new_view.build_embed(), view=new_view)
 
-    async def handle_add_group_step2(self, interaction: discord.Interaction, view: AddMutexGroupView):
+        new_view = self._create_step1_view(view.father_interaction, view.selected_tags)
+        await interaction.edit_original_response(
+            embed=new_view.build_embed(), view=new_view
+        )
+
+    async def handle_add_group_step2(
+        self, interaction: discord.Interaction, view: AddMutexGroupView
+    ):
         """处理“下一步”按钮点击，显示步骤2的视图。"""
         await safe_defer(interaction, ephemeral=True)
 
@@ -112,24 +123,32 @@ class MutexTagsHandler:
         new_view = AddMutexGroupView(
             handler=self,
             all_tag_names=self.tag_service.get_unique_tag_names(),
-            father_interaction=view.father_interaction, # 传递父交互
+            father_interaction=view.father_interaction,  # 传递父交互
             step=2,
             selected_priority_tags=unique_tags,
         )
-        
-        await interaction.edit_original_response(embed=new_view.build_embed(), view=new_view)
 
-    async def handle_save_new_group(self, interaction: discord.Interaction, view: AddMutexGroupView):
+        await interaction.edit_original_response(
+            embed=new_view.build_embed(), view=new_view
+        )
+
+    async def handle_save_new_group(
+        self, interaction: discord.Interaction, view: AddMutexGroupView
+    ):
         """处理最终的保存逻辑。"""
         await safe_defer(interaction, ephemeral=True)
 
         priority_tags = [tag for tag in view.selected_tags if tag]
-        override_tag_name = view.selected_override_tag if view.selected_override_tag else None
+        override_tag_name = (
+            view.selected_override_tag if view.selected_override_tag else None
+        )
 
         async with self.session_factory() as session:
             repo = ConfigService(session)
             await repo.add_mutex_group(priority_tags, override_tag_name)
-            logger.info(f"成功添加新的互斥标签组，包含标签: {priority_tags}，覆盖标签: {override_tag_name}")
+            logger.info(
+                f"成功添加新的互斥标签组，包含标签: {priority_tags}，覆盖标签: {override_tag_name}"
+            )
 
         # 在保存成功后，关闭 AddMutexGroupView 消息
         await interaction.delete_original_response()
