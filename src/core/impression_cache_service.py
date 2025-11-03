@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from collections import Counter
+from typing import TYPE_CHECKING
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import update
 from sqlalchemy import case, func
@@ -8,6 +9,9 @@ from sqlalchemy import case, func
 from shared.models.thread import Thread
 from shared.models.bot_config import BotConfig
 from shared.enum.search_config_type import SearchConfigType
+
+if TYPE_CHECKING:
+    from bot_main import MyBot
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +21,13 @@ class ImpressionCacheService:
     处理帖子展示次数的内存缓存和定期数据库回写服务。
     """
 
-    def __init__(self, session_factory: async_sessionmaker, flush_interval: int = 60):
+    def __init__(
+        self,
+        bot: "MyBot",
+        session_factory: async_sessionmaker,
+        flush_interval: int = 60,
+    ):
+        self.bot = bot
         self.session_factory = session_factory
         self.flush_interval = flush_interval  # 默认1分钟回写一次
         self._impression_cache = Counter()
@@ -105,6 +115,10 @@ class ImpressionCacheService:
                 )
 
                 await session.commit()
+
+                # 发布配置更新事件
+                self.bot.dispatch("config_updated")
+
                 logger.debug(
                     f"成功回写 {len(data_to_flush)} 个帖子的展示次数，总增量为 {total_increment}。"
                 )
