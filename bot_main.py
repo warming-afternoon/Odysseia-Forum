@@ -31,7 +31,8 @@ from src.preferences.preferences_service import PreferencesService
 from src.auditor.cog import Auditor
 from src.config.cog import Configuration
 from src.banner.cog import BannerManagement
-from config.config_service import ConfigService
+from src.config.config_service import ConfigService
+from src.collection.cog import CollectionCog
 from src.shared.api_scheduler import APIScheduler
 from src.api.v1.routers import (
     preferences as preferences_api,
@@ -197,6 +198,10 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
             ),
+            CollectionCog(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+            ),
         ]
         await asyncio.gather(
             *(self.add_cog(cog) for cog in cogs_to_load), return_exceptions=True
@@ -205,11 +210,6 @@ class MyBot(commands.Bot):
 
         # 3. 注册全局事件监听器
         self.add_listener(self.on_index_updated_global, "on_index_updated")
-
-        # 4. 启动索引同步服务
-        # asyncio.create_task(
-        #    start_index_sync(self, config=self.config, interval_minutes=30)
-        #)
 
         # --- 同步应用程序命令 ---
         try:
@@ -259,11 +259,14 @@ async def main():
         # 从已加载的 Cogs 中获取服务实例
         preferences_cog = bot.get_cog("Preferences")
         search_cog = bot.get_cog("Search")
+        collection_cog = bot.get_cog("CollectionCog")
 
         if preferences_cog:
             preferences_api.preferences_cog_instance = preferences_cog
         if search_cog:
             search_api.search_cog_instance = search_cog
+        if collection_cog:
+            search_api.collection_cog_instance = collection_cog
         search_api.async_session_factory = AsyncSessionFactory
         meta_api.cache_service_instance = bot.cache_service
         search_api.cache_service_instance = bot.cache_service
@@ -296,8 +299,12 @@ async def main():
         host=api_config.get("host", "0.0.0.0"),
         port=api_config.get("port", 10810),
         log_level="info",
-        ssl_keyfile=api_config.get("ssl_key_path", None) if api_config.get("enable_ssl", False) else None,
-        ssl_certfile=api_config.get("ssl_cert_path", None) if api_config.get("enable_ssl", False) else None,
+        ssl_keyfile=api_config.get("ssl_key_path", None)
+        if api_config.get("enable_ssl", False)
+        else None,
+        ssl_certfile=api_config.get("ssl_cert_path", None)
+        if api_config.get("enable_ssl", False)
+        else None,
     )
     server = uvicorn.Server(uvicorn_config)
 

@@ -6,7 +6,7 @@ from sqlmodel import Field, SQLModel
 class ThreadFollow(SQLModel, table=True):
     """用户关注帖子的关联表"""
     
-    __tablename__ = "thread_follow"
+    __tablename__ = "thread_follow"  # type: ignore
     
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(index=True, description="用户Discord ID")

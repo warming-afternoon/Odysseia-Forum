@@ -26,8 +26,9 @@ class ThreadDetail(BaseModel):
         description="帖子首楼图片 URL 列表（按出现顺序）"
     )
     tags: List[str] = Field(description="帖子关联的标签列表")
+    collected_flag: bool = Field(default=False, description="当前用户是否收藏了此帖")
 
-    @field_serializer('thread_id', 'channel_id')
+    @field_serializer("thread_id", "channel_id")
     def serialize_id(self, value: int) -> str:
         """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
         return str(value)

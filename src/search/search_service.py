@@ -10,6 +10,8 @@ from shared.database import thread_fts_table
 from shared.models.thread import Thread
 from shared.models.tag import Tag
 from shared.models.author import Author
+from shared.models.user_collection import UserCollection
+from shared.models.thread_tag_link import ThreadTagLink
 from search.qo.thread_search import ThreadSearchQuery
 from core.tag_service import TagService
 from shared.range_parser import parse_range_string
@@ -247,6 +249,15 @@ class SearchService:
 
             # --- 步骤 3: 组合正选关键词和其他过滤器 ---
             base_stmt = select(Thread.id).distinct()
+            
+            if query.user_id_for_collection_search:
+                # 如果是收藏搜索，则必须 JOIN user_collection 表
+                base_stmt = base_stmt.join(
+                    UserCollection, Thread.thread_id == UserCollection.thread_id # type: ignore
+                )
+                # 并将用户ID作为首要过滤条件
+                filters.append(UserCollection.user_id == query.user_id_for_collection_search)
+            
             needs_fts_join = query.keywords  # 只在有正选关键词时才需要JOIN
             if needs_fts_join:
                 base_stmt = base_stmt.join(
@@ -361,6 +372,19 @@ class SearchService:
             select(Tag)
             .join(Thread, Tag.threads)  # type: ignore
             .where(Thread.author_id == author_id)  # type: ignore
+            .distinct()
+        )
+        result = await self.session.execute(statement)
+        return result.scalars().all()
+
+    async def get_tags_for_collections(self, user_id: int) -> Sequence[Tag]:
+        """获取指定用户收藏的所有帖子的唯一标签列表"""
+        statement = (
+            select(Tag)
+            .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id) # type: ignore
+            .join(Thread, ThreadTagLink.thread_id == Thread.id) # type: ignore
+            .join(UserCollection, Thread.thread_id == UserCollection.thread_id) # type: ignore
+            .where(UserCollection.user_id == user_id)
             .distinct()
         )
         result = await self.session.execute(statement)

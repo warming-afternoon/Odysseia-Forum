@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from src.search.cog import Search
+from src.collection.cog import CollectionCog
 from src.search.qo.thread_search import ThreadSearchQuery
 from src.search.search_service import SearchService
 from config.config_service import ConfigService
@@ -17,6 +18,7 @@ from typing import Dict, Any
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
 search_cog_instance: Search | None = None
+collection_cog_instance: CollectionCog | None = None
 async_session_factory: async_sessionmaker | None = None
 config_service_instance: ConfigService | None = None
 cache_service_instance: CacheService | None = None
@@ -36,6 +38,7 @@ async def execute_search(request: SearchRequest, current_user: Dict[str, Any] = 
     """
     if (
         not search_cog_instance
+        or not collection_cog_instance
         or not async_session_factory
         or not config_service_instance
     ):
@@ -136,6 +139,31 @@ async def execute_search(request: SearchRequest, current_user: Dict[str, Any] = 
                 exclude_thread_ids=exclude_thread_ids,
             )
 
+            # 当排序方法为按创建时间排序时，不记录展示次数。其它外的排序方法均记录展示次数。
+            count_view = not (
+                query_object.sort_method == "created_at"
+                or (
+                    query_object.sort_method == "custom"
+                    and query_object.custom_base_sort == "created_at"
+                )
+            )
+
+            if threads and count_view:
+                thread_ids_to_update = [t.id for t in threads if t.id is not None]
+                await search_cog_instance.impression_cache_service.increment(
+                    thread_ids_to_update
+                )
+        
+        # 检查收藏状态
+        collected_thread_ids = set()
+        user_id = int(current_user["id"]) if current_user and "id" in current_user else None
+        if user_id and threads:
+            thread_ids = [t.thread_id for t in threads]
+            async with collection_cog_instance.get_collection_service() as service:
+                collected_thread_ids = await service.get_collected_thread_ids(
+                    user_id, thread_ids
+                )
+
         results = []
         for thread in threads:
             # 手动创建 ThreadDetail 对象，确保字段正确映射
@@ -154,6 +182,7 @@ async def execute_search(request: SearchRequest, current_user: Dict[str, Any] = 
                 first_message_excerpt=thread.first_message_excerpt,
                 thumbnail_urls=thread.thumbnail_urls or [],
                 tags=[tag.name for tag in thread.tags],
+                collected_flag=thread.thread_id in collected_thread_ids,
             )
             results.append(thread_detail)
 
