@@ -26,7 +26,7 @@ class ConfigService:
         logger.info("刷新 BotConfig 缓存...")
         result = await self.session.execute(select(BotConfig))
         all_configs = result.scalars().all()
-        
+
         # 使用 SearchConfigType 枚举作为键，方便类型提示和访问
         self._cache = {SearchConfigType(config.type): config for config in all_configs}
         logger.info(f"BotConfig 缓存刷新完毕，共加载 {len(self._cache)} 个配置项。")
@@ -60,7 +60,9 @@ class ConfigService:
         )
         return list(result.scalars().unique().all())
 
-    async def add_mutex_group(self, tag_names: List[str], override_tag_name: Optional[str] = None) -> MutexTagGroup:
+    async def add_mutex_group(
+        self, tag_names: List[str], override_tag_name: Optional[str] = None
+    ) -> MutexTagGroup:
         """
         添加一个新的互斥标签组及其规则。
         tag_names 列表中的顺序决定了优先级，越靠前优先级越高 (priority 0 最高)。
@@ -138,7 +140,9 @@ class ConfigService:
         result = await self.session.execute(stmt)
 
         if result.rowcount == 0:
-            logger.warning(f"尝试更新类型为 {config_type.name} 的配置失败，数据库中未找到该行。")
+            logger.warning(
+                f"尝试更新类型为 {config_type.name} 的配置失败，数据库中未找到该行。"
+            )
             return False
 
         await self.session.commit()

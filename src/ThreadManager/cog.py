@@ -4,7 +4,7 @@ from discord import app_commands
 from discord.ext import commands
 import datetime
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from typing import TYPE_CHECKING, List, Tuple, Any, Dict
+from typing import TYPE_CHECKING, List, Any, Dict
 
 from shared.safe_defer import safe_defer
 from config.config_service import ConfigService
@@ -92,7 +92,7 @@ class ThreadManager(commands.Cog):
             added_tag = conflict_info["added"]
 
             sorted_rules = sorted(group.rules, key=lambda r: r.priority)
-            
+
             group_tags_list = []
             if group.override_tag_name:
                 group_tags_list.append(f"覆盖标签: **{group.override_tag_name}**")
@@ -102,9 +102,9 @@ class ThreadManager(commands.Cog):
                 for j, rule in enumerate(sorted_rules)
             ]
             group_tags_list.extend(priority_rules_list)
-            
+
             group_tags_str = "\n".join(group_tags_list)
-            
+
             removed_tags_str = ", ".join(f"{t}" for t in removed_tags)
             value_parts = [f"**规则**:\n{group_tags_str}"]
 
@@ -112,7 +112,7 @@ class ThreadManager(commands.Cog):
                 value_parts.append(f"**结果**: \n应用覆盖标签: **{added_tag}**")
                 value_parts.append(f"移除标签: **{removed_tags_str}**")
             else:
-                value_parts.append(f"**结果**: \n保留最高优先级标签")
+                value_parts.append("**结果**: \n保留最高优先级标签")
                 value_parts.append(f"移除标签: **{removed_tags_str}**")
 
             embed.add_field(
@@ -121,7 +121,9 @@ class ThreadManager(commands.Cog):
                 inline=False,
             )
 
-        footer_text = "如需修改，请右键点击左侧频道列表中的帖子名，\n选择'编辑帖子'来调整标签"
+        footer_text = (
+            "如需修改，请右键点击左侧频道列表中的帖子名，\n选择'编辑帖子'来调整标签"
+        )
         embed.set_footer(text=footer_text)
 
         try:
@@ -197,7 +199,7 @@ class ThreadManager(commands.Cog):
                     value_parts.append(f"**结果**: \n应用覆盖标签: **{added_tag}**")
                     value_parts.append(f"移除标签: **{removed_tags_str}**")
                 else:
-                    value_parts.append(f"**结果**: \n保留最高优先级标签")
+                    value_parts.append("**结果**: \n保留最高优先级标签")
                     value_parts.append(f"移除标签: **{removed_tags_str}**")
 
                 embed.add_field(
@@ -221,10 +223,12 @@ class ThreadManager(commands.Cog):
     async def apply_mutex_tag_rules(self, thread: discord.Thread) -> bool:
         """检查并应用互斥标签规则。如果进行了修改，则返回 True。"""
         applied_tags = thread.applied_tags
-        if (not applied_tags or
-            len(applied_tags) < 2 or
-            not thread.parent or
-            not isinstance(thread.parent, discord.ForumChannel)):
+        if (
+            not applied_tags
+            or len(applied_tags) < 2
+            or not thread.parent
+            or not isinstance(thread.parent, discord.ForumChannel)
+        ):
             return False
 
         post_tag_name_to_obj = {tag.name: tag for tag in applied_tags}
@@ -233,7 +237,9 @@ class ThreadManager(commands.Cog):
         async with self.session_factory() as session:
             repo = ConfigService(session)
             groups = await repo.get_all_mutex_groups_with_rules()
-            notify_config = await repo.get_search_config(SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT)
+            notify_config = await repo.get_search_config(
+                SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT
+            )
             should_notify_management = notify_config and notify_config.value_int == 1
 
         tags_to_remove = set()
@@ -243,7 +249,7 @@ class ThreadManager(commands.Cog):
         for group in groups:
             sorted_rules = sorted(group.rules, key=lambda r: r.priority)
             group_tag_names = {rule.tag_name for rule in sorted_rules}
-            
+
             conflicting_names_in_post = post_tag_names.intersection(group_tag_names)
 
             if len(conflicting_names_in_post) > 1:
@@ -251,7 +257,9 @@ class ThreadManager(commands.Cog):
                 # --- 检查覆盖标签 ---
                 if group.override_tag_name:
                     # 检查覆盖标签是否在当前频道的可用标签中
-                    override_tag_obj = discord.utils.get(thread.parent.available_tags, name=group.override_tag_name)
+                    override_tag_obj = discord.utils.get(
+                        thread.parent.available_tags, name=group.override_tag_name
+                    )
 
                 if override_tag_obj:
                     # 应用覆盖逻辑
@@ -260,13 +268,15 @@ class ThreadManager(commands.Cog):
                         tags_to_remove.add(post_tag_name_to_obj[name])
                     # 添加覆盖标签
                     tags_to_add.add(override_tag_obj)
-                    
+
                     # 记录冲突信息用于通知
-                    all_conflicts.append({
-                        "group": group,
-                        "removed": conflicting_names_in_post,
-                        "added": override_tag_obj.name,
-                    })
+                    all_conflicts.append(
+                        {
+                            "group": group,
+                            "removed": conflicting_names_in_post,
+                            "added": override_tag_obj.name,
+                        }
+                    )
                 else:
                     # 回退到原始优先级逻辑
                     # 找到帖子中优先级最高的那个冲突标签
@@ -275,7 +285,7 @@ class ThreadManager(commands.Cog):
                         if rule.tag_name in conflicting_names_in_post:
                             highest_priority_tag_name = rule.tag_name
                             break
-                    
+
                     # 移除除了最高优先级之外的其他冲突标签
                     tags_to_remove_from_group = {
                         post_tag_name_to_obj[name]
@@ -284,11 +294,13 @@ class ThreadManager(commands.Cog):
                     }
                     tags_to_remove.update(tags_to_remove_from_group)
 
-                    all_conflicts.append({
-                        "group": group,
-                        "removed": {t.name for t in tags_to_remove_from_group},
-                        "added": None,
-                    })
+                    all_conflicts.append(
+                        {
+                            "group": group,
+                            "removed": {t.name for t in tags_to_remove_from_group},
+                            "added": None,
+                        }
+                    )
 
         if tags_to_remove or tags_to_add:
             # 发送通知
@@ -302,7 +314,7 @@ class ThreadManager(commands.Cog):
                     await self._notify_management_of_mutex_conflict(
                         thread, all_conflicts, user_notified_publicly
                     )
-            
+
             # 计算最终标签
             final_tags = list((set(applied_tags) - tags_to_remove) | tags_to_add)
 

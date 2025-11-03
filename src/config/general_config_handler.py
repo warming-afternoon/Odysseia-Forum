@@ -1,6 +1,5 @@
 import logging
 import discord
-import asyncio
 from typing import TYPE_CHECKING, Dict
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -20,7 +19,12 @@ logger = logging.getLogger(__name__)
 
 
 class GeneralConfigHandler:
-    def __init__(self, bot: "MyBot", session_factory: async_sessionmaker, config_service: ConfigService):
+    def __init__(
+        self,
+        bot: "MyBot",
+        session_factory: async_sessionmaker,
+        config_service: ConfigService,
+    ):
         self.bot = bot
         self.session_factory = session_factory
         self.config_service = config_service
@@ -75,16 +79,22 @@ class GeneralConfigHandler:
                 config_type, new_values, interaction.user.id
             )
             if not updated:
-                await interaction.followup.send("❌ 更新配置失败，未找到对应配置项。", ephemeral=True)
+                await interaction.followup.send(
+                    "❌ 更新配置失败，未找到对应配置项。", ephemeral=True
+                )
                 return
 
             # 发布事件，通知所有监听者
             self.bot.dispatch("config_updated")
 
-            await interaction.followup.send("✅ 配置已成功更新！正在刷新面板...", ephemeral=True)
-            
+            await interaction.followup.send(
+                "✅ 配置已成功更新！正在刷新面板...", ephemeral=True
+            )
+
             # 刷新UI
-            all_configs = await self.config_service.get_all_configurable_search_configs()
+            all_configs = (
+                await self.config_service.get_all_configurable_search_configs()
+            )
 
             original_message = await interaction.original_response()
             view = ConfigPanelView(self, all_configs, config_type)

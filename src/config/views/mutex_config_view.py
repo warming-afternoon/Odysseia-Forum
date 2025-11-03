@@ -3,7 +3,6 @@ import discord
 from typing import List, TYPE_CHECKING
 
 from shared.safe_defer import safe_defer
-from config.views.add_mutex_group_view import AddMutexGroupView
 
 if TYPE_CHECKING:
     from config.mutex_tags_handler import MutexTagsHandler
