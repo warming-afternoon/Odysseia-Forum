@@ -274,6 +274,8 @@ async def main():
         host=api_config.get("host", "0.0.0.0"),
         port=api_config.get("port", 10810),
         log_level="info",
+        ssl_keyfile=api_config.get("ssl_key_path", None) if api_config.get("enable_ssl", False) else None,
+        ssl_certfile=api_config.get("ssl_cert_path", None) if api_config.get("enable_ssl", False) else None,
     )
     server = uvicorn.Server(uvicorn_config)
 
