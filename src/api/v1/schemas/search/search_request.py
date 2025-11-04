@@ -10,7 +10,7 @@ class SearchRequest(BaseModel):
     包含所有可用的搜索条件，用于精确查找论坛帖子
     """
 
-    channel_ids: Optional[List[int]] = Field(
+    channel_ids: Optional[List[str]] = Field(
         default=None, description="要搜索的频道ID列表，为空则搜索所有频道"
     )
     include_tags: List[str] = Field(
@@ -33,10 +33,10 @@ class SearchRequest(BaseModel):
         default=None,
         description="关键词排除的豁免标记，附近包含这些标记的反选关键词不会被排除",
     )
-    include_authors: Optional[List[int]] = Field(
+    include_authors: Optional[List[str]] = Field(
         default=None, description="只看这些作者的帖子，作者ID列表"
     )
-    exclude_authors: Optional[List[int]] = Field(
+    exclude_authors: Optional[List[str]] = Field(
         default=None, description="屏蔽这些作者的帖子，作者ID列表"
     )
     author_name: Optional[str] = Field(

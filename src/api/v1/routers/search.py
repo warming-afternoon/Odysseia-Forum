@@ -37,16 +37,37 @@ async def execute_search(request: SearchRequest):
             detail="Search 服务尚未初始化",
         )
 
+    # 将请求中的字符串ID转换为整数ID，供后端服务使用
+    try:
+        channel_ids_int = (
+            [int(cid) for cid in request.channel_ids] if request.channel_ids else None
+        )
+        include_authors_int = (
+            [int(aid) for aid in request.include_authors]
+            if request.include_authors
+            else None
+        )
+        exclude_authors_int = (
+            [int(aid) for aid in request.exclude_authors]
+            if request.exclude_authors
+            else None
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="提供的ID (channel_ids, include_authors, exclude_authors) 包含无效的非数字字符串。",
+        )
+
     query_object = ThreadSearchQuery(
-        channel_ids=request.channel_ids,
+        channel_ids=channel_ids_int,
         include_tags=request.include_tags,
         exclude_tags=request.exclude_tags,
         tag_logic=request.tag_logic,
         keywords=request.keywords,
         exclude_keywords=request.exclude_keywords,
         exclude_keyword_exemption_markers=request.exclude_keyword_exemption_markers,
-        include_authors=request.include_authors,
-        exclude_authors=request.exclude_authors,
+        include_authors=include_authors_int,
+        exclude_authors=exclude_authors_int,
         created_after=request.created_after,
         created_before=request.created_before,
         active_after=request.active_after,
@@ -98,14 +119,23 @@ async def execute_search(request: SearchRequest):
 
         results = []
         for thread in threads:
+            
+            author_detail = None
+            if thread.author:
+                author_detail = AuthorDetail(
+                    id=str(thread.author.id),
+                    name=thread.author.name,
+                    global_name=thread.author.global_name,
+                    display_name=thread.author.display_name,
+                    avatar_url=thread.author.avatar_url,
+                )
+
             # 手动创建 ThreadDetail 对象，确保字段正确映射
             thread_detail = ThreadDetail(
-                thread_id=thread.thread_id,
-                channel_id=thread.channel_id,
+                thread_id=str(thread.thread_id),
+                channel_id=str(thread.channel_id),
                 title=thread.title,
-                author=AuthorDetail.model_validate(thread.author)
-                if thread.author
-                else None,
+                author=author_detail,
                 created_at=thread.created_at,
                 last_active_at=thread.last_active_at,
                 reaction_count=thread.reaction_count,
