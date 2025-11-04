@@ -1,5 +1,5 @@
 import discord
-from typing import List, TYPE_CHECKING, Sequence, Set
+from typing import TYPE_CHECKING, Sequence, Set
 
 from shared.safe_defer import safe_defer
 from .generic_search_view import GenericSearchView
@@ -124,7 +124,7 @@ class ChannelSelectionView(discord.ui.View):
         if selected_count == 0:
             description = (
                 "**当前未选择任何频道，将默认搜索所有频道**\n\n"
-                f"您可以从下方选择频道进行指定搜索\n"
+                "您可以从下方选择频道进行指定搜索\n"
             )
         else:
             # 获取已选频道的名称列表用于展示
@@ -134,8 +134,8 @@ class ChannelSelectionView(discord.ui.View):
             # 如果选中太多，只显示前几个
             display_names = selected_names[:10]
             if len(selected_names) > 10:
-                 display_names.append(f"...等共 {selected_count} 个频道")
-          
+                display_names.append(f"...等共 {selected_count} 个频道")
+
             names_str = ", ".join(display_names)
 
             description = (
@@ -148,7 +148,7 @@ class ChannelSelectionView(discord.ui.View):
             description=description,
             color=discord.Color.blue()
             if selected_count > 0
-            else discord.Color.greyple()
+            else discord.Color.greyple(),
         )
 
         return embed
@@ -170,7 +170,9 @@ class ChannelSelectionView(discord.ui.View):
         self.selected_channel_ids -= current_page_ids
 
         # 将当前下拉框选中的ID添加回 master set
-        new_selected_ids = {int(val) for val in self.channel_select.values if val != "none"}
+        new_selected_ids = {
+            int(val) for val in self.channel_select.values if val != "none"
+        }
         self.selected_channel_ids.update(new_selected_ids)
 
         await self.refresh_view(interaction)

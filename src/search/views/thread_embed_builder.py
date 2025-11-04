@@ -8,33 +8,13 @@ class ThreadEmbedBuilder:
     """负责构建帖子搜索结果的 Embed"""
 
     @staticmethod
-    def _highlight_keywords(text: str, keywords_str: str) -> str:
-        """辅助函数，用于在文本中高亮所有关键词"""
-        if not keywords_str or not text:
+    def _highlight_keywords(text: str, highlight_pattern: re.Pattern | None) -> str:
+        """辅助函数，使用预编译的 pattern 在文本中高亮关键词"""
+        if not highlight_pattern or not text:
             return text
 
-        keywords = set()
-        and_groups = [
-            group.strip()
-            for group in keywords_str.replace("，", ",").split(",")
-            if group.strip()
-        ]
-        for group in and_groups:
-            or_keywords = [kw.strip() for kw in group.split("/") if kw.strip()]
-            keywords.update(or_keywords)
-
-        if not keywords:
-            return text
-
-        # 构造正则表达式，使用 | (OR) 来匹配任何一个关键词
-        # re.escape确保关键词中的特殊字符（如+、*）被正确处理
-        # re.IGNORECASE 使匹配不区分大小写
-        pattern = re.compile(
-            f"({'|'.join(re.escape(kw) for kw in keywords)})", re.IGNORECASE
-        )
-
-        # 使用 pattern.sub 进行替换, 在关键词两侧添加空格以增强可读性
-        return pattern.sub(r" **\1** ", text)
+        # 直接使用传入的 pattern 对象进行替换
+        return highlight_pattern.sub(r" **\1** ", text)
 
     @staticmethod
     async def build(
@@ -42,6 +22,7 @@ class ThreadEmbedBuilder:
         guild: discord.Guild,
         preview_mode: str = "thumbnail",
         keywords_str: str = "",
+        highlight_pattern: re.Pattern | None = None,  # 接收 pattern 对象
     ) -> discord.Embed:
         """根据Thread ORM对象构建嵌入消息"""
 
@@ -89,7 +70,7 @@ class ThreadEmbedBuilder:
 
         # 高亮摘要
         highlighted_excerpt = ThreadEmbedBuilder._highlight_keywords(
-            excerpt_display, keywords_str
+            excerpt_display, highlight_pattern
         )
 
         embed.add_field(name="首楼摘要", value=highlighted_excerpt, inline=False)

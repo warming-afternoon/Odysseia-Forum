@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional
+from typing import List, Optional, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select, update
@@ -13,9 +13,42 @@ from shared.enum.search_config_type import SearchConfigType, SearchConfigDefault
 logger = logging.getLogger(__name__)
 
 
-class ConfigRepository:
+class ConfigService:
     def __init__(self, session: AsyncSession):
         self.session = session
+        # 缓存字典
+        self._cache: Dict[SearchConfigType, BotConfig] = {}
+
+    async def build_or_refresh_cache(self):
+        """
+        从数据库加载所有配置项来构建或刷新缓存。
+        """
+        logger.info("刷新 BotConfig 缓存...")
+        result = await self.session.execute(select(BotConfig))
+        all_configs = result.scalars().all()
+
+        # 使用 SearchConfigType 枚举作为键，方便类型提示和访问
+        self._cache = {SearchConfigType(config.type): config for config in all_configs}
+        logger.info(f"BotConfig 缓存刷新完毕，共加载 {len(self._cache)} 个配置项。")
+
+    async def get_config_from_cache(
+        self, config_type: SearchConfigType
+    ) -> Optional[BotConfig]:
+        """
+        从缓存中异步获取配置项。
+        如果缓存中不存在，则尝试刷新整个缓存并重新获取。
+        """
+        config = self._cache.get(config_type)
+        if config is None:
+            logger.info(f"配置缓存未命中: {config_type.name}. 正在尝试刷新缓存...")
+            await self.build_or_refresh_cache()
+            config = self._cache.get(config_type)  # 刷新后重试
+            if config is None:
+                logger.error(
+                    f"刷新缓存后仍然找不到配置: {config_type.name}. "
+                    f"请检查数据库中是否存在此配置项，或运行一次初始化。"
+                )
+        return config
 
     async def get_all_mutex_groups_with_rules(self) -> List[MutexTagGroup]:
         """
@@ -27,7 +60,9 @@ class ConfigRepository:
         )
         return list(result.scalars().unique().all())
 
-    async def add_mutex_group(self, tag_names: List[str], override_tag_name: Optional[str] = None) -> MutexTagGroup:
+    async def add_mutex_group(
+        self, tag_names: List[str], override_tag_name: Optional[str] = None
+    ) -> MutexTagGroup:
         """
         添加一个新的互斥标签组及其规则。
         tag_names 列表中的顺序决定了优先级，越靠前优先级越高 (priority 0 最高)。
@@ -81,7 +116,7 @@ class ConfigRepository:
 
     async def update_search_config_float(
         self, config_type: SearchConfigType, new_value: float, user_id: int
-    ) -> BotConfig:
+    ) -> bool:
         """更新或创建浮点数类型的搜索配置。"""
         return await self.update_search_config(
             config_type, {"value_float": new_value}, user_id
@@ -89,10 +124,9 @@ class ConfigRepository:
 
     async def update_search_config(
         self, config_type: SearchConfigType, new_values: dict, user_id: int
-    ) -> BotConfig:
+    ) -> bool:
         """
-        通用更新方法，可更新 BotConfig 中的字段。
-        new_values 字典的键应为 BotConfig 模型的字段名，例如 "value_float" 或 "value_int"。
+        更新数据库中的配置项，返回是否更新成功。
         """
         # 动态构建要更新的值，并加入 update_user_id
         update_data = new_values.copy()
@@ -106,21 +140,16 @@ class ConfigRepository:
         result = await self.session.execute(stmt)
 
         if result.rowcount == 0:
-            raise RuntimeError(
-                f"类型为 {config_type.name} 的搜索配置未找到，无法更新。"
+            logger.warning(
+                f"尝试更新类型为 {config_type.name} 的配置失败，数据库中未找到该行。"
             )
-
-        config_entry = await self.get_search_config(config_type)
-        if not config_entry:
-            raise RuntimeError(f"更新后未找到类型为 {config_type.name} 的搜索配置。")
+            return False
 
         await self.session.commit()
-        await self.session.refresh(config_entry)
-        return config_entry
+        return True
 
     async def get_all_configurable_search_configs(self) -> List[BotConfig]:
         """获取所有可供用户配置的搜索配置项。"""
-        # 这里可以根据需要过滤掉一些内部配置项，目前我们全返回
         result = await self.session.execute(
             select(BotConfig).order_by(BotConfig.type)  # type: ignore
         )

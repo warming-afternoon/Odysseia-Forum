@@ -2,19 +2,21 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
+import re
+import asyncio
 from typing import TYPE_CHECKING, Sequence
 
 from shared.safe_defer import safe_defer
 from .dto.tag import TagDTO
 from .views.global_search_view import GlobalSearchView
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from .repository import SearchRepository
-from core.tagService import TagService
+from .search_service import SearchService
+from core.tag_service import TagService
 from core.cache_service import CacheService
 from core.impression_cache_service import ImpressionCacheService
 from search.qo.thread_search import ThreadSearchQuery
 from .views.channel_selection_view import ChannelSelectionView
-from config.repository import ConfigRepository
+from config.config_service import ConfigService
 from shared.enum.search_config_type import SearchConfigType, SearchConfigDefaults
 from .views.generic_search_view import GenericSearchView
 from .views.persistent_channel_search_view import PersistentChannelSearchView
@@ -42,6 +44,7 @@ class Search(commands.Cog):
         cache_service: CacheService,
         preferences_service: PreferencesService,
         impression_cache_service: ImpressionCacheService,
+        config_service: ConfigService,
     ):
         self.bot = bot
         self.session_factory = session_factory
@@ -50,6 +53,7 @@ class Search(commands.Cog):
         self.cache_service = cache_service
         self.preferences_service = preferences_service
         self.impression_cache_service = impression_cache_service
+        self.config_service = config_service
         self.global_search_view = GlobalSearchView(self)
         self.persistent_channel_search_view = PersistentChannelSearchView(self)
         self._has_cached_tags = False  # 用于确保 on_ready 只执行一次缓存
@@ -80,11 +84,33 @@ class Search(commands.Cog):
             for channel_id in channel_ids:
                 channel = self.cache_service.indexed_channels.get(channel_id)
                 if channel:
-                    all_tags_names_set.update(tag.name for tag in channel.available_tags)
+                    all_tags_names_set.update(
+                        tag.name for tag in channel.available_tags
+                    )
             all_tags_names = sorted(list(all_tags_names_set))
 
         # 返回 TagDTO 对象列表，确保后续代码可以安全地访问 .id 和 .name
         return [TagDTO(id=0, name=tag_name) for tag_name in all_tags_names]
+
+    @staticmethod
+    def _compile_highlight_regex(keywords_str: str) -> re.Pattern | None:
+        """
+        一个辅助函数，用于解析关键词字符串并返回一个编译好的正则表达式对象。
+        如果关键词为空，则返回 None。
+        """
+        if not keywords_str:
+            return None
+
+        # 同时按逗号和斜杠分割，并去除空白
+        raw_keywords = re.split(r"[，,/\s]+", keywords_str)
+        cleaned_keywords = {kw.strip() for kw in raw_keywords if kw.strip()}
+
+        if not cleaned_keywords:
+            return None
+
+        # 构建 pattern，使用 re.escape 确保特殊字符被正确处理
+        pattern_str = f"({'|'.join(re.escape(kw) for kw in cleaned_keywords)})"
+        return re.compile(pattern_str, re.IGNORECASE)
 
     @app_commands.command(
         name="创建频道搜索", description="在当前帖子内创建频道搜索按钮"
@@ -110,7 +136,7 @@ class Search(commands.Cog):
 
             # 创建 embed
             embed = discord.Embed(
-                title=f"🔍 {interaction.channel.parent.name} 频道搜索",
+                title=f"🔍 「{interaction.channel.parent.name} 」频道搜索",
                 description=f"点击下方按钮，搜索 <#{channel_id}> 频道内的所有帖子",
                 color=0x3498DB,
             )
@@ -342,7 +368,7 @@ class Search(commands.Cog):
     async def get_tags_for_author(self, author_id: int):
         """获取给定作者使用过的全部标签"""
         async with self.session_factory() as session:
-            repo = SearchRepository(session, self.tag_service)
+            repo = SearchService(session, self.tag_service)
             return await repo.get_tags_for_author(author_id)
 
     async def get_indexed_channel_ids(self) -> Sequence[int]:
@@ -359,37 +385,35 @@ class Search(commands.Cog):
     ) -> dict:
         """通用搜索和显示函数"""
         try:
+            # 获取 UCB1 配置
+            total_disp_conf = await self.config_service.get_config_from_cache(
+                SearchConfigType.TOTAL_DISPLAY_COUNT
+            )
+            ucb_factor_conf = await self.config_service.get_config_from_cache(
+                SearchConfigType.UCB1_EXPLORATION_FACTOR
+            )
+            strength_conf = await self.config_service.get_config_from_cache(
+                SearchConfigType.STRENGTH_WEIGHT
+            )
+
+            total_display_count = (
+                total_disp_conf.value_int
+                if total_disp_conf and total_disp_conf.value_int is not None
+                else 1
+            )
+            exploration_factor = (
+                ucb_factor_conf.value_float
+                if ucb_factor_conf and ucb_factor_conf.value_float is not None
+                else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
+            )
+            strength_weight = (
+                strength_conf.value_float
+                if strength_conf and strength_conf.value_float is not None
+                else SearchConfigDefaults.STRENGTH_WEIGHT.value
+            )
+
             async with self.session_factory() as session:
-                repo = SearchRepository(session, self.tag_service)
-                config_repo = ConfigRepository(session)
-
-                # 获取 UCB1 配置
-                total_disp_conf = await config_repo.get_search_config(
-                    SearchConfigType.TOTAL_DISPLAY_COUNT
-                )
-                ucb_factor_conf = await config_repo.get_search_config(
-                    SearchConfigType.UCB1_EXPLORATION_FACTOR
-                )
-                strength_conf = await config_repo.get_search_config(
-                    SearchConfigType.STRENGTH_WEIGHT
-                )
-
-                total_display_count = (
-                    total_disp_conf.value_int
-                    if total_disp_conf and total_disp_conf.value_int is not None
-                    else 1
-                )
-                exploration_factor = (
-                    ucb_factor_conf.value_float
-                    if ucb_factor_conf and ucb_factor_conf.value_float is not None
-                    else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
-                )
-                strength_weight = (
-                    strength_conf.value_float
-                    if strength_conf and strength_conf.value_float is not None
-                    else SearchConfigDefaults.STRENGTH_WEIGHT.value
-                )
-
+                repo = SearchService(session, self.tag_service)
                 offset = (page - 1) * per_page
                 limit = per_page
 
@@ -414,14 +438,21 @@ class Search(commands.Cog):
             if not interaction.guild:
                 logger.warning("搜索时，无法获取 guild 对象，无法构建结果 embeds")
             else:
-                for thread in threads:
-                    embed = await ThreadEmbedBuilder.build(
+                # 预编译正则表达式
+                highlight_pattern = self._compile_highlight_regex(
+                    search_qo.keywords or ""
+                )
+
+                embed_tasks = [
+                    ThreadEmbedBuilder.build(
                         thread,
                         interaction.guild,
                         preview_mode,
-                        keywords_str=search_qo.keywords or "",
+                        highlight_pattern=highlight_pattern,
                     )
-                    embeds.append(embed)
+                    for thread in threads
+                ]
+                embeds = await asyncio.gather(*embed_tasks)
 
             return {
                 "has_results": True,

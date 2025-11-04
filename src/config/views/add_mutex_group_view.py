@@ -16,6 +16,7 @@ class AddMutexGroupView(discord.ui.View):
     一个专门用于新增互斥标签组的视图。
     这个视图会作为一个新的私密消息发送给用户。
     """
+
     def __init__(
         self,
         handler: "MutexTagsHandler",
@@ -84,7 +85,9 @@ class AddMutexGroupView(discord.ui.View):
         save_button.callback = self.on_save_button_click
         self.add_item(save_button)
 
-        back_button = discord.ui.Button(label="⬅️ 上一步", style=discord.ButtonStyle.secondary, row=4)
+        back_button = discord.ui.Button(
+            label="⬅️ 上一步", style=discord.ButtonStyle.secondary, row=4
+        )
         back_button.callback = self.on_back_button_click
         self.add_item(back_button)
 

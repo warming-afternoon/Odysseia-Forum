@@ -9,8 +9,9 @@ from shared.safe_defer import safe_defer
 
 from .mutex_tags_handler import MutexTagsHandler
 from .general_config_handler import GeneralConfigHandler
-from core.tagService import TagService
+from core.tag_service import TagService
 from src.webpage.index_sync import manual_sync, get_sync_service
+from .config_service import ConfigService
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -60,16 +61,29 @@ class Configuration(commands.Cog):
         session_factory: async_sessionmaker,
         api_scheduler,
         tag_service: TagService,
+        config_service: ConfigService,
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.api_scheduler = api_scheduler
         self.tag_service = tag_service
+        self.config_service = config_service
         self.mutex_handler = MutexTagsHandler(
             bot, self.session_factory, self.api_scheduler, self.tag_service
         )
-        self.general_config_handler = GeneralConfigHandler(bot, self.session_factory)
+        self.general_config_handler = GeneralConfigHandler(
+            bot, self.session_factory, self.config_service
+        )
         logger.info("Config 模块已加载")
+
+    @commands.Cog.listener()
+    async def on_config_updated(self):
+        """
+        监听全局的配置更新事件，并刷新缓存。
+        """
+        logger.debug("Configuration Cog 接收到 'config_updated' 事件，正在刷新缓存...")
+        if self.config_service:
+            await self.config_service.build_or_refresh_cache()
 
     config_group = app_commands.Group(name="配置", description="管理机器人各项配置")
 
