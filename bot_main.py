@@ -193,9 +193,9 @@ class MyBot(commands.Bot):
         self.add_listener(self.on_index_updated_global, "on_index_updated")
 
         # 4. 启动索引同步服务
-        asyncio.create_task(
-            start_index_sync(self, config=self.config, interval_minutes=30)
-        )
+        # asyncio.create_task(
+        #    start_index_sync(self, config=self.config, interval_minutes=30)
+        #)
 
         # --- 同步应用程序命令 ---
         try:

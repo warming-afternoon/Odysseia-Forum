@@ -163,3 +163,27 @@ body::before{
 /* select multiple prettify */
 .filter-item select[multiple]{min-height:44px;max-height:160px;overflow:auto}
 .filter-item select[multiple] option{padding:6px 8px}
+
+
+/* loading skeleton animations */
+.loading-card{animation:pulse 1.5s ease-in-out infinite}
+.loading-card .skeleton,.loading-card .skeleton-title,.loading-card .skeleton-badge,.loading-card .skeleton-line{background:linear-gradient(90deg,rgba(255,255,255,.05) 25%,rgba(255,255,255,.1) 50%,rgba(255,255,255,.05) 75%);background-size:200% 100%;animation:shimmer 1.5s ease-in-out infinite}
+.loading-card .media-img.skeleton{height:200px;border-radius:0}
+.loading-card .skeleton-text{padding:14px;background:#0b121a}
+.loading-card .skeleton-line{height:14px;margin-bottom:8px;border-radius:4px}
+.loading-card .skeleton-line.short{width:60%}
+.loading-card .skeleton-title{height:20px;margin:10px 0;border-radius:6px}
+.loading-card .skeleton-badge{display:inline-block;width:80px;height:24px;margin:4px 6px 4px 0;border-radius:999px}
+
+@keyframes shimmer{
+	0%{background-position:200% 0}
+	100%{background-position:-200% 0}
+}
+
+@keyframes pulse{
+	0%,100%{opacity:1}
+	50%{opacity:.7}
+}
+
+/* error message */
+.error-message{padding:40px;text-align:center;color:var(--danger);background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:var(--radius);margin:20px 0}

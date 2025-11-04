@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from typing import Optional, List
 from datetime import datetime
 from ..base import PaginatedResponse
@@ -22,6 +22,11 @@ class ThreadDetail(BaseModel):
     first_message_excerpt: Optional[str] = Field(description="帖子首条消息摘要")
     thumbnail_url: Optional[str] = Field(description="帖子缩略图 URL")
     tags: List[str] = Field(description="帖子关联的标签列表")
+
+    @field_serializer('thread_id', 'channel_id')
+    def serialize_id(self, value: int) -> str:
+        """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
+        return str(value)
 
     class Config:
         from_attributes = True

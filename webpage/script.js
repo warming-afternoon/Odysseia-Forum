@@ -1,3 +1,4 @@
+
 (function(){
 	"use strict";
 
@@ -9,8 +10,8 @@
 
 	/** 数据与状态 **/
 	const state = {
-		all: [],
 		filtered: [],
+		total: 0,
 		page: 1,
 		perPage: 24,
 		sort: "relevance",
@@ -21,7 +22,10 @@
 		tagLogic: "AND",
 		timeFrom: null,
 		timeTo: null,
-		authed: true
+		authed: true,
+		loading: false,
+		availableChannels: new Map(),
+		availableTags: new Set()
 	};
 
 	// iOS 兼容：从回调 URL 片段中获取 token 并持久化
@@ -72,10 +76,8 @@
 	const fmtDate = (d)=> {
 		if(!d) return "";
 		// 确保正确解析 UTC 时间字符串
-		// 如果字符串不包含时区信息，需要明确指定为 UTC
 		let dt;
 		if(typeof d === 'string'){
-			// 如果字符串不以 Z 结尾且不包含时区偏移，添加 Z 表示 UTC
 			if(!d.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(d)){
 				dt = new Date(d + 'Z');
 			} else {
@@ -88,7 +90,6 @@
 		const now = Date.now();
 		const diff = now - dt.getTime();
 		
-		// 处理未来时间（可能由于时区问题）
 		if(diff < 0) return "刚刚";
 		
 		const sec = Math.floor(diff / 1000);
@@ -118,38 +119,36 @@
 		if(!text) return "";
 		let html = escapeHtml(text);
 		
-		// Discord 自定义表情 <:emoji_name:emoji_id> 或 <a:emoji_name:emoji_id> (动画表情)
+		// Discord 自定义表情
 		html = html.replace(/&lt;a?:([^:]+):(\d+)&gt;/g, '<img class="discord-emoji" src="https://cdn.discordapp.com/emojis/$2.webp" alt=":$1:" title=":$1:" loading="lazy">');
 		
-		// 代码块 ```code```
+		// 代码块
 		html = html.replace(/```([^`]+)```/g, '<pre><code>$1</code></pre>');
-		
-		// 行内代码 `code`
 		html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
 		
-		// 粗体 **bold** 或 __bold__
+		// 粗体
 		html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
 		html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
 		
-		// 斜体 *italic* 或 _italic_
+		// 斜体
 		html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 		html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
 		
-		// 删除线 ~~strikethrough~~
+		// 删除线
 		html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
 		
-		// 链接 [text](url)
+		// 链接
 		html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
 		
-		// 标题 # Header
+		// 标题
 		html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
 		html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
 		html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
 		
-		// 引用 > quote
+		// 引用
 		html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
 		
-		// 无序列表 - item 或 * item
+		// 无序列表
 		html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>');
 		html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
 		
@@ -196,192 +195,164 @@
 		label.textContent = [...items].slice(0,3).join(', ') + (items.size>3? ` 等${items.size}项` : '');
 	}
 
-	/** 初始化频道与标签选项（菜单内容） **/
-	function initChannels(all){
+	/** 初始化频道选项 **/
+	async function initChannels(){
 		const byId = window.CHANNELS || {};
-		const discovered = new Set(all.map(x=>String(x.channel_id)));
-		const options = [];
-		discovered.forEach(id=>{ options.push({id, name: byId[id] || `频道 ${id}`}); });
-		options.sort((a,b)=> a.name.localeCompare(b.name, 'zh-Hans'));
+		state.availableChannels = new Map(Object.entries(byId).map(([id, name]) => [id, name]));
+		
+		const options = Array.from(state.availableChannels.entries())
+			.map(([id, name]) => ({id, name}))
+			.sort((a,b)=> a.name.localeCompare(b.name, 'zh-Hans'));
+		
 		const menu = el.chWrap.querySelector('.multi-menu');
 		menu.innerHTML = options.map(o=>`<label class="multi-option"><input type="checkbox" value="${o.id}"><span>${escapeHtml(o.name)}</span></label>`).join('');
-		// 恢复 URL 选择
+		
 		menu.querySelectorAll('input[type=checkbox]').forEach(cb=>{ cb.checked = state.channels.has(cb.value); });
 		setMultiLabel(el.chWrap, state.channels.size? new Set([...state.channels].map(id=> (byId[id]||`频道 ${id}`))) : new Set());
 	}
 
-	function computeAvailableTags(){
-		// 基于所选频道集合（若未选择则全部频道）来收集所有帖子 tags
-		const allowAll = state.channels.size===0;
-		const tagSet = new Set();
-		state.all.forEach(item=>{
-			if(allowAll || state.channels.has(String(item.channel_id))){
-				(item.tags||[]).forEach(t=> tagSet.add(t));
-			}
-		});
-		return [...tagSet].sort((a,b)=> a.localeCompare(b,'zh-Hans'));
+	/** 初始化标签选项（从后端元数据获取） **/
+	async function initTags(){
+		// 这里可以从后端 API 获取可用标签列表
+		// 暂时使用空集合，实际使用时可以调用 /v1/meta/tags 等接口
+		refreshTagMenus();
 	}
+
 	function refreshTagMenus(){
-		const tags = computeAvailableTags();
+		const tags = [...state.availableTags].sort((a,b)=> a.localeCompare(b,'zh-Hans'));
 		const html = tags.map(t=>`<label class="multi-option"><input type="checkbox" value="${escapeAttr(t)}"><span>${escapeHtml(t)}</span></label>`).join('');
 		const menuIn = el.inWrap.querySelector('.multi-menu');
 		const menuEx = el.exWrap.querySelector('.multi-menu');
 		menuIn.innerHTML = html; menuEx.innerHTML = html;
-		// 恢复
+		
 		menuIn.querySelectorAll('input').forEach(i=> i.checked = state.includeTags.has(i.value));
 		menuEx.querySelectorAll('input').forEach(i=> i.checked = state.excludeTags.has(i.value));
 		setMultiLabel(el.inWrap, state.includeTags);
 		setMultiLabel(el.exWrap, state.excludeTags);
 	}
 
-	/** 搜索与排序 **/
-	function normalize(text){ return (text||"").toLowerCase().replace(/[\u3000\s]+/g," ").trim(); }
-	
-	// 解析高级搜索语法：author:xxx "精确匹配" -排除
-	function parseQuery(q){
-		const parsed = { authors: [], exact: [], include: [], exclude: [] };
-		if(!q) return parsed;
+	/** 构建搜索请求参数 **/
+	function buildSearchRequest(){
+		const sortMap = {
+			"relevance": { method: "comprehensive", order: "desc" },
+			"last_active_desc": { method: "last_active", order: "desc" },
+			"created_desc": { method: "created_at", order: "desc" },
+			"reply_desc": { method: "reply_count", order: "desc" },
+			"reaction_desc": { method: "reaction_count", order: "desc" }
+		};
+		const sortConfig = sortMap[state.sort] || sortMap["relevance"];
 		
-		// 匹配模式：author:xxx "quoted" -exclude word
-		const regex = /author:(\S+)|"([^"]+)"|-(\S+)|(\S+)/gi;
-		let match;
-		while((match = regex.exec(q)) !== null){
-			if(match[1]){ // author:xxx
-				parsed.authors.push(normalize(match[1]));
-			} else if(match[2]){ // "精确匹配"
-				parsed.exact.push(normalize(match[2]));
-			} else if(match[3]){ // -排除
-				parsed.exclude.push(normalize(match[3]));
-			} else if(match[4]){ // 普通词
-				parsed.include.push(normalize(match[4]));
+		return {
+			channel_ids: state.channels.size > 0 ? Array.from(state.channels).map(id => parseInt(id)) : null,
+			include_tags: Array.from(state.includeTags),
+			exclude_tags: Array.from(state.excludeTags),
+			tag_logic: state.tagLogic.toLowerCase(),
+			keywords: state.query || null,
+			created_after: state.timeFrom ? formatDateForAPI(state.timeFrom) : null,
+			created_before: state.timeTo ? formatDateForAPI(state.timeTo) : null,
+			sort_method: sortConfig.method,
+			sort_order: sortConfig.order,
+			limit: state.perPage,
+			offset: (state.page - 1) * state.perPage
+		};
+	}
+
+	function formatDateForAPI(date){
+		const d = new Date(date);
+		const year = d.getFullYear();
+		const month = String(d.getMonth() + 1).padStart(2, '0');
+		const day = String(d.getDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
+	}
+
+	/** 从服务端获取搜索结果 **/
+	async function fetchSearchResults(){
+		if(state.loading) return;
+		
+		state.loading = true;
+		showLoadingPlaceholders();
+		
+		try{
+			const searchRequest = buildSearchRequest();
+			const res = await fetch(window.AUTH_URL + '/api/search', {
+				method: 'POST',
+				credentials: 'include',
+				headers: {
+					'Content-Type': 'application/json',
+					...authHeaders()
+				},
+				body: JSON.stringify(searchRequest)
+			
+
+
+			});
+			
+			if(!res || res.status === 401){
+				state.authed = false;
+				state.loading = false;
+				render();
+				return;
 			}
-		}
-		return parsed;
-	}
-	
-	function matchesQuery(item, parsed){
-		const title = normalize(item.title);
-		const author = normalize(item.author);
-		const excerpt = normalize(item.first_message_excerpt);
-		const combined = title + " " + excerpt;
-		
-		// 检查 author: 完全匹配
-		if(parsed.authors.length > 0){
-			const found = parsed.authors.some(a=> author === a);
-			if(!found) return false;
-		}
-		
-		// 检查精确匹配
-		for(const ex of parsed.exact){
-			if(!combined.includes(ex) && !title.includes(ex)) return false;
-		}
-		
-		// 检查排除词
-		for(const ex of parsed.exclude){
-			if(combined.includes(ex) || title.includes(ex) || author.includes(ex)) return false;
-		}
-		
-		// 检查包含词（全部必须匹配）
-		for(const inc of parsed.include){
-			if(!combined.includes(inc) && !title.includes(inc) && !author.includes(inc)) return false;
-		}
-		
-		return true;
-	}
-	
-	function keywordScore(item, parsed){
-		if(parsed.authors.length===0 && parsed.exact.length===0 && parsed.include.length===0) return 0;
-		const title = normalize(item.title);
-		const author = normalize(item.author);
-		const excerpt = normalize(item.first_message_excerpt);
-		let score = 0;
-		
-		// author: 匹配加分
-		for(const a of parsed.authors){ if(author.includes(a)) score += 10; }
-		
-		// 精确匹配高分
-		for(const ex of parsed.exact){
-			if(title.includes(ex)) score += 8;
-			else if(excerpt.includes(ex)) score += 4;
-		}
-		
-		// 普通词匹配
-		for(const inc of parsed.include){
-			if(title.includes(inc)) score += 5;
-			else if(author.includes(inc)) score += 3;
-			else if(excerpt.includes(inc)) score += 2;
-		}
-		
-		// 时间加权
-		if(item.last_active_at){
-			const d=(Date.now()-new Date(item.last_active_at).getTime())/86400000;
-			score += Math.max(0,5-Math.min(5,d/7));
-		}
-		return score;
-	}
-	
-	function includesAllTags(itemTags, required){ for(const t of required){ if(!itemTags.includes(t)) return false; } return true; }
-	function includesAnyTag(itemTags, required){ for(const t of required){ if(itemTags.includes(t)) return true; } return false; }
-	function excludesAnyTags(itemTags, banned){ for(const t of banned){ if(itemTags.includes(t)) return true; } return false; }
-
-	function applyFilters(){
-		const parsed = parseQuery(state.query);
-		const chSet = state.channels;
-		const inc = [...state.includeTags].map(normalize);
-		const exc = [...state.excludeTags].map(normalize);
-		const from = state.timeFrom; const to = state.timeTo;
-
-		let res = state.all.filter(item=>{
-			if(chSet.size && !chSet.has(String(item.channel_id))) return false;
-			const itemTags = (item.tags||[]).map(normalize);
-			// 标签逻辑：AND 全部包含 / OR 任一即可
-			if(inc.length){
-				if(state.tagLogic === "AND"){
-					if(!includesAllTags(itemTags, inc)) return false;
-				} else {
-					if(!includesAnyTag(itemTags, inc)) return false;
+			
+			if(!res.ok){
+				console.error('搜索请求失败:', res.status);
+				state.loading = false;
+				el.stats.textContent = "搜索失败，请稍后重试";
+				el.results.innerHTML = '<div class="error-message">搜索失败，请稍后重试</div>';
+				return;
+			}
+			
+			const data = await res.json();
+			state.filtered = data.results || [];
+			state.total = data.total || 0;
+			
+			// 从结果中提取可用标签
+			const tagsSet = new Set();
+			state.filtered.forEach(item => {
+				if(Array.isArray(item.tags)){
+					item.tags.forEach(tag => tagsSet.add(tag));
 				}
-			}
-			if(exc.length && excludesAnyTags(itemTags, exc)) return false;
-			// 时间筛选：只基于发帖时间（created_at）
-			if(from || to){
-				if(!item.created_at) return false;
-				// 正确解析 UTC 时间
-				let createdDate;
-				if(typeof item.created_at === 'string'){
-					if(!item.created_at.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(item.created_at)){
-						createdDate = new Date(item.created_at + 'Z');
-					} else {
-						createdDate = new Date(item.created_at);
-					}
-				} else {
-					createdDate = new Date(item.created_at);
-				}
-				// 不早于：发帖时间 >= from 的开始（本地时区）
-				if(from && createdDate < startOfDay(from)) return false;
-				// 不晚于：发帖时间 <= to 的结束（本地时区）
-				if(to && createdDate > endOfDay(to)) return false;
-			}
-			// 使用高级搜索逻辑
-			if(state.query && !matchesQuery(item, parsed)) return false;
-			return true;
-		});
-
-		switch(state.sort){
-			case "relevance":
-				res = res.map(x=>({item:x, s:keywordScore(x, parsed)})).sort((a,b)=> b.s - a.s || new Date(b.item.last_active_at||0)-new Date(a.item.last_active_at||0)).map(x=>x.item);
-				break;
-			case "last_active_desc": res.sort((a,b)=> new Date(b.last_active_at||0)-new Date(a.last_active_at||0)); break;
-			case "created_desc": res.sort((a,b)=> new Date(b.created_at||0)-new Date(a.created_at||0)); break;
-			case "reply_desc": res.sort((a,b)=> (b.reply_count||0)-(a.reply_count||0)); break;
-			case "reaction_desc": res.sort((a,b)=> (b.reaction_count||0)-(a.reaction_count||0)); break;
+			});
+			state.availableTags = tagsSet;
+			
+		}catch(e){
+			console.error('获取搜索结果时出错:', e);
+			state.loading = false;
+			el.stats.textContent = "搜索出错";
+			el.results.innerHTML = '<div class="error-message">搜索出错，请稍后重试</div>';
+			return;
 		}
-
-		state.filtered = res;
+		
+		state.loading = false;
+		render();
 	}
 
-	function startOfDay(d){ const x = new Date(d); x.setHours(0,0,0,0); return x; }
-	function endOfDay(d){ const x = new Date(d); x.setHours(23,59,59,999); return x; }
+	/** 显示加载占位符 **/
+	function showLoadingPlaceholders(){
+		const placeholders = Array(state.perPage).fill(0).map(() => `
+			<article class="card loading-card">
+				<div class="card-media">
+					<div class="media-img skeleton"></div>
+					<div class="excerpt skeleton-text">
+						<div class="skeleton-line"></div>
+						<div class="skeleton-line"></div>
+						<div class="skeleton-line short"></div>
+					</div>
+				</div>
+				<div class="card-body">
+					<div class="skeleton-title"></div>
+					<div class="card-meta">
+						<span class="skeleton-badge"></span>
+						<span class="skeleton-badge"></span>
+						<span class="skeleton-badge"></span>
+					</div>
+				</div>
+			</article>
+		`).join('');
+		
+		el.results.innerHTML = placeholders;
+		el.stats.textContent = "加载中...";
+	}
 
 	/** 渲染 **/
 	function render(){
@@ -395,41 +366,39 @@
 				</div>
 			</div>`;
 			el.pagination.innerHTML = "";
-			// 绑定登录按钮
 			const btn = document.getElementById('loginBtn');
 			if(btn){ btn.addEventListener('click', ()=> login()); }
 			return;
 		}
-		const total = state.filtered.length;
+		
+		const total = state.total;
 		const pages = Math.max(1, Math.ceil(total / state.perPage));
-		if(state.page>pages) state.page = pages;
-		const start = (state.page-1)*state.perPage;
-		const slice = state.filtered.slice(start, start+state.perPage);
+		if(state.page > pages && pages > 0) state.page = pages;
+		
 		el.stats.textContent = `共 ${total} 条结果 · 第 ${state.page}/${pages} 页`;
-
-		el.results.innerHTML = slice.map(renderCard).join("");
+		el.results.innerHTML = state.filtered.map(renderCard).join("");
 		renderPagination(state.page, pages);
-		// 基于所选频道刷新可选标签
 		refreshTagMenus();
 		
-		// 滚动到页面顶部
 		window.scrollTo({top: 0, behavior: 'smooth'});
 	}
 
 	function renderCard(item){
+		const author = item.author || {};
 		const imgHtml = item.thumbnail_url ? `<div class="media-img"><img src="${escapeAttr(item.thumbnail_url)}" alt="${escapeAttr(item.title)} 缩略图" loading="lazy" class="card-img" data-src="${escapeAttr(item.thumbnail_url)}"></div>` : `<div class="media-img"></div>`;
 		const excerptText = limitText(item.first_message_excerpt||"", item.thumbnail_url ? 500 : 800);
 		const excerptHtml = `<div class="excerpt markdown-content">${renderMarkdown(excerptText)}</div>`;
-		const channelName = (window.CHANNELS||{})[String(item.channel_id)] || `频道 ${item.channel_id}`;
+		const channelName = state.availableChannels.get(String(item.channel_id)) || `频道 ${item.channel_id}`;
 		const created = fmtDate(item.created_at);
 		const active = fmtDate(item.last_active_at);
-		const authorName = item.author || "未知作者";
+		const authorName = author.display_name || author.global_name || author.username || "未知作者";
 		const guildId = window.GUILD_ID || "1134557553011998840";
+		
 		return `
 		<article class="card" tabindex="0">
 			<div class="card-media">${imgHtml}${excerptHtml}</div>
 			<div class="card-body">
-				<h2 class="card-title" title="${escapeAttr(item.title)}">${highlight(item.title)}</h2>
+				<h2 class="card-title" title="${escapeAttr(item.title)}">${escapeHtml(item.title)}</h2>
 				<div class="card-meta">
 					<span class="badge" title="频道"><span class="dot"></span>${escapeHtml(channelName)}</span>
 					<span class="badge badge-author" title="点击搜索该作者" data-author="${escapeAttr(authorName)}">👤 ${escapeHtml(authorName)}</span>
@@ -446,31 +415,22 @@
 			</div>
 		</article>`;
 	}
+	
 	function limitText(s,n){ if(!s) return ""; return s.length>n? s.slice(0,n-1)+"…" : s; }
-	function highlight(text){
-		const parsed = parseQuery(state.query);
-		const allTokens = [...parsed.include, ...parsed.exact, ...parsed.authors].filter(t=>t.length>=2);
-		if(allTokens.length===0) return escapeHtml(text||"");
-		let html = escapeHtml(text||"");
-		for(const t of allTokens){
-			const rx=new RegExp(`(${escapeRegExp(t)})`,'ig');
-			html=html.replace(rx,'<mark>$1</mark>');
-		}
-		return html;
-	}
-	function escapeRegExp(s){ return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
 	function renderPagination(page, total){
 		const btn = (p, label, disabled=false, current=false)=>`<button class="page-btn" ${disabled?"disabled":""} ${current?"aria-current=\"page\"":""} data-page="${p}">${label}</button>`;
 		const items = [];
 		items.push(btn(Math.max(1,page-1), "上一页", page<=1));
-		const windowSize = 5; const start = Math.max(1, page - Math.floor(windowSize/2)); const end = Math.min(total, start + windowSize - 1);
+		const windowSize = 5; 
+		const start = Math.max(1, page - Math.floor(windowSize/2)); 
+		const end = Math.min(total, start + windowSize - 1);
 		for(let i=start;i<=end;i++) items.push(btn(i, i, false, i===page));
 		items.push(btn(Math.min(total,page+1), "下一页", page>=total));
 		el.pagination.innerHTML = items.join("");
 	}
 
-	/** 自定义下拉：打开/关闭与选择同步 **/
+	/** 自定义下拉 **/
 	function setupMulti(wrap, onChange){
 		const btn = wrap.querySelector('.multi-toggle');
 		const menu = wrap.querySelector('.multi-menu');
@@ -492,37 +452,83 @@
 	function bindEvents(){
 		setupMulti(el.chWrap, ()=>{
 			state.channels = collectChecked(el.chWrap);
-			setMultiLabel(el.chWrap, new Set([...state.channels].map(id=> (window.CHANNELS?.[id]||`频道 ${id}`))));
-			// 频道变化 -> 清空标签筛选并刷新标签可选项
-			state.includeTags.clear();
-			state.excludeTags.clear();
-			refreshTagMenus();
+			setMultiLabel(el.chWrap, new Set([...state.channels].map(id=> (state.availableChannels.get(id)||`频道 ${id}`))));
 		});
-		setupMulti(el.inWrap, ()=>{ state.includeTags = collectChecked(el.inWrap); setMultiLabel(el.inWrap, state.includeTags); });
-		setupMulti(el.exWrap, ()=>{ state.excludeTags = collectChecked(el.exWrap); setMultiLabel(el.exWrap, state.excludeTags); });
+		setupMulti(el.inWrap, ()=>{ 
+			state.includeTags = collectChecked(el.inWrap); 
+			setMultiLabel(el.inWrap, state.includeTags); 
+		});
+		setupMulti(el.exWrap, ()=>{ 
+			state.excludeTags = collectChecked(el.exWrap); 
+			setMultiLabel(el.exWrap, state.excludeTags); 
+		});
 
-		el.searchBtn.addEventListener('click', ()=>{ state.page=1; state.query=el.keyword.value; syncAndRender(); });
-		el.keyword.addEventListener('input', debounce(()=>{ state.page=1; state.query=el.keyword.value; syncAndRender(true); }, 250));
+		el.searchBtn.addEventListener('click', ()=>{ 
+			state.page=1; 
+			state.query=el.keyword.value; 
+			syncAndSearch(); 
+		});
+		el.keyword.addEventListener('input', debounce(()=>{ 
+			state.page=1; 
+			state.query=el.keyword.value; 
+			syncAndSearch(true); 
+		}, 250));
 		el.applyBtn.addEventListener('click', ()=>{ 
 			state.page=1; 
 			state.timeFrom = el.timeFrom.value ? new Date(el.timeFrom.value) : null;
 			state.timeTo = el.timeTo.value ? new Date(el.timeTo.value) : null;
-			syncAndRender(); 
+			syncAndSearch(); 
 		});
 		el.resetBtn.addEventListener('click', ()=>{
-			state.page=1; state.channels.clear(); state.includeTags.clear(); state.excludeTags.clear(); state.tagLogic="AND"; state.timeFrom=null; state.timeTo=null; state.query=""; state.sort="relevance"; state.perPage=24;
-			// 清 UI
-			el.keyword.value=""; el.sort.value="relevance"; el.perPage.value="24"; el.tagLogic.value="AND"; el.timeFrom.value=""; el.timeTo.value="";
+			state.page=1; 
+			state.channels.clear(); 
+			state.includeTags.clear(); 
+			state.excludeTags.clear(); 
+			state.tagLogic="AND"; 
+			state.timeFrom=null; 
+			state.timeTo=null; 
+			state.query=""; 
+			state.sort="relevance"; 
+			state.perPage=24;
+			
+			el.keyword.value=""; 
+			el.sort.value="relevance"; 
+			el.perPage.value="24"; 
+			el.tagLogic.value="AND"; 
+			el.timeFrom.value=""; 
+			el.timeTo.value="";
 			el.chWrap.querySelectorAll('input').forEach(i=> i.checked=false);
 			el.inWrap.querySelectorAll('input').forEach(i=> i.checked=false);
 			el.exWrap.querySelectorAll('input').forEach(i=> i.checked=false);
-			setMultiLabel(el.chWrap, new Set()); setMultiLabel(el.inWrap, new Set()); setMultiLabel(el.exWrap, new Set());
-			syncAndRender();
+			setMultiLabel(el.chWrap, new Set()); 
+			setMultiLabel(el.inWrap, new Set()); 
+			setMultiLabel(el.exWrap, new Set());
+			syncAndSearch();
 		});
-		el.sort.addEventListener('change', ()=>{ state.sort=el.sort.value; state.page=1; syncAndRender(); });
-		el.perPage.addEventListener('change', ()=>{ state.perPage=+el.perPage.value||24; state.page=1; syncAndRender(); });
-		el.tagLogic.addEventListener('change', ()=>{ state.tagLogic=el.tagLogic.value; state.page=1; syncAndRender(); });
-		el.pagination.addEventListener('click', (e)=>{ const b = e.target.closest('button[data-page]'); if(!b) return; const p = +b.getAttribute('data-page'); if(!isNaN(p)) { state.page = p; syncAndRender(); } });
+		el.sort.addEventListener('change', ()=>{ 
+			state.sort=el.sort.value; 
+			state.page=1; 
+			syncAndSearch(); 
+		});
+		el.perPage.addEventListener('change', ()=>{ 
+			state.perPage=+el.perPage.value||24; 
+			state.page=1; 
+			syncAndSearch(); 
+		});
+		el.tagLogic.addEventListener('change', ()=>{ 
+			state.tagLogic=el.tagLogic.value; 
+			state.page=1; 
+			syncAndSearch(); 
+		});
+		el.pagination.addEventListener('click', (e)=>{ 
+			const b = e.target.closest('button[data-page]'); 
+			if(!b) return; 
+			const p = +b.getAttribute('data-page'); 
+			if(!isNaN(p)) { 
+				state.page = p; 
+				syncAndSearch(); 
+			} 
+		});
 		
 		// 点击作者跳转搜索
 		el.results.addEventListener('click', (e)=>{
@@ -533,7 +539,7 @@
 					state.query = `author:${author}`;
 					el.keyword.value = state.query;
 					state.page = 1;
-					syncAndRender();
+					syncAndSearch();
 					window.scrollTo({top:0, behavior:'smooth'});
 				}
 				return;
@@ -545,13 +551,12 @@
 				const tagText = tag.textContent.trim().replace(/^#\s*/, '');
 				if(tagText && !state.includeTags.has(tagText)){
 					state.includeTags.add(tagText);
-					// 更新 UI
 					el.inWrap.querySelectorAll('input').forEach(i=> {
 						if(i.value === tagText) i.checked = true;
 					});
 					setMultiLabel(el.inWrap, state.includeTags);
 					state.page = 1;
-					syncAndRender();
+					syncAndSearch();
 					window.scrollTo({top:0, behavior:'smooth'});
 				}
 				return;
@@ -577,21 +582,23 @@
 			}
 		});
 		
-		window.addEventListener('popstate', ()=>{ readFromURL(); hydrateControls(); applyFilters(); render(); });
+		window.addEventListener('popstate', ()=>{ 
+			readFromURL(); 
+			hydrateControls(); 
+			fetchSearchResults(); 
+		});
 	}
 	
-	/** Discord 链接跳转：优先唤起客户端 **/
+	/** Discord 链接跳转 **/
 	function openDiscordLink(guild, channel, thread){
 		const appUrl = `discord://-/channels/${guild}/${thread}`;
 		const webUrl = `https://discord.com/channels/${guild}/${thread}`;
 		
-		// 创建隐藏 iframe 尝试唤起客户端
 		const iframe = document.createElement('iframe');
 		iframe.style.display = 'none';
 		iframe.src = appUrl;
 		document.body.appendChild(iframe);
 		
-		// 设置超时：如果 1.5 秒内未成功唤起，则打开网页版
 		let opened = false;
 		const timeout = setTimeout(()=>{
 			if(!opened){
@@ -600,7 +607,6 @@
 			document.body.removeChild(iframe);
 		}, 1500);
 		
-		// 监听页面失焦（表示客户端成功唤起）
 		const onBlur = ()=>{
 			opened = true;
 			clearTimeout(timeout);
@@ -609,7 +615,6 @@
 		};
 		window.addEventListener('blur', onBlur);
 		
-		// 备用：直接尝试打开 app URL
 		window.location.href = appUrl;
 	}
 	
@@ -629,7 +634,12 @@
 		const close = ()=>{ popup.remove(); };
 		popup.querySelector('.popup-backdrop').addEventListener('click', close);
 		popup.querySelector('.popup-close').addEventListener('click', close);
-		document.addEventListener('keydown', function onEsc(e){ if(e.key==='Escape'){ close(); document.removeEventListener('keydown', onEsc); } });
+		document.addEventListener('keydown', function onEsc(e){
+			if(e.key==='Escape'){
+				close();
+				document.removeEventListener('keydown', onEsc);
+			}
+		});
 	}
 
 	function hydrateControls(){
@@ -637,87 +647,66 @@
 		el.sort.value = state.sort;
 		el.perPage.value = String(state.perPage);
 		el.tagLogic.value = state.tagLogic;
-		// 恢复频道和标签菜单
+		
 		el.chWrap.querySelectorAll('input').forEach(i=> i.checked = state.channels.has(i.value));
 		el.inWrap.querySelectorAll('input').forEach(i=> i.checked = state.includeTags.has(i.value));
 		el.exWrap.querySelectorAll('input').forEach(i=> i.checked = state.excludeTags.has(i.value));
-		setMultiLabel(el.chWrap, new Set([...state.channels].map(id=> (window.CHANNELS?.[id]||`频道 ${id}`))));
+		setMultiLabel(el.chWrap, new Set([...state.channels].map(id=> (state.availableChannels.get(id)||`频道 ${id}`))));
 		setMultiLabel(el.inWrap, state.includeTags);
 		setMultiLabel(el.exWrap, state.excludeTags);
 		el.timeFrom.value = state.timeFrom ? toISODate(state.timeFrom) : "";
 		el.timeTo.value = state.timeTo ? toISODate(state.timeTo) : "";
 	}
-	function toISODate(d){ const x = new Date(d); x.setHours(0,0,0,0); return x.toISOString().slice(0,10); }
+	
+	function toISODate(d){
+		const x = new Date(d);
+		x.setHours(0,0,0,0);
+		return x.toISOString().slice(0,10);
+	}
 
-	function syncAndRender(replace=false){
+	function syncAndSearch(replace=false){
 		writeToURL(replace);
-		applyFilters();
-		render();
+		fetchSearchResults();
 	}
 
+		  /** 登录 **/
+		  async function login(){
+		      window.location.href = window.AUTH_URL + "/login";
+		  }
 
-    /** 登录 **/
-    async function login(){
-        window.location.href = "https://discord.com/api/oauth2/authorize?client_id=" + window.CLIENT_ID + "&redirect_uri=" + window.AUTH_URL + "/callback&response_type=code&scope=identify%20guilds.members.read";
-    }
-
-    /** 检查认证 **/
-    async function checkAuth(){
-        await fetch(window.AUTH_URL + '/checkauth', {credentials:'include', headers: authHeaders()});
-    }
-
-	/** 数据加载 **/
-	async function loadIndex(){
-		const res = await fetch(window.AUTH_URL + '/index.json', {credentials:'include', headers: authHeaders()}).catch(()=>null);
-		if (!res || res.status === 401) {
-			state.authed = false;
-			state.all = [];
-			state.filtered = [];
-			return;
-		}
-		if (res.status !== 200) {
-			state.authed = true; // 其他错误不当作未登录
-			return;
-		}
-		state.authed = true;
-		const text = await res.text();
-		// 使用自定义 JSON 解析，将大数字 ID 保持为字符串
-		const data = JSON.parse(text, (key, value) => {
-			// 将 ID 字段保持为字符串，避免精度丢失
-			if((key === 'channel_id' || key === 'thread_id' || key === 'author_id') && typeof value === 'number'){
-				return String(value);
-			}
-			return value;
-		});
-		state.all = data.map(x=>({
-			channel_id: String(x.channel_id),
-			thread_id: String(x.thread_id),
-			title: x.title || "",
-			author_id: String(x.author_id),
-			author: x.author || "",
-			created_at: x.created_at || "",
-			last_active_at: x.last_active_at || "",
-			reaction_count: x.reaction_count||0,
-			reply_count: x.reply_count||0,
-			first_message_excerpt: x.first_message_excerpt || "",
-			thumbnail_url: x.thumbnail_url || "",
-			tags: Array.isArray(x.tags)? x.tags : []
-		}));
-		// 初始化频道菜单与标签菜单
-		initChannels(state.all);
-		refreshTagMenus();
-	}
-
-	/** 构建时间 **/
-	async function loadBuildTime(){ try{ document.getElementById('buildTime').textContent = new Date().toLocaleString(); }catch{} }
+		  /** 检查认证 **/
+		  async function checkAuth(){
+		      try{
+		          const res = await fetch(window.AUTH_URL + '/checkauth', {
+		              credentials:'include',
+		              headers: authHeaders()
+		          });
+		          if(res && res.ok){
+		              const data = await res.json();
+		              state.authed = data.loggedIn !== false;
+		          }else{
+		              state.authed = false;
+		          }
+		      }catch(e){
+		          console.error('检查认证失败:', e);
+		          state.authed = false;
+		      }
+		  }
 
 	/** 启动 **/
 	(async function init(){
 		readFromURL();
-		await Promise.all([checkAuth(), loadIndex(), loadBuildTime()]);
+		await checkAuth();
+		await initChannels();
+		await initTags();
 		hydrateControls();
-		applyFilters();
-		render();
+		
+		if(state.authed){
+			await fetchSearchResults();
+		}else{
+			render();
+		}
+		
 		bindEvents();
 	})();
 })();
