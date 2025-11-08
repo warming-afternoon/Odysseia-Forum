@@ -1,13 +1,13 @@
 from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import List, Optional
 import discord
-from ..dependencies.security import get_api_key
+from ..dependencies.security import get_current_user
 from ..schemas.meta import Channel, TagDetail
 from src.core.cache_service import CacheService
 
 cache_service_instance: Optional[CacheService] = None
 
-router = APIRouter(prefix="/meta", tags=["元数据"], dependencies=[Depends(get_api_key)])
+router = APIRouter(prefix="/meta", tags=["元数据"], dependencies=[Depends(get_current_user)])
 
 
 @router.get(
