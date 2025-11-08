@@ -389,20 +389,14 @@
 	/** 标签胶囊点击 - 三态切换 **/
 	function cycleTagState(tag){
 		const current = state.tagStates.get(tag) || null;
-		let next;
+		const mode = state.tagMode; // 使用全局的tag模式
 		
-		if(current === null){
-			next = 'excluded'; // 默认 -> 排除
-		} else if(current === 'excluded'){
-			next = 'included'; // 排除 -> 包含
-		} else {
-			next = null; // 包含 -> 默认
-		}
-		
-		if(next === null){
+		if(current === mode){
+			// 如果已经是当前模式，则取消选择
 			state.tagStates.delete(tag);
 		} else {
-			state.tagStates.set(tag, next);
+			// 否则设置为当前模式
+			state.tagStates.set(tag, mode);
 		}
 		
 		updateTagPills();
