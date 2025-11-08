@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 from .thread_manager_service import ThreadManagerService
 from .views.vote_view import TagVoteView
 from .batch_update_service import BatchUpdateService
+from .services.follow_service import FollowService
 
 import logging
 
@@ -345,7 +346,43 @@ class ThreadManager(commands.Cog):
                 # 标签被修改，on_thread_update会被触发，届时再同步
                 return
             await self.sync_service.sync_thread(thread=thread)
+            
+            # 新帖子发布时，只为贴主添加关注
+            if thread.owner_id and not thread.owner.bot if thread.owner else True:
+                async with self.session_factory() as session:
+                    follow_service = FollowService(session)
+                    await follow_service.add_follow(
+                        user_id=thread.owner_id,
+                        thread_id=thread.id,
+                        auto_view=False  # 贴主发布时不标记为已查看
+                    )
+                    logger.debug(f"新帖子 {thread.id}，已为贴主 {thread.owner_id} 添加关注")
 
+    @commands.Cog.listener()
+    async def on_thread_member_join(self, member: discord.ThreadMember):
+        """监听用户加入帖子事件，自动添加关注"""
+        try:
+            thread = member.thread
+            if not thread or not self.is_channel_indexed(thread.parent_id):
+                return
+            
+            # 获取用户对象
+            user = await thread.guild.fetch_member(member.id)
+            if user.bot:
+                return
+            
+            async with self.session_factory() as session:
+                follow_service = FollowService(session)
+                # 用户主动加入时，标记为已查看
+                await follow_service.add_follow(
+                    user_id=member.id,
+                    thread_id=thread.id,
+                    auto_view=True
+                )
+                logger.debug(f"用户 {member.id} 加入帖子 {thread.id}，已自动添加关注")
+        except Exception as e:
+            logger.error(f"用户加入帖子自动关注失败: {e}", exc_info=True)
+    
     @commands.Cog.listener()
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
         if self.is_channel_indexed(channel_id=after.parent_id) and (
@@ -537,6 +574,88 @@ class ThreadManager(commands.Cog):
             # 抛出异常让调用者决定如何处理。
             raise
 
+    @app_commands.command(
+        name="发布更新", description="发布帖子更新（仅贴主可用）"
+    )
+    @app_commands.describe(消息链接="更新消息的Discord链接")
+    async def publish_update(self, interaction: discord.Interaction, 消息链接: str):
+        """发布帖子更新，刷新最后更新时间和链接"""
+        await safe_defer(interaction)
+        
+        try:
+            # 检查是否在帖子中
+            if not isinstance(interaction.channel, discord.Thread):
+                await self.bot.api_scheduler.submit(
+                    coro_factory=lambda: interaction.followup.send(
+                        "❌ 此命令只能在帖子中使用", ephemeral=True
+                    ),
+                    priority=1,
+                )
+                return
+            
+            thread = interaction.channel
+            
+            # 检查是否是贴主
+            if thread.owner_id != interaction.user.id:
+                await self.bot.api_scheduler.submit(
+                    coro_factory=lambda: interaction.followup.send(
+                        "❌ 只有贴主才能发布更新", ephemeral=True
+                    ),
+                    priority=1,
+                )
+                return
+            
+            # 验证消息链接格式
+            import re
+            link_pattern = r"https://discord\.com/channels/(\d+)/(\d+)/(\d+)"
+            match = re.match(link_pattern, 消息链接)
+            
+            if not match:
+                await self.bot.api_scheduler.submit(
+                    coro_factory=lambda: interaction.followup.send(
+                        "❌ 无效的消息链接格式\n"
+                        "正确格式: https://discord.com/channels/服务器ID/频道ID/消息ID",
+                        ephemeral=True
+                    ),
+                    priority=1,
+                )
+                return
+            
+            # 更新数据库
+            async with self.session_factory() as session:
+                repo = ThreadManagerService(session)
+                success = await repo.update_thread_update_info(
+                    thread_id=thread.id,
+                    latest_update_link=消息链接
+                )
+                
+                if success:
+                    await self.bot.api_scheduler.submit(
+                        coro_factory=lambda: interaction.followup.send(
+                            "✅ 已发布更新！关注此帖的用户将收到通知",
+                            ephemeral=False
+                        ),
+                        priority=1,
+                    )
+                    logger.info(f"帖子 {thread.id} 发布了更新: {消息链接}")
+                else:
+                    await self.bot.api_scheduler.submit(
+                        coro_factory=lambda: interaction.followup.send(
+                            "❌ 更新失败，帖子可能未被索引",
+                            ephemeral=True
+                        ),
+                        priority=1,
+                    )
+        except Exception as e:
+            logger.error(f"发布更新失败: {e}", exc_info=True)
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 发布更新时出错: {str(e)}",
+                    ephemeral=True
+                ),
+                priority=1,
+            )
+    
     @app_commands.command(
         name="标签评价", description="对当前帖子的标签进行评价（赞或踩）"
     )

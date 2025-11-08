@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from .routers import preferences, search, meta
+from .routers import preferences, search, meta, fetch_images
 
 app = FastAPI(
     title="Odysseia Forum API v1",
@@ -10,6 +10,7 @@ app = FastAPI(
 app.include_router(preferences.router)
 app.include_router(search.router)
 app.include_router(meta.router)
+app.include_router(fetch_images.router)
 
 
 @app.get("/health", summary="健康检查", tags=["系统"])

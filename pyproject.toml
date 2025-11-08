@@ -20,7 +20,8 @@ dependencies = [
     "alembic",
     "fastapi",
     "uvicorn[standard]",
-    "uvloop; platform_system != 'Windows'"
+    "uvloop; platform_system != 'Windows'",
+    "httpx"
 ]
 
 [project.optional-dependencies]

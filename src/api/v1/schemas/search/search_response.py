@@ -3,6 +3,7 @@ from typing import Optional, List
 from datetime import datetime
 from ..base import PaginatedResponse
 from .author import AuthorDetail
+from ..banner import BannerItem
 
 
 class ThreadDetail(BaseModel):
@@ -35,4 +36,11 @@ class ThreadDetail(BaseModel):
 class SearchResponse(PaginatedResponse[ThreadDetail]):
     """搜索接口的最终响应体"""
 
-    pass
+    available_tags: List[str] = Field(
+        default_factory=list,
+        description="当搜索单个频道时返回该频道的可用标签列表，全频道搜索时返回空列表"
+    )
+    banner_carousel: List[BannerItem] = Field(
+        default_factory=list,
+        description="Banner轮播列表，包含当前频道+全频道的banner（最多8个）"
+    )

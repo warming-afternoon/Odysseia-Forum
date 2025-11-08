@@ -257,9 +257,21 @@ class SearchService:
                     group.strip() for group in keywords_str.split(",") if group.strip()
                 ]
                 for group in and_groups:
-                    or_keywords = [
-                        f"{kw.strip()}*" for kw in group.split("/") if kw.strip()
-                    ]
+                    or_keywords = []
+                    for kw in group.split("/"):
+                        kw = kw.strip()
+                        if not kw:
+                            continue
+                        # 检查是否是精确匹配（用引号包围）
+                        if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
+                            # 精确匹配：移除引号，不添加*前缀
+                            exact_kw = kw[1:-1].strip()
+                            if exact_kw:
+                                or_keywords.append(f'"{exact_kw}"')
+                        else:
+                            # 普通关键词：添加*前缀匹配
+                            or_keywords.append(f"{kw}*")
+                    
                     if or_keywords:
                         filters.append(
                             thread_fts_table.c.thread_fts.op("MATCH")(

@@ -30,6 +30,7 @@ from src.preferences.cog import Preferences
 from src.preferences.preferences_service import PreferencesService
 from src.auditor.cog import Auditor
 from src.config.cog import Configuration
+from src.banner.cog import BannerManagement
 from config.config_service import ConfigService
 from src.shared.api_scheduler import APIScheduler
 from src.webpage.index_sync import start_index_sync
@@ -37,9 +38,12 @@ from src.api.v1.routers import (
     preferences as preferences_api,
     search as search_api,
     meta as meta_api,
+    auth as auth_api,
+    fetch_images as fetch_images_api,
 )
 from src.api.main import app as fastapi_app
 from src.api.v1.dependencies.security import initialize_api_security
+from src.api.v1.routers.auth import initialize_auth_config
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +193,10 @@ class MyBot(commands.Bot):
                 tag_service=self.tag_service,
                 config_service=self.config_service,
             ),
+            BannerManagement(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+            ),
         ]
         await asyncio.gather(
             *(self.add_cog(cog) for cog in cogs_to_load), return_exceptions=True
@@ -258,14 +266,23 @@ async def main():
             search_api.search_cog_instance = search_cog
         search_api.async_session_factory = AsyncSessionFactory
         meta_api.cache_service_instance = bot.cache_service
+        search_api.cache_service_instance = bot.cache_service
         search_api.config_service_instance = bot.config_service
+
+        auth_section = bot.config.get("auth", {}) if isinstance(bot.config, dict) else {}
+        fetch_images_api.configure_fetch_images_router(
+            session_factory=AsyncSessionFactory,
+            bot_token=auth_section.get("bot_token"),
+            guild_id=auth_section.get("guild_id"),
+        )
 
         logger.info("API 路由服务注入完成")
 
     bot.setup_hook = enhanced_setup_hook
 
-    # 初始化 API 安全配置
+    # 初始化 API 安全配置和认证配置
     initialize_api_security()
+    initialize_auth_config()
 
     # 配置并并行运行 Bot 和 API 服务器
     api_config = config.get("api", {})

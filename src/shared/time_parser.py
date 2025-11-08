@@ -27,11 +27,13 @@ def parse_time_string(time_str: Optional[str]) -> Optional[datetime]:
     time_str = time_str.strip()
 
     # 尝试解析绝对时间 (YYYY-MM-DD)
-    absolute_pattern = r"^(\d{4})[\s-/—．.]+(\d{1,2})[\s-/—．.]+(\d{1,2})$"
+    # 修复字符类：将 - 放在最后，避免被解释为范围
+    absolute_pattern = r"^(\d{4})[\s/—．.\-]+(\d{1,2})[\s/—．.\-]+(\d{1,2})$"
     match = re.match(absolute_pattern, time_str)
     if match:
         try:
             year, month, day = map(int, match.groups())
+            # 使用 UTC 时区，避免时区偏移问题
             return datetime(year, month, day)
         except ValueError:
             raise ValueError(f"无效的日期: {time_str}")
@@ -61,7 +63,7 @@ def parse_time_string(time_str: Optional[str]) -> Optional[datetime]:
         else:
             raise ValueError(f"不支持的时间单位: {unit}")
 
-        # 计算目标时间
+        # 计算目标时间（使用 UTC）
         target_time = datetime.now() + time_delta
 
         # 如果是过去的时间，将时间设置为当天的开始 (00:00:00)

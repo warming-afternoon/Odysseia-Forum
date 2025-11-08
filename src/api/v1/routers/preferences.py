@@ -1,14 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from src.preferences.cog import Preferences
 from src.preferences.preferences_service import PreferencesService
-from ..dependencies.security import get_api_key
+from ..dependencies.security import require_auth
 from ..schemas.preferences import UserPreferencesResponse, UserPreferencesUpdateRequest
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
 preferences_cog_instance: Preferences | None = None
 
 router = APIRouter(
-    prefix="/preferences", tags=["用户偏好"], dependencies=[Depends(get_api_key)]
+    prefix="/preferences", tags=["用户偏好"], dependencies=[Depends(require_auth)]
 )
 
 

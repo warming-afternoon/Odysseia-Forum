@@ -5,17 +5,22 @@ from src.search.qo.thread_search import ThreadSearchQuery
 from src.search.search_service import SearchService
 from config.config_service import ConfigService
 from src.shared.enum.search_config_type import SearchConfigType, SearchConfigDefaults
-from ..dependencies.security import get_api_key
+from src.shared.keyword_parser import KeywordParser
+from ..dependencies.security import require_auth
 from ..schemas.search import SearchRequest, SearchResponse, ThreadDetail
 from ..schemas.search.author import AuthorDetail
+from ..schemas.banner import BannerItem
+from src.core.cache_service import CacheService
+from src.banner.banner_service import BannerService
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
 search_cog_instance: Search | None = None
 async_session_factory: async_sessionmaker | None = None
 config_service_instance: ConfigService | None = None
+cache_service_instance: CacheService | None = None
 
 router = APIRouter(
-    prefix="/search", tags=["帖子搜索"], dependencies=[Depends(get_api_key)]
+    prefix="/search", tags=["帖子搜索"], dependencies=[Depends(require_auth)]
 )
 
 
@@ -37,16 +42,47 @@ async def execute_search(request: SearchRequest):
             detail="Search 服务尚未初始化",
         )
 
+    # 解析高级搜索语法
+    author_name = None
+    parsed_include_keywords = []
+    parsed_exclude_keywords = []
+    remaining_keywords = request.keywords or ""
+    
+    if request.keywords:
+        # 清理并解析关键词
+        sanitized_keywords = KeywordParser.sanitize(request.keywords)
+        author_name, parsed_include_keywords, parsed_exclude_keywords, remaining_keywords = KeywordParser.parse(sanitized_keywords)
+    
+    # 合并解析出的排除词和原有的排除词
+    final_exclude_keywords = request.exclude_keywords or ""
+    if parsed_exclude_keywords:
+        if final_exclude_keywords:
+            final_exclude_keywords += " " + " ".join(parsed_exclude_keywords)
+        else:
+            final_exclude_keywords = " ".join(parsed_exclude_keywords)
+    
+    # 构建最终的关键词字符串（精确匹配的用引号包围）
+    final_keywords_parts = []
+    if parsed_include_keywords:
+        # 精确匹配的关键词用引号包围
+        for kw in parsed_include_keywords:
+            final_keywords_parts.append(f'"{kw}"')
+    if remaining_keywords:
+        final_keywords_parts.append(remaining_keywords)
+    
+    final_keywords = " ".join(final_keywords_parts) if final_keywords_parts else None
+
     query_object = ThreadSearchQuery(
         channel_ids=request.channel_ids,
         include_tags=request.include_tags,
         exclude_tags=request.exclude_tags,
         tag_logic=request.tag_logic,
-        keywords=request.keywords,
-        exclude_keywords=request.exclude_keywords,
+        keywords=final_keywords,
+        exclude_keywords=final_exclude_keywords if final_exclude_keywords else None,
         exclude_keyword_exemption_markers=request.exclude_keyword_exemption_markers,
         include_authors=request.include_authors,
         exclude_authors=request.exclude_authors,
+        author_name=author_name,  # 使用解析出的作者名
         created_after=request.created_after,
         created_before=request.created_before,
         active_after=request.active_after,
@@ -117,11 +153,44 @@ async def execute_search(request: SearchRequest):
             )
             results.append(thread_detail)
 
+        # 如果是单频道搜索，返回该频道的可用标签
+        available_tags = []
+        target_channel_id = None
+        if request.channel_ids and len(request.channel_ids) == 1:
+            target_channel_id = request.channel_ids[0]
+            if cache_service_instance:
+                all_channels = cache_service_instance.get_indexed_channels()
+                target_channel = next(
+                    (ch for ch in all_channels if ch.id == target_channel_id),
+                    None,
+                )
+                if target_channel:
+                    available_tags = [tag.name for tag in target_channel.available_tags]
+
+        # 获取Banner轮播列表
+        banner_carousel = []
+        async with async_session_factory() as session:
+            banner_service = BannerService(session)
+            banners = await banner_service.get_active_banners(
+                channel_id=target_channel_id
+            )
+            banner_carousel = [
+                BannerItem(
+                    thread_id=banner.thread_id,
+                    title=banner.title,
+                    cover_image_url=banner.cover_image_url,
+                    channel_id=banner.channel_id if banner.channel_id else 0,
+                )
+                for banner in banners
+            ]
+
         return SearchResponse(
             total=total_threads,
             limit=request.limit,
             offset=request.offset,
             results=results,
+            available_tags=available_tags,
+            banner_carousel=banner_carousel,
         )
     except Exception as e:
         # 生产环境中应使用 logger.exception

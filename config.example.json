@@ -38,38 +38,58 @@
     "_comment_ssl_key_path": "SSL私钥路径"
   },
 
-  "webpage": {
-    "client_id": "your_client_id_here",
-    "_comment_client_id": "上面的client_id是bot的客户端ID",
+"auth": {
+    "client_id": "your_discord_client_id_here",
+    "_comment_client_id": "Discord OAuth2 应用的客户端 ID",
+    
+    "client_secret": "your_discord_client_secret_here",
+    "_comment_client_secret": "Discord OAuth2 应用的客户端密钥",
+    
+    "redirect_uri": "https://your-api-domain.com/v1/auth/callback",
+    "_comment_redirect_uri": "OAuth2 回调 URL，必须在 Discord 应用设置中配置",
     
     "guild_id": "your_guild_id_here",
-    "_comment_guild_id": "上面的guild_id是主服务器ID",
+    "_comment_guild_id": "Discord 服务器 ID，用于验证用户是否在服务器中",
     
-    "channels": {
-      "channel_id_1": "频道名称1",
-      "channel_id_2": "频道名称2"
-    },
-    "_comment_channels": "上面的channels是要展示的频道列表，格式为 频道ID: 频道名称",
+    "role_ids": "role_id_1,role_id_2",
+    "_comment_role_ids": "允许访问的身份组 ID，多个用逗号分隔",
+    
+    "jwt_secret": "your_jwt_secret_key_here_make_it_long_and_random",
+    "_comment_jwt_secret": "JWT 签名密钥，请使用长随机字符串",
+    
+    "bot_token": "your_bot_token_here",
+    "_comment_bot_token": "Discord Bot Token，用于验证用户身份组（可选，建议配置）",
+    
+    "frontend_url": "https://your-frontend-domain.com",
+    "_comment_frontend_url": "前端应用 URL，用于 OAuth2 回调后重定向",
+    
+    "cookie_domain": "",
+    "_comment_cookie_domain": "Cookie 域名，留空则使用默认（可选）"
+  },
 
-    "auth_url": "https://your_auth_url_here",
-    "_comment_auth_url": "上面的auth_url是认证服务的URL",
+  "banner": {
+    "enabled": true,
+    "_comment_enabled": "是否启用Banner申请系统",
     
-    "cloudflare": {
-      "enabled": false,
-      "_comment_enabled": "是否启用自动部署到Cloudflare Pages",
-      
-      "api_token": "your_cloudflare_api_token",
-      "_comment_api_token": "Cloudflare API Token，需要有Pages编辑权限",
-      
-      "account_id": "your_cloudflare_account_id",
-      "_comment_account_id": "Cloudflare账户ID",
-      
-      "kv": {
-        "namespace_id": "your_cloudflare_kv_namespace_id",
-        "_comment_namespace_id": "Cloudflare KV命名空间ID",
-        "key": "your_cloudflare_kv_key",
-        "_comment_key": "Cloudflare KV键名"
-      }
-    }
+    "applicant_role_ids": "role_id_1,role_id_2",
+    "_comment_applicant_role_ids": "允许申请Banner的身份组ID，多个用逗号分隔",
+    
+    "reviewer_role_ids": "role_id_1,role_id_2,role_id_3",
+    "_comment_reviewer_role_ids": "审核员身份组ID，多个用逗号分隔",
+    
+    "review_thread_id": 0,
+    "_comment_review_thread_id": "接收审核申请的Thread ID",
+    
+    "archive_channel_id": 0,
+    "_comment_archive_channel_id": "审核记录存档的Forum频道ID",
+    
+    "available_channels": {
+      "1374474903981527082": "纯净区",
+      "1374481342825238821": "男性向",
+      "1374488912143061114": "女性向",
+      "1374491326308946071": "全性向",
+      "1374491950161330277": "其它区"
+    },
+    "_comment_available_channels": "用户可选择的展示频道列表，格式为 频道ID: 频道名称"
   }
 }

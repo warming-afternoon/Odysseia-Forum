@@ -286,8 +286,56 @@ class SyncService:
         # 准备标签数据并存入数据库
         tags_data = {t.id: t.name for t in thread.applied_tags or []}
 
+        # 先保存帖子数据
         async with self.session_factory() as session:
             repo = ThreadManagerService(session=session)
             await repo.add_or_update_thread_with_tags(
                 thread_data=thread_data, tags_data=tags_data
             )
+        
+        # 检查是否是首次被关注（检查关注表而不是帖子表）
+        is_first_follow = False
+        async with self.session_factory() as session:
+            from sqlmodel import select, func
+            from shared.models.thread_follow import ThreadFollow
+            
+            # 检查该帖子是否有任何关注记录
+            statement = select(func.count()).select_from(ThreadFollow).where(
+                ThreadFollow.thread_id == thread.id
+            )
+            result = await session.execute(statement)
+            follow_count = result.scalar() or 0
+            is_first_follow = follow_count == 0
+        
+        # 如果是首次被关注的老帖子，批量添加所有成员到关注列表
+        if is_first_follow:
+            await self._auto_follow_on_first_detect(thread)
+    
+    async def _auto_follow_on_first_detect(self, thread: discord.Thread):
+        """首次检测到老帖子时，自动为所有成员添加关注"""
+        try:
+            # 获取帖子中的所有成员ID
+            member_ids = []
+            
+            # fetch_members()返回AsyncIterator，直接迭代
+            members_iterator = await thread.fetch_members()
+            for member in members_iterator:
+                # 不用检测机器人，fetch member太慢了
+                member_ids.append(member.id)
+            
+            if member_ids:
+                from ThreadManager.services.follow_service import FollowService
+                async with self.session_factory() as session:
+                    follow_service = FollowService(session)
+                    added_count = await follow_service.batch_add_follows(
+                        thread_id=thread.id,
+                        user_ids=member_ids
+                    )
+                    if added_count > 0:
+                        logger.info(f"老帖子 {thread.id} 首次检测，为 {added_count} 个成员添加了自动关注")
+        except discord.NotFound:
+            logger.warning(f"老帖子 {thread.id} 已被删除，跳过自动关注")
+        except discord.Forbidden:
+            logger.warning(f"老帖子 {thread.id} 没有权限获取成员列表，跳过自动关注")
+        except Exception as e:
+            logger.error(f"老帖子自动关注失败 (帖子 {thread.id}): {e}", exc_info=True)
