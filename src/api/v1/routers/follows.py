@@ -14,14 +14,14 @@ router = APIRouter(prefix="/follows", tags=["关注列表"])
 
 @router.get("/", summary="获取用户的关注列表")
 async def get_follows(
-    limit: int = 100,
+    limit: int = 10000,
     offset: int = 0,
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
     """
     获取当前用户关注的帖子列表
     
-    - **limit**: 返回数量限制（默认100）
+    - **limit**: 返回数量限制（默认10000）
     - **offset**: 偏移量（默认0）
     
     返回格式：
