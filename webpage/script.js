@@ -38,6 +38,7 @@
 		followsAvailableTags: [], // 关注列表可用tags
 		followsPage: 1, // 关注列表当前页
 		followsPerPage: 24, // 关注列表每页数量
+		openMode: 'app', // 帖子打开方式：'app' 或 'web'
 		imageRefreshQueue: new Map(), // 等待刷新封面的线程 -> 元数据
 		imageRefreshTimer: null, // 定时器句柄
 		imageRefreshProcessing: false, // 是否正在请求刷新
@@ -46,6 +47,14 @@
 		currentBannerIndex: 0, // 当前显示的banner索引
 		bannerAutoPlay: null // 自动播放定时器
 	};
+
+	let savedOpenMode;
+	try{
+		savedOpenMode = window.localStorage.getItem('open_mode');
+	}catch{}
+	if(savedOpenMode === 'web' || savedOpenMode === 'app'){
+		state.openMode = savedOpenMode;
+	}
 
 	const IMAGE_REFRESH_DEBOUNCE = 5000;
 	const PLACEHOLDER_IMAGE = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="120" height="68" viewBox="0 0 120 68"%3E%3Crect width="120" height="68" rx="12" fill="%23141926"/%3E%3Cpath d="M18 46L40 26l14 12 18-16 30 24H18Z" fill="%2330527c" opacity=".65"/%3E%3Ccircle cx="86" cy="20" r="6" fill="%23ffffff" opacity=".35"/%3E%3C/svg%3E';
@@ -80,6 +89,7 @@
 		timeTo: document.getElementById("timeTo"),
 		sort: document.getElementById("sortSelect"),
 		perPage: document.getElementById("perPage"),
+		openMode: document.getElementById("openMode"),
 		tagLogic: document.getElementById("tagLogic"),
 		tagModeSwitch: document.getElementById("tagModeSwitch"),
 		stats: document.getElementById("resultCount"),
@@ -579,7 +589,11 @@
 		const channelName = state.availableChannels.get(String(item.channel_id)) || `频道 ${item.channel_id}`;
 		const created = fmtDate(item.created_at);
 		const active = fmtDate(item.last_active_at);
-		const authorName = author.display_name || author.global_name || author.username || "未知作者";
+		const authorDisplayName = author.display_name || author.global_name || author.name || "未知作者";
+		const authorUsername = author.name || "";
+		const authorTooltip = authorUsername
+			? `点击搜索${authorUsername}的所有作品`
+			: "点击搜索该作者的所有作品";
 		const guildId = window.GUILD_ID;
 		
 		return `
@@ -589,7 +603,7 @@
 				<h2 class="card-title" title="${escapeAttr(item.title)}">${escapeHtml(item.title)}</h2>
 				<div class="card-meta">
 					<span class="badge" title="频道"><span class="dot"></span>${escapeHtml(channelName)}</span>
-					<span class="badge badge-author" title="点击搜索该作者" data-author="${escapeAttr(authorName)}">👤 ${escapeHtml(authorName)}</span>
+					<span class="badge badge-author" title="${escapeAttr(authorTooltip)}" data-author="${escapeAttr(authorUsername)}">👤 ${escapeHtml(authorDisplayName)}</span>
 					<span class="badge" title="发布时间 ${new Date(item.created_at).toLocaleString()}">🕒 ${escapeHtml(created)}</span>
 					<span class="badge" title="最近活跃 ${new Date(item.last_active_at).toLocaleString()}">🔥 ${escapeHtml(active)}</span>
 					<span class="badge" title="回复">💬 ${escapeHtml(item.reply_count||0)}</span>
@@ -862,6 +876,17 @@
 			}
 		});
 
+		// 帖子打开方式改变
+		if(el.openMode){
+			el.openMode.addEventListener('change', ()=>{
+				const value = el.openMode.value === 'web' ? 'web' : 'app';
+				state.openMode = value;
+				try{
+					window.localStorage.setItem('open_mode', value);
+				}catch{}
+			});
+		}
+
 		// 标签逻辑改变
 		el.tagLogic.addEventListener('change', ()=>{
 			state.tagLogic = el.tagLogic.value;
@@ -998,9 +1023,9 @@
 			// 点击作者跳转搜索
 			const authorBadge = e.target.closest('.badge-author');
 			if(authorBadge){
-				const author = authorBadge.getAttribute('data-author');
-				if(author){
-					state.query = `author:${author}`;
+				const authorUsername = (authorBadge.getAttribute('data-author') || '').trim();
+				if(authorUsername){
+					state.query = `author:${authorUsername}`;
 					el.keyword.value = state.query;
 					state.page = 1;
 					syncAndSearch();
@@ -1053,14 +1078,27 @@
 	
 	/** Discord 链接跳转 **/
 	function openDiscordLink(guild, channel, thread){
-		const appUrl = `discord://-/channels/${guild}/${thread}`;
-		const webUrl = `https://discord.com/channels/${guild}/${thread}`;
-		
+		const safeGuild = guild ? String(guild) : '';
+		const safeChannel = channel && channel !== 'null' && channel !== 'undefined' ? String(channel) : '';
+		const safeThread = thread && thread !== 'null' && thread !== 'undefined' ? String(thread) : '';
+		const segments = [];
+		if(safeGuild) segments.push(safeGuild);
+		if(safeChannel) segments.push(safeChannel);
+		if(safeThread) segments.push(safeThread);
+		const path = segments.join('/');
+		const appUrl = path ? `discord://-/channels/${path}` : 'discord://-/channels';
+		const webUrl = path ? `https://discord.com/channels/${path}` : 'https://discord.com/channels';
+
+		if(state.openMode === 'web' || !path){
+			window.open(webUrl, '_blank', 'noopener,noreferrer');
+			return;
+		}
+
 		const iframe = document.createElement('iframe');
 		iframe.style.display = 'none';
 		iframe.src = appUrl;
 		document.body.appendChild(iframe);
-		
+
 		let opened = false;
 		const timeout = setTimeout(()=>{
 			if(!opened){
@@ -1068,7 +1106,7 @@
 			}
 			document.body.removeChild(iframe);
 		}, 1500);
-		
+
 		const onBlur = ()=>{
 			opened = true;
 			clearTimeout(timeout);
@@ -1076,7 +1114,7 @@
 			window.removeEventListener('blur', onBlur);
 		};
 		window.addEventListener('blur', onBlur);
-		
+
 		window.location.href = appUrl;
 	}
 
@@ -1109,6 +1147,9 @@
 		el.keyword.value = state.query;
 		el.sort.value = state.sort;
 		el.perPage.value = String(state.perPage);
+		if(el.openMode){
+			el.openMode.value = state.openMode;
+		}
 		el.tagLogic.value = state.tagLogic;
 		el.timeFrom.value = state.timeFrom ? toISODate(state.timeFrom) : "";
 		el.timeTo.value = state.timeTo ? toISODate(state.timeTo) : "";

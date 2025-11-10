@@ -31,7 +31,7 @@ class BannerApplicationButtonView(discord.ui.View):
         self.allowed_role_ids = [int(rid.strip()) for rid in applicant_role_ids_str.split(",") if rid.strip()]
         
         self.review_thread_id = config.get("review_thread_id")
-        self.archive_channel_id = config.get("archive_channel_id")
+        self.archive_thread_id = config.get("archive_thread_id")
         
         # 转换available_channels从dict格式到list格式
         channels_dict = config.get("available_channels", {})

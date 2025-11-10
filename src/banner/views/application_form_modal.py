@@ -44,7 +44,7 @@ class ApplicationFormModal(discord.ui.Modal, title="Banner申请"):
         self.session_factory = session_factory
         self.config = config
         self.review_thread_id = config.get("review_thread_id")
-        self.archive_channel_id = config.get("archive_channel_id")
+        self.archive_thread_id = config.get("archive_thread_id")
         
         # 转换available_channels从dict格式到list格式
         channels_dict = config.get("available_channels", {})

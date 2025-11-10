@@ -35,7 +35,7 @@ class ChannelSelectionView(discord.ui.View):
         self.applicant_id = applicant_id
         self.config = config
         self.review_thread_id = config.get("review_thread_id")
-        self.archive_channel_id = config.get("archive_channel_id")
+        self.archive_thread_id = config.get("archive_thread_id")
 
         # 创建频道选择下拉菜单
         options = [

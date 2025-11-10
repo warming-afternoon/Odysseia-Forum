@@ -117,21 +117,14 @@ class SearchService:
                 set(query.include_authors) if query.include_authors else set()
             )
 
-            # --- 作者名模糊搜索 ---
             if query.author_name:
-                search_pattern = f"%{query.author_name}%"
-                author_subquery = select(Author.id).where(
-                    Author.global_name.like(search_pattern)  # type: ignore
-                    | Author.display_name.like(search_pattern)  # type: ignore
-                )
-                author_result = await self.session.execute(author_subquery)
-                matched_author_ids = set(author_result.scalars().all())
-
-                if query.include_authors:
-                    # 如果同时指定了ID和模糊搜索，则取交集
-                    final_include_author_ids.intersection_update(matched_author_ids)
-                else:
-                    final_include_author_ids = matched_author_ids
+                normalized_author_name = query.author_name.strip()
+                if normalized_author_name:
+                    filters.append(
+                        Thread.author.has(
+                            func.lower(Author.name) == normalized_author_name.lower()
+                        )
+                    )
 
             # 应用作者过滤器
             if final_include_author_ids:

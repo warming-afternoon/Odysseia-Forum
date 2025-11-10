@@ -94,16 +94,16 @@ class BannerManagement(commands.Cog):
             # 检查配置
             applicant_role_ids_str = self.config.get("applicant_role_ids", "")
             review_thread_id = self.config.get("review_thread_id")
-            archive_channel_id = self.config.get("archive_channel_id")
+            archive_thread_id = self.config.get("archive_thread_id")
             channels_config = self.config.get("available_channels", {})
 
             # 验证必需配置
-            if not all([applicant_role_ids_str, review_thread_id, archive_channel_id]):
+            if not all([applicant_role_ids_str, review_thread_id, archive_thread_id]):
                 await interaction.followup.send(
                     "❌ Banner配置不完整。请在config.json中配置：\n"
                     "- banner.applicant_role_ids (允许申请的身份组)\n"
                     "- banner.review_thread_id (审核Thread)\n"
-                    "- banner.archive_channel_id (存档Forum频道)",
+                    "- banner.archive_thread_id (存档Forum频道)",
                     ephemeral=True,
                 )
                 return

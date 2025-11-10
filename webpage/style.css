@@ -74,6 +74,45 @@ button{
 	font-family:inherit;
 }
 
+select{
+	font-family:inherit;
+	padding:12px 40px 12px 14px;
+	border-radius:var(--radius-md);
+	border:1px solid rgba(255,255,255,.12);
+	background:linear-gradient(135deg, rgba(17,20,36,.92), rgba(12,15,30,.92)) padding-box,
+	            url('data:image/svg+xml;utf8,<svg width="14" height="10" viewBox="0 0 14 10" xmlns="http://www.w3.org/2000/svg"><path d="M2 2.5L7 7.5L12 2.5" stroke="%23d0d6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>') no-repeat right 14px center;
+	color:var(--color-text-primary);
+	font-size:14px;
+	box-shadow:inset 0 0 0 1px rgba(255,255,255,.04);
+	backdrop-filter:blur(var(--blur-soft));
+	cursor:pointer;
+	transition:var(--transition-fast);
+	-webkit-appearance:none;
+	-moz-appearance:none;
+	appearance:none;
+	background-clip:padding-box;
+}
+
+select:focus{
+	outline:none;
+	border-color:rgba(138,123,255,.55);
+	box-shadow:0 0 0 3px rgba(138,123,255,.22);
+}
+
+select option{
+	background:rgba(12,15,30,.95);
+	color:var(--color-text-primary);
+}
+
+select option:checked{
+	background:rgba(138,123,255,.35);
+	color:#fff;
+}
+
+select::-ms-expand{
+	display:none;
+}
+
 .hidden{
 	display:none !important;
 }
@@ -691,8 +730,7 @@ button{
 	letter-spacing:1.2px;
 }
 
-.filter-item input,
-.filter-item select{
+.filter-item input{
 	padding:13px;
 	border-radius:var(--radius-md);
 	border:1px solid rgba(255,255,255,.08);
@@ -700,6 +738,11 @@ button{
 	color:var(--color-text-primary);
 	font-size:14px;
 	transition:var(--transition-fast);
+}
+
+.filter-item select{
+	width:100%;
+	font-size:14px;
 }
 
 .filter-item input:focus,
@@ -725,13 +768,9 @@ button{
 }
 
 .view-controls select{
-	padding:9px 36px 9px 14px;
+	padding:9px 38px 9px 14px;
 	border-radius:var(--radius-sm);
-	border:1px solid rgba(255,255,255,.12);
-	background:linear-gradient(135deg, rgba(17,20,36,.92), rgba(13,16,30,.92)) padding-box,
-	            url('data:image/svg+xml;utf8,<svg width="14" height="10" viewBox="0 0 14 10" xmlns="http://www.w3.org/2000/svg"><path d="M2 2.5L7 7.5L12 2.5" stroke="%23d0d6ff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>') no-repeat right 12px center;
-	color:var(--color-text-primary);
-	cursor:pointer;
+	border-color:rgba(255,255,255,.14);
 }
 
 .tag-pills-section{

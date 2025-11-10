@@ -40,7 +40,7 @@ class RejectReasonModal(discord.ui.Modal, title="拒绝理由"):
         self.applicant_id = applicant_id
         self.reviewer_id = reviewer_id
         self.config = config
-        self.archive_channel_id = config.get("archive_channel_id")
+        self.archive_thread_id = config.get("archive_thread_id")
         self.original_interaction = original_interaction
 
     async def on_submit(self, interaction: discord.Interaction):
@@ -97,18 +97,55 @@ class RejectReasonModal(discord.ui.Modal, title="拒绝理由"):
     async def _archive_review(self, application, status: str, reviewer_id: int):
         """在存档频道留档"""
         try:
-            archive_channel = self.bot.get_channel(self.archive_channel_id)
-            if isinstance(archive_channel, discord.ForumChannel):
-                # 在Forum频道创建帖子留档
-                thread = await archive_channel.create_thread(
-                    name=f"Banner审核 - {application.id} - {status}",
-                    content=f"申请ID: {application.id}\n"
-                    f"申请人: <@{application.applicant_id}>\n"
-                    f"审核员: <@{reviewer_id}>\n"
-                    f"状态: {status}\n"
-                    f"时间: {discord.utils.format_dt(discord.utils.utcnow())}\n"
-                    f"拒绝理由: {application.reject_reason or 'N/A'}",
+            archive_channel = self.bot.get_channel(self.archive_thread_id)
+            if archive_channel is None:
+                logger.error("存档频道不存在，无法发送审核记录")
+                return
+
+            if not hasattr(archive_channel, "send"):
+                logger.error("存档频道不支持发送消息")
+                return
+
+            guild = getattr(archive_channel, "guild", None)
+            if guild is None:
+                logger.error("无法获取存档频道所属服务器信息")
+                return
+
+            thread_url = (
+                f"https://discord.com/channels/{guild.id}/{application.thread_id}"
+            )
+
+            embed = discord.Embed(
+                title=f"Banner审核 - {application.id}",
+                description="❌ 已拒绝",
+                color=discord.Color.red(),
+                timestamp=discord.utils.utcnow(),
+            )
+            embed.add_field(
+                name="申请人",
+                value=f"<@{application.applicant_id}>",
+                inline=True,
+            )
+            embed.add_field(
+                name="审核员",
+                value=f"<@{reviewer_id}>",
+                inline=True,
+            )
+            embed.add_field(name="申请ID", value=str(application.id), inline=True)
+            embed.add_field(
+                name="帖子链接",
+                value=f"[点击查看]({thread_url})",
+                inline=False,
+            )
+            if application.reject_reason:
+                embed.add_field(
+                    name="拒绝理由",
+                    value=application.reject_reason,
+                    inline=False,
                 )
+            embed.set_image(url=application.cover_image_url)
+
+            await archive_channel.send(embed=embed)
         except Exception as e:
             logger.error(f"存档审核记录时出错: {e}", exc_info=True)
 
@@ -130,7 +167,7 @@ class ReviewView(discord.ui.View):
         self.application_id = application_id
         self.applicant_id = applicant_id
         self.config = config
-        self.archive_channel_id = config.get("archive_channel_id")
+        self.archive_thread_id = config.get("archive_thread_id")
 
     @discord.ui.button(
         label="同意",
@@ -236,17 +273,65 @@ class ReviewView(discord.ui.View):
     async def _archive_review(self, application, status: str, reviewer_id: int):
         """在存档频道留档"""
         try:
-            archive_channel = self.bot.get_channel(self.archive_channel_id)
-            if isinstance(archive_channel, discord.ForumChannel):
-                # 在Forum频道创建帖子留档
-                await archive_channel.create_thread(
-                    name=f"Banner审核 - {application.id} - {status}",
-                    content=f"申请ID: {application.id}\n"
-                    f"申请人: <@{application.applicant_id}>\n"
-                    f"审核员: <@{reviewer_id}>\n"
-                    f"状态: {status}\n"
-                    f"时间: {discord.utils.format_dt(discord.utils.utcnow())}\n"
-                    f"帖子链接: https://discord.com/channels/{application.channel_id}/{application.thread_id}",
+            archive_channel = self.bot.get_channel(self.archive_thread_id)
+            if archive_channel is None:
+                logger.error("存档频道不存在，无法发送审核记录")
+                return
+
+            if not hasattr(archive_channel, "send"):
+                logger.error("存档频道不支持发送消息")
+                return
+
+            guild = getattr(archive_channel, "guild", None)
+            if guild is None:
+                logger.error("无法获取存档频道所属服务器信息")
+                return
+
+            thread_url = (
+                f"https://discord.com/channels/{guild.id}/{application.channel_id}/{application.thread_id}"
+            )
+
+            status_display_map = {
+                "approved_carousel": "✅ 已同意 - 已加入轮播",
+                "approved_waitlist": "✅ 已同意 - 已加入等待列表",
+                "rejected": "❌ 已拒绝",
+            }
+            color_map = {
+                "approved_carousel": discord.Color.green(),
+                "approved_waitlist": discord.Color.green(),
+                "rejected": discord.Color.red(),
+            }
+
+            embed = discord.Embed(
+                title=f"Banner审核 - {application.id}",
+                description=status_display_map.get(status, status),
+                color=color_map.get(status, discord.Color.blurple()),
+                timestamp=discord.utils.utcnow(),
+            )
+            embed.add_field(
+                name="申请人",
+                value=f"<@{application.applicant_id}>",
+                inline=True,
+            )
+            embed.add_field(
+                name="审核员",
+                value=f"<@{reviewer_id}>",
+                inline=True,
+            )
+            embed.add_field(name="申请ID", value=str(application.id), inline=True)
+            embed.add_field(
+                name="帖子链接",
+                value=f"[点击查看]({thread_url})",
+                inline=False,
+            )
+            if application.reject_reason:
+                embed.add_field(
+                    name="拒绝理由",
+                    value=application.reject_reason,
+                    inline=False,
                 )
+            embed.set_image(url=application.cover_image_url)
+
+            await archive_channel.send(embed=embed)
         except Exception as e:
             logger.error(f"存档审核记录时出错: {e}", exc_info=True)

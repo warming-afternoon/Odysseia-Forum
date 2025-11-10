@@ -80,8 +80,8 @@
     "review_thread_id": 0,
     "_comment_review_thread_id": "接收审核申请的Thread ID",
     
-    "archive_channel_id": 0,
-    "_comment_archive_channel_id": "审核记录存档的Forum频道ID",
+    "archive_thread_id": 0,
+    "_comment_archive_thread_id": "审核记录存档的Forum频道ID",
     
     "available_channels": {
       "1374474903981527082": "纯净区",
