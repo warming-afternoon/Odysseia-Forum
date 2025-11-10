@@ -490,7 +490,6 @@
 				el.results.innerHTML = '<div class="error-message">搜索失败，请稍后重试</div>';
 				return;
 			}
-			
 			const data = await res.json();
 			state.filtered = data.results || [];
 			state.total = data.total || 0;
@@ -498,8 +497,15 @@
 			// 更新可用标签列表
 			state.availableTags = data.available_tags || [];
 			
+			// 更新未读数量（如后端提供）
+			if (typeof data.unread_count === 'number') {
+				state.unreadCount = data.unread_count;
+				updateUnreadBadge();
+			}
+			
 			// 更新Banner轮播列表
 			updateBannerCarousel(data.banner_carousel || []);
+			
 			
 		}catch(e){
 			console.error('获取搜索结果时出错:', e);
@@ -1083,7 +1089,6 @@
 		const safeThread = thread && thread !== 'null' && thread !== 'undefined' ? String(thread) : '';
 		const segments = [];
 		if(safeGuild) segments.push(safeGuild);
-		if(safeChannel) segments.push(safeChannel);
 		if(safeThread) segments.push(safeThread);
 		const path = segments.join('/');
 		const appUrl = path ? `discord://-/channels/${path}` : 'discord://-/channels';

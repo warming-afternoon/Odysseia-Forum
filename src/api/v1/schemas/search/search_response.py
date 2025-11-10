@@ -44,3 +44,7 @@ class SearchResponse(PaginatedResponse[ThreadDetail]):
         default_factory=list,
         description="Banner轮播列表，包含当前频道+全频道的banner（最多8个）"
     )
+    unread_count: int = Field(
+        default=0,
+        description="当前用户关注列表的未读更新数量"
+    )

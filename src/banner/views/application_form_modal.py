@@ -118,7 +118,7 @@ class ApplicationFormModal(discord.ui.Modal, title="Banner申请"):
 
             # 构建Discord链接
             guild_id = interaction.guild_id or ""
-            thread_link = f"https://discord.com/channels/{guild_id}/{channel_id}/{thread_id}"
+            thread_link = f"https://discord.com/channels/{guild_id}/{thread_id}"
 
             embed = discord.Embed(
                 title="选择展示范围",

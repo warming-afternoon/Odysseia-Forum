@@ -6,12 +6,14 @@ from src.search.search_service import SearchService
 from config.config_service import ConfigService
 from src.shared.enum.search_config_type import SearchConfigType, SearchConfigDefaults
 from src.shared.keyword_parser import KeywordParser
-from ..dependencies.security import require_auth
+from ..dependencies.security import require_auth, get_current_user
 from ..schemas.search import SearchRequest, SearchResponse, ThreadDetail
 from ..schemas.search.author import AuthorDetail
 from ..schemas.banner import BannerItem
 from src.core.cache_service import CacheService
 from src.banner.banner_service import BannerService
+from ThreadManager.services.follow_service import FollowService
+from typing import Dict, Any
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
 search_cog_instance: Search | None = None
@@ -25,7 +27,7 @@ router = APIRouter(
 
 
 @router.post("/", response_model=SearchResponse, summary="执行帖子搜索")
-async def execute_search(request: SearchRequest):
+async def execute_search(request: SearchRequest, current_user: Dict[str, Any] = Depends(get_current_user)):
     """
     根据指定的条件搜索帖子，并返回包含作者信息的分页结果。
 
@@ -184,6 +186,17 @@ async def execute_search(request: SearchRequest):
                 for banner in banners
             ]
 
+        # 读取未读更新数量
+        unread_count = 0
+        try:
+            user_id = int(current_user["id"]) if current_user and "id" in current_user else None
+            if user_id is not None:
+                async with async_session_factory() as session:
+                    follow_service = FollowService(session)
+                    unread_count = await follow_service.get_unread_count(user_id=user_id)
+        except Exception:
+            unread_count = 0
+
         return SearchResponse(
             total=total_threads,
             limit=request.limit,
@@ -191,6 +204,7 @@ async def execute_search(request: SearchRequest):
             results=results,
             available_tags=available_tags,
             banner_carousel=banner_carousel,
+            unread_count=unread_count,
         )
     except Exception as e:
         # 生产环境中应使用 logger.exception
