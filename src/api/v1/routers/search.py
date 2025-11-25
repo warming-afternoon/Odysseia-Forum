@@ -152,7 +152,7 @@ async def execute_search(request: SearchRequest, current_user: Dict[str, Any] = 
                 reply_count=thread.reply_count,
                 display_count=thread.display_count,
                 first_message_excerpt=thread.first_message_excerpt,
-                thumbnail_url=thread.thumbnail_url,
+                thumbnail_urls=thread.thumbnail_urls or [],
                 tags=[tag.name for tag in thread.tags],
             )
             results.append(thread_detail)

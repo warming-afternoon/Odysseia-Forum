@@ -188,4 +188,6 @@ config.json
 data/
 temp/
 webpage/index.json
+webpage/node_modules/
+webpage/.env
 config_production.json

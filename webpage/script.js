@@ -1,1810 +1,1763 @@
+const app = {
+	state: {
+		token: localStorage.getItem('auth_token'),
+		user: null,
+		view: 'search',
+		channelId: null,
+		query: '',
+		dateStart: null, dateEnd: null,
+		sortMethod: 'comprehensive', sortOrder: 'desc',
+		limit: 20,
+		tagMode: 'include', tagLogic: 'and',
+		includedTags: new Set(), excludedTags: new Set(), availableTags: [],
+		results: [], banners: [], totalResults: 0, unreadCount: 0,
+		isLoading: false, sidebarOpen: false,
+		failedImages: null, imageRefreshTimer: null, isRefreshingImages: false,
+		followThreads: [], followTotal: 0, followFetched: false,
+		followFetchLimit: 10000, followAvailableTags: [], followNeedsRefresh: false
+	},
+	markingFollows: false,
 
-(function(){
-	"use strict";
+	getPrimaryThumbnail(post) {
+		if (!post) return null;
+		if (Array.isArray(post.thumbnail_urls) && post.thumbnail_urls.length) {
+			return post.thumbnail_urls.find(url => typeof url === 'string' && url.length) || null;
+		}
+		if (typeof post.thumbnail_url === 'string' && post.thumbnail_url.length) {
+			return post.thumbnail_url;
+		}
+		return null;
+	},
 
-	const url = new URL(window.location.href);
-	const error = url.searchParams.get("error");
-	if(error){
-		alert("登录失败: " + error);
-	}
+	normalizeThumbnailList(thumbnailUrls) {
+		if (Array.isArray(thumbnailUrls)) {
+			return thumbnailUrls.filter(url => typeof url === 'string' && url.length);
+		}
+		if (typeof thumbnailUrls === 'string' && thumbnailUrls.length) {
+			return [thumbnailUrls];
+		}
+		return [];
+	},
 
-	/** 数据与状态 **/
-	const state = {
-		filtered: [],
-		total: 0,
-		page: 1,
-		perPage: 24,
-		sort: "last_active_desc",
-		query: "",
-		selectedChannel: null, // 单选频道，null表示全频道搜索
-		tagStates: new Map(), // 标签状态: null(默认), 'excluded'(排除), 'included'(包含)
-		tagLogic: "and", // 标签逻辑：and 或 or
-		tagMode: 'included', // 标签点击模式：'included'(包含) 或 'excluded'(排除)
-		timeFrom: null,
-		timeTo: null,
-		authed: true,
-		loading: false,
-		availableChannels: new Map(),
-		availableTags: [], // 当前可用的标签列表
-		currentPanel: 'channels', // 当前活动面板
-		user: null, // 用户信息
-		unreadCount: 0, // 未读更新数量
-		follows: [], // 关注列表
-		followsTotal: 0, // 关注总数
-		viewMode: 'search', // 'search' 或 'follows'
-		// 关注列表筛选状态
-		followsQuery: '', // 关注列表搜索关键词
-		followsTagStates: new Map(), // 关注列表tag状态
-		followsAvailableTags: [], // 关注列表可用tags
-		followsPage: 1, // 关注列表当前页
-		followsPerPage: 24, // 关注列表每页数量
-		openMode: 'app', // 帖子打开方式：'app' 或 'web'
-		imageRefreshQueue: new Map(), // 等待刷新封面的线程 -> 元数据
-		imageRefreshTimer: null, // 定时器句柄
-		imageRefreshProcessing: false, // 是否正在请求刷新
-		// Banner轮播状态
-		bannerCarousel: [], // Banner列表
-		currentBannerIndex: 0, // 当前显示的banner索引
-		bannerAutoPlay: null // 自动播放定时器
-	};
+	getPlaceholderImage(size = '600x300') {
+		return `https://placehold.co/${size}/2f3136/72767d?text=No+Image`;
+	},
 
-	let savedOpenMode;
-	try{
-		savedOpenMode = window.localStorage.getItem('open_mode');
-	}catch{}
-	if(savedOpenMode === 'web' || savedOpenMode === 'app'){
-		state.openMode = savedOpenMode;
-	}
-
-	const IMAGE_REFRESH_DEBOUNCE = 5000;
-	const PLACEHOLDER_IMAGE = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="120" height="68" viewBox="0 0 120 68"%3E%3Crect width="120" height="68" rx="12" fill="%23141926"/%3E%3Cpath d="M18 46L40 26l14 12 18-16 30 24H18Z" fill="%2330527c" opacity=".65"/%3E%3Ccircle cx="86" cy="20" r="6" fill="%23ffffff" opacity=".35"/%3E%3C/svg%3E';
-
-	// iOS 兼容：从回调 URL 片段中获取 token 并持久化
-	(function hydrateAuthToken(){
-		try{
-			const m = location.hash && location.hash.match(/[#&]token=([^&]+)/);
-			const fromHash = m ? decodeURIComponent(m[1]) : null;
-			const fromStorage = window.localStorage.getItem('auth_token') || null;
-			if(fromHash){
-				window.AUTH_TOKEN = fromHash;
-				window.localStorage.setItem('auth_token', fromHash);
-				history.replaceState({}, '', location.pathname + location.search);
-			}else if(fromStorage){
-				window.AUTH_TOKEN = fromStorage;
-			}
-		}catch{}
-	})();
-
-	function authHeaders(){
-		const h = {};
-		if(window.AUTH_TOKEN){ h['Authorization'] = 'Bearer ' + window.AUTH_TOKEN; }
-		return h;
-	}
-
-	/** DOM **/
-	const el = {
-		keyword: document.getElementById("keywordInput"),
-		searchBtn: document.getElementById("searchBtn"),
-		timeFrom: document.getElementById("timeFrom"),
-		timeTo: document.getElementById("timeTo"),
-		sort: document.getElementById("sortSelect"),
-		perPage: document.getElementById("perPage"),
-		openMode: document.getElementById("openMode"),
-		tagLogic: document.getElementById("tagLogic"),
-		tagModeSwitch: document.getElementById("tagModeSwitch"),
-		stats: document.getElementById("resultCount"),
-		results: document.getElementById("results"),
-		pagination: document.getElementById("pagination"),
-		// 侧边栏相关
-		sidebar: document.getElementById("sidebar"),
-		drawerToggle: document.getElementById("drawerToggle"),
-		userAvatar: document.getElementById("userAvatar"),
-		userName: document.getElementById("userName"),
-		channelList: document.getElementById("channelList"),
-		tagPillsSection: document.getElementById("tagPillsSection"),
-		tagPills: document.getElementById("tagPills"),
-		followsBadge: document.getElementById("followsBadge"),
-		// 筛选器相关
-		filters: document.getElementById("filters"),
-		viewControls: document.querySelector(".view-controls")
-	};
-
-	/** 工具函数 **/
-	const fmtDate = (d)=> {
-		if(!d) return "";
-		let dt;
-		if(typeof d === 'string'){
-			if(!d.endsWith('Z') && !/[+-]\d{2}:\d{2}$/.test(d)){
-				dt = new Date(d + 'Z');
-			} else {
-				dt = new Date(d);
-			}
-		} else {
-			dt = new Date(d);
+	// 生成多图智能排版 HTML（用于卡片默认状态）
+	renderMultiImageGrid(thumbnailUrls, threadId) {
+		const urls = this.normalizeThumbnailList(thumbnailUrls);
+		const count = urls.length;
+		
+		if (count === 0) {
+			return `<img src="${this.getPlaceholderImage()}" class="card-img single-img" onerror="app.handleImageError(event, '${threadId}', '')">`;
 		}
 		
-		const now = Date.now();
-		const diff = now - dt.getTime();
-		
-		if(diff < 0) return "刚刚";
-		
-		const sec = Math.floor(diff / 1000);
-		const min = Math.floor(sec / 60);
-		const hour = Math.floor(min / 60);
-		const day = Math.floor(hour / 24);
-		
-		if(sec < 60) return "刚刚";
-		if(min < 60) return `${min}分钟前`;
-		if(hour < 24) return `${hour}小时前`;
-		if(day < 7) return `${day}天前`;
-		
-		const year = dt.getFullYear();
-		const month = dt.getMonth() + 1;
-		const date = dt.getDate();
-		const thisYear = new Date().getFullYear();
-		
-		if(year === thisYear) return `${month}月${date}日`;
-		return `${year}年${month}月${date}日`;
-	};
-
-	const debounce = (fn,ms)=>{ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a),ms); }; };
-	function escapeHtml(s){ return (s==null?"":String(s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;"); }
-	function escapeAttr(s){ return String(s||"").replace(/"/g,'&quot;'); }
-	
-	/** 简单的 Markdown 渲染器 **/
-	function renderMarkdown(text){
-		if(!text) return "";
-		let html = escapeHtml(text);
-		
-		// 步骤1: 保护特殊内容（链接和代码块），用占位符替换
-		// 使用null字符作为占位符，不会与markdown语法冲突
-		const protected_content = [];
-		let counter = 0;
-		
-		// 保护Discord表情
-		html = html.replace(/&lt;a?:([^:]+):(\d+)&gt;/g, (match, name, id) => {
-			const placeholder = `\x00MDPROTECT${counter++}\x00`;
-			protected_content.push(`<img class="discord-emoji" src="https://cdn.discordapp.com/emojis/${id}.webp" alt=":${name}:" title=":${name}:" loading="lazy">`);
-			return placeholder;
-		});
-		
-		// 保护代码块
-		html = html.replace(/```([^`]+)```/g, (match, code) => {
-			const placeholder = `\x00MDPROTECT${counter++}\x00`;
-			protected_content.push(`<pre><code>${code}</code></pre>`);
-			return placeholder;
-		});
-		
-		// 保护行内代码
-		html = html.replace(/`([^`]+)`/g, (match, code) => {
-			const placeholder = `\x00MDPROTECT${counter++}\x00`;
-			protected_content.push(`<code>${code}</code>`);
-			return placeholder;
-		});
-		
-		// 保护链接（包括链接文本和URL）
-		html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
-			const placeholder = `\x00MDPROTECT${counter++}\x00`;
-			protected_content.push(`<a href="${url}" target="_blank" rel="noopener">${text}</a>`);
-			return placeholder;
-		});
-		
-		// 步骤2: 处理其他markdown格式
-		html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-		html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-		html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-		html = html.replace(/_([^_]+)_/g, '<em>$1</em>');
-		html = html.replace(/~~([^~]+)~~/g, '<del>$1</del>');
-		html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-		html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-		html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-		html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
-		html = html.replace(/^[*-] (.+)$/gm, '<li>$1</li>');
-		html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-		html = html.replace(/\n/g, '<br>');
-		
-		// 步骤3: 还原保护的内容
-		protected_content.forEach((content, index) => {
-			html = html.replace(`\x00MDPROTECT${index}\x00`, content);
-		});
-		
-		return html;
-	}
-
-	/** URL 状态同步 **/
-	function readFromURL(){
-		const p = new URLSearchParams(location.search);
-		
-		// 检查是否是关注列表模式
-		const mode = p.get("mode");
-		if(mode === "follows"){
-			state.viewMode = "follows";
-			state.followsQuery = p.get("q") || "";
-			state.followsPage = +(p.get("page") || 1) || 1;
-			
-			// 读取关注列表的标签状态
-			const included = (p.get("ti")||"").split("|").filter(Boolean);
-			const excluded = (p.get("te")||"").split("|").filter(Boolean);
-			state.followsTagStates.clear();
-			included.forEach(tag => state.followsTagStates.set(tag, 'included'));
-			excluded.forEach(tag => state.followsTagStates.set(tag, 'excluded'));
-		} else {
-			// 搜索模式
-			state.viewMode = "search";
-			state.query = p.get("q") || "";
-			state.sort = p.get("sort") || "last_active_desc";
-			state.page = +(p.get("page") || 1) || 1;
-			state.perPage = +(p.get("pp") || 24) || 24;
-			state.selectedChannel = p.get("ch") || null;
-			state.tagLogic = p.get("tl") || "and";
-			
-			// 读取搜索的标签状态
-			const included = (p.get("ti")||"").split("|").filter(Boolean);
-			const excluded = (p.get("te")||"").split("|").filter(Boolean);
-			state.tagStates.clear();
-			included.forEach(tag => state.tagStates.set(tag, 'included'));
-			excluded.forEach(tag => state.tagStates.set(tag, 'excluded'));
-			
-			state.timeFrom = p.get("tf") ? new Date(+p.get("tf")) : null;
-			state.timeTo = p.get("tt") ? new Date(+p.get("tt")) : null;
-		}
-	}
-
-	function writeToURL(replace=false){
-		const p = new URLSearchParams();
-		
-		if(state.viewMode === 'follows'){
-			// 关注列表模式
-			p.set("mode", "follows");
-			if(state.followsQuery) p.set("q", state.followsQuery);
-			if(state.followsPage>1) p.set("page", String(state.followsPage));
-			
-			// 写入关注列表的标签状态
-			const included = [];
-			const excluded = [];
-			state.followsTagStates.forEach((status, tag) => {
-				if(status === 'included') included.push(tag);
-				else if(status === 'excluded') excluded.push(tag);
-			});
-			if(included.length) p.set("ti", included.join("|"));
-			if(excluded.length) p.set("te", excluded.join("|"));
-		} else {
-			// 搜索模式
-			if(state.query) p.set("q", state.query);
-			if(state.sort && state.sort!=="last_active_desc") p.set("sort", state.sort);
-			if(state.page>1) p.set("page", String(state.page));
-			if(state.perPage!==24) p.set("pp", String(state.perPage));
-			if(state.selectedChannel) p.set("ch", state.selectedChannel);
-			if(state.tagLogic && state.tagLogic!=="and") p.set("tl", state.tagLogic);
-			
-			// 写入搜索的标签状态
-			const included = [];
-			const excluded = [];
-			state.tagStates.forEach((status, tag) => {
-				if(status === 'included') included.push(tag);
-				else if(status === 'excluded') excluded.push(tag);
-			});
-			if(included.length) p.set("ti", included.join("|"));
-			if(excluded.length) p.set("te", excluded.join("|"));
-			
-			if(state.timeFrom) p.set("tf", String(+state.timeFrom));
-			if(state.timeTo) p.set("tt", String(+state.timeTo));
+		if (count === 1) {
+			return `<img src="${urls[0]}" class="card-img single-img" onerror="app.handleImageError(event, '${threadId}', '')">`;
 		}
 		
-		const url = `${location.pathname}?${p.toString()}`;
-		history[replace?"replaceState":"pushState"]({}, "", url);
-	}
-
-	/** 侧边栏面板切换 **/
-	function switchPanel(panelName){
-		// 特殊处理退出登录
-		if(panelName === 'logout'){
-			if(confirm('确定要退出登录吗？')){
-				logout();
-			}
-			return;
+		if (count === 2) {
+			return `
+				<div class="multi-img-grid grid-2">
+					<div class="img-cell"><img src="${urls[0]}" onerror="this.src='${this.getPlaceholderImage('300x300')}'"></div>
+					<div class="img-cell"><img src="${urls[1]}" onerror="this.src='${this.getPlaceholderImage('300x300')}'"></div>
+				</div>`;
 		}
 		
-		state.currentPanel = panelName;
-		
-		// 更新导航按钮状态
-		document.querySelectorAll('.nav-btn').forEach(btn => {
-			if(btn.getAttribute('data-panel') === panelName){
-				btn.classList.add('active');
-			} else {
-				btn.classList.remove('active');
-			}
-		});
-		
-		// 更新面板显示
-		document.querySelectorAll('.panel').forEach(panel => {
-			if(panel.id === `panel-${panelName}`){
-				panel.classList.add('active');
-			} else {
-				panel.classList.remove('active');
-			}
-		});
-		
-		// 如果切换到关注列表，切换视图模式并加载
-		if(panelName === 'follows'){
-			state.viewMode = 'follows';
-			// 只隐藏筛选器，保留分页数量控件
-			if(el.filters) el.filters.style.display = 'none';
-			loadFollows();
-			markFollowsViewed();
-			writeToURL(true);  // 更新URL
-			// 关闭抽屉（移动端）
-			if(window.innerWidth <= 720){
-				el.sidebar.classList.remove('open');
-			}
-		} else if(state.viewMode === 'follows'){
-			// 从关注列表切换回搜索模式
-			state.viewMode = 'search';
-			// 显示筛选器
-			if(el.filters) el.filters.style.display = '';
-			state.followsQuery = '';
-			state.followsTagStates.clear();
-			syncAndSearch();
-		}
-
-		updateBannerVisibility();
-	}
-
-	/** 初始化频道列表 **/
-	async function initChannels(){
-		const byId = window.CHANNELS || {};
-		state.availableChannels = new Map(Object.entries(byId).map(([id, name]) => [id, name]));
-		
-		const categories = window.CHANNEL_CATEGORIES || [];
-		
-		// 全频道选项
-		const isAllActive = !state.selectedChannel;
-		let html = `<div class="channel-item all-channels${isAllActive?' active':''}" data-channel-id="">🌐 全频道搜索</div>`;
-		
-		// 渲染分类
-		categories.forEach(category => {
-			html += `<div class="channel-category">`;
-			html += `<div class="category-title">${escapeHtml(category.name)}</div>`;
-			html += `<div class="category-channels">`;
-			category.channels.forEach(channel => {
-				const isActive = channel.id === state.selectedChannel;
-				html += `<div class="channel-item${isActive?' active':''}" data-channel-id="${channel.id}">${escapeHtml(channel.name)}</div>`;
-			});
-			html += `</div></div>`;
-		});
-		
-		el.channelList.innerHTML = html;
-	}
-
-	/** 更新标签胶囊显示 **/
-	function updateTagPills(){
-		// 根据当前模式选择不同的tags和状态
-		const tags = state.viewMode === 'follows' ? state.followsAvailableTags : state.availableTags;
-		const tagStates = state.viewMode === 'follows' ? state.followsTagStates : state.tagStates;
-		
-		// 没有可用标签或(搜索模式下)全频道搜索时隐藏标签栏
-		if(tags.length === 0 || (state.viewMode === 'search' && state.selectedChannel === null)){
-			el.tagPillsSection.classList.add('hidden');
-			return;
+		if (count === 3) {
+			return `
+				<div class="multi-img-grid grid-3">
+					<div class="img-cell img-main"><img src="${urls[0]}" onerror="this.src='${this.getPlaceholderImage('400x400')}'"></div>
+					<div class="img-cell"><img src="${urls[1]}" onerror="this.src='${this.getPlaceholderImage('200x200')}'"></div>
+					<div class="img-cell"><img src="${urls[2]}" onerror="this.src='${this.getPlaceholderImage('200x200')}'"></div>
+				</div>`;
 		}
 		
-		el.tagPillsSection.classList.remove('hidden');
-		el.tagPills.innerHTML = tags.map(tag => {
-			const status = tagStates.get(tag) || null;
-			const className = status ? `tag-pill ${status}` : 'tag-pill';
-			return `<div class="${className}" data-tag="${escapeAttr(tag)}">${escapeHtml(tag)}</div>`;
-		}).join('');
-	}
-
-	/** 标签胶囊点击 - 三态切换 **/
-	function cycleTagState(tag){
-		const current = state.tagStates.get(tag) || null;
-		const mode = state.tagMode; // 使用全局的tag模式
-		
-		if(current === mode){
-			// 如果已经是当前模式，则取消选择
-			state.tagStates.delete(tag);
-		} else {
-			// 否则设置为当前模式
-			state.tagStates.set(tag, mode);
-		}
-		
-		updateTagPills();
-	}
-
-	/** 构建搜索请求参数 **/
-	function buildSearchRequest(){
-		const sortMap = {
-			"relevance": { method: "comprehensive", order: "desc" },
-			"last_active_desc": { method: "last_active", order: "desc" },
-			"created_desc": { method: "created_at", order: "desc" },
-			"reply_desc": { method: "reply_count", order: "desc" },
-			"reaction_desc": { method: "reaction_count", order: "desc" }
-		};
-		const sortConfig = sortMap[state.sort] || sortMap["relevance"];
-		
-		// 构建标签过滤
-		const includeTags = [];
-		const excludeTags = [];
-		state.tagStates.forEach((status, tag) => {
-			if(status === 'included') includeTags.push(tag);
-			else if(status === 'excluded') excludeTags.push(tag);
-		});
-		
-		return {
-			channel_ids: state.selectedChannel ? [state.selectedChannel] : null,
-			include_tags: includeTags.length > 0 ? includeTags : [],
-			exclude_tags: excludeTags.length > 0 ? excludeTags : [],
-			tag_logic: state.tagLogic,
-			keywords: state.query || null,
-			created_after: state.timeFrom ? formatDateForAPI(state.timeFrom) : null,
-			created_before: state.timeTo ? formatDateForAPI(state.timeTo) : null,
-			sort_method: sortConfig.method,
-			sort_order: sortConfig.order,
-			limit: state.perPage,
-			offset: (state.page - 1) * state.perPage
-		};
-	}
-
-	function formatDateForAPI(date){
-		const d = new Date(date);
-		const year = d.getFullYear();
-		const month = String(d.getMonth() + 1).padStart(2, '0');
-		const day
-
-
- = String(d.getDate()).padStart(2, '0');
-		return `${year}-${month}-${day}`;
-	}
-
-	/** 从服务端获取搜索结果 **/
-	async function fetchSearchResults(){
-		if(state.loading) return;
-		
-		state.loading = true;
-		showLoadingPlaceholders();
-		
-		try{
-			const searchRequest = buildSearchRequest();
-			const res = await fetch(window.AUTH_URL + '/search', {
-				method: 'POST',
-				credentials: 'include',
-				headers: {
-					'Content-Type': 'application/json',
-					...authHeaders()
-				},
-				body: JSON.stringify(searchRequest)
-			});
-			
-			if(!res || res.status === 401){
-				state.authed = false;
-				state.loading = false;
-				render();
-				return;
-			}
-			
-			if(!res.ok){
-				console.error('搜索请求失败:', res.status);
-				state.loading = false;
-				el.stats.textContent = "搜索失败，请稍后重试";
-				el.results.innerHTML = '<div class="error-message">搜索失败，请稍后重试</div>';
-				return;
-			}
-			const data = await res.json();
-			state.filtered = data.results || [];
-			state.total = data.total || 0;
-			
-			// 更新可用标签列表
-			state.availableTags = data.available_tags || [];
-			
-			// 更新未读数量（如后端提供）
-			if (typeof data.unread_count === 'number') {
-				state.unreadCount = data.unread_count;
-				updateUnreadBadge();
-			}
-			
-			// 更新Banner轮播列表
-			updateBannerCarousel(data.banner_carousel || []);
-			
-			
-		}catch(e){
-			console.error('获取搜索结果时出错:', e);
-			state.loading = false;
-			el.stats.textContent = "搜索出错";
-			el.results.innerHTML = '<div class="error-message">搜索出错，请稍后重试</div>';
-			return;
-		}
-		
-		state.loading = false;
-		render();
-	}
-
-	/** 显示加载占位符 **/
-	function showLoadingPlaceholders(){
-		const placeholders = Array(state.perPage).fill(0).map(() => `
-			<article class="card loading-card">
-				<div class="card-media">
-					<div class="media-img skeleton"></div>
-					<div class="excerpt skeleton-text">
-						<div class="skeleton-line"></div>
-						<div class="skeleton-line"></div>
-						<div class="skeleton-line short"></div>
-					</div>
-				</div>
-				<div class="card-body">
-					<div class="skeleton-title"></div>
-					<div class="card-meta">
-						<span class="skeleton-badge"></span>
-						<span class="skeleton-badge"></span>
-						<span class="skeleton-badge"></span>
-					</div>
-				</div>
-			</article>
-		`).join('');
-		
-		el.results.innerHTML = placeholders;
-		el.stats.textContent = "加载中...";
-		
-		// 清空banner显示
-		const bannerSection = document.getElementById('bannerCarousel');
-		if(bannerSection){
-			bannerSection.innerHTML = '<div class="banner-placeholder"><p>🎉 加载中...</p></div>';
-		}
-	}
-
-	/** 渲染 **/
-	function render(){
-		if(!state.authed){
-			el.stats.textContent = "您需要先登录才能浏览搜索结果";
-			el.results.innerHTML = `<div class="auth-required">
-				<div class="auth-card">
-					<h3>需要登录</h3>
-					<p>请先使用 Discord 登录以加载搜索索引并浏览搜索结果。</p>
-					<button id="loginBtn" class="btn primary">登录 Discord</button>
-				</div>
-			</div>`;
-			el.pagination.innerHTML = "";
-			const btn = document.getElementById('loginBtn');
-			if(btn){ btn.addEventListener('click', ()=> login()); }
-			return;
-		}
-		
-		const total = state.total;
-		const pages = Math.max(1, Math.ceil(total / state.perPage));
-		if(state.page > pages && pages > 0) state.page = pages;
-		
-		el.stats.textContent = `共 ${total} 条结果 · 第 ${state.page}/${pages} 页`;
-		el.results.innerHTML = state.filtered.map(renderCard).join("");
-		renderPagination(state.page, pages);
-		updateTagPills();
-		attachImageErrorHandlers();
-		
-		window.scrollTo({top: 0, behavior: 'smooth'});
-	}
-
-	function renderCard(item){
-		const author = item.author || {};
-		const hasThumbnail = Boolean(item.thumbnail_url);
-		const cardClassName = hasThumbnail ? "card" : "card card--no-thumb";
-		const mediaClassName = hasThumbnail ? "card-media" : "card-media card-media--no-thumb";
-		const mediaImgHtml = hasThumbnail
-			? `<div class="media-img"><img src="${escapeAttr(item.thumbnail_url)}" alt="${escapeAttr(item.title)} 缩略图" loading="lazy" class="card-img" data-src="${escapeAttr(item.thumbnail_url)}" data-thread-id="${escapeAttr(String(item.thread_id))}" data-channel-id="${item.channel_id != null ? escapeAttr(String(item.channel_id)) : ''}"></div>`
-			: "";
-		const excerptText = limitText(item.first_message_excerpt||"", hasThumbnail ? 500 : 800);
-		const excerptHtml = `<div class="excerpt markdown-content">${renderMarkdown(excerptText)}</div>`;
-		const channelName = state.availableChannels.get(String(item.channel_id)) || `频道 ${item.channel_id}`;
-		const created = fmtDate(item.created_at);
-		const active = fmtDate(item.last_active_at);
-		const authorDisplayName = author.display_name || author.global_name || author.name || "未知作者";
-		const authorUsername = author.name || "";
-		const authorTooltip = authorUsername
-			? `点击搜索${authorUsername}的所有作品`
-			: "点击搜索该作者的所有作品";
-		const guildId = window.GUILD_ID;
+		// 4张及以上：2x2网格，超过4张显示剩余数量
+		const displayUrls = urls.slice(0, 4);
+		const remaining = count - 4;
 		
 		return `
-		<article class="${cardClassName}" tabindex="0">
-			<div class="${mediaClassName}">${mediaImgHtml}${excerptHtml}</div>
-			<div class="card-body">
-				<h2 class="card-title" title="${escapeAttr(item.title)}">${escapeHtml(item.title)}</h2>
-				<div class="card-meta">
-					<span class="badge" title="频道"><span class="dot"></span>${escapeHtml(channelName)}</span>
-					<span class="badge badge-author" title="${escapeAttr(authorTooltip)}" data-author="${escapeAttr(authorUsername)}">👤 ${escapeHtml(authorDisplayName)}</span>
-					<span class="badge" title="发布时间 ${new Date(item.created_at).toLocaleString()}">🕒 ${escapeHtml(created)}</span>
-					<span class="badge" title="最近活跃 ${new Date(item.last_active_at).toLocaleString()}">🔥 ${escapeHtml(active)}</span>
-					<span class="badge" title="回复">💬 ${escapeHtml(item.reply_count||0)}</span>
-					<span class="badge" title="反应">⭐ ${escapeHtml(item.reaction_count||0)}</span>
+			<div class="multi-img-grid grid-4">
+				${displayUrls.map((url, idx) => `
+					<div class="img-cell${idx === 3 && remaining > 0 ? ' has-more' : ''}">
+						<img src="${url}" onerror="this.src='${this.getPlaceholderImage('200x200')}'">
+						${idx === 3 && remaining > 0 ? `<div class="more-overlay">+${remaining}</div>` : ''}
+					</div>
+				`).join('')}
+			</div>`;
+	},
+
+	// 生成轮播组件 HTML（用于悬停展开/移动端详情）
+	renderCarousel(thumbnailUrls, threadId, carouselId) {
+		const urls = this.normalizeThumbnailList(thumbnailUrls);
+		const count = urls.length;
+		
+		if (count === 0) {
+			return `<img src="${this.getPlaceholderImage('600x400')}" class="card-img carousel-single" onerror="app.handleImageError(event, '${threadId}', '')">`;
+		}
+		
+		if (count === 1) {
+			return `<img src="${urls[0]}" class="card-img carousel-single" onerror="app.handleImageError(event, '${threadId}', '')">`;
+		}
+		
+		const dotsHtml = urls.map((_, idx) => 
+			`<button class="carousel-dot${idx === 0 ? ' active' : ''}" data-index="${idx}" onclick="app.goToSlide('${carouselId}', ${idx}, event)"></button>`
+		).join('');
+		
+		return `
+			<div class="carousel" id="${carouselId}" data-current="0" data-total="${count}">
+				<div class="carousel-track">
+					${urls.map((url, idx) => `
+						<div class="carousel-slide${idx === 0 ? ' active' : ''}" data-index="${idx}">
+							<img src="${url}" onerror="this.src='${this.getPlaceholderImage('600x400')}'">
+						</div>
+					`).join('')}
 				</div>
-				<div class="tags">${(item.tags||[]).map(t=>`<span class="tag"># ${escapeHtml(t)}</span>`).join("")}</div>
-			</div>
-			<div class="card-actions">
-				<div class="left"> </div>
-				<div class="right"><a class="link discord-link" href="#" data-guild="${guildId}" data-channel="${item.channel_id}" data-thread="${item.thread_id}">打开原帖 →</a></div>
-			</div>
-		</article>`;
-	}
-	
-	function limitText(s,n){ if(!s) return ""; return s.length>n? s.slice(0,n-1)+"…" : s; }
+				<button class="carousel-btn carousel-prev" onclick="app.prevSlide('${carouselId}', event)">
+					<span class="material-symbols-outlined">chevron_left</span>
+				</button>
+				<button class="carousel-btn carousel-next" onclick="app.nextSlide('${carouselId}', event)">
+					<span class="material-symbols-outlined">chevron_right</span>
+				</button>
+				<div class="carousel-dots">${dotsHtml}</div>
+				<div class="carousel-counter">${1}/${count}</div>
+			</div>`;
+	},
 
-	function attachImageErrorHandlers(){
-		const images = document.querySelectorAll('img.card-img');
-		images.forEach(img=>{
-			if(img.dataset.errorListenerAttached === '1') return;
-			img.dataset.errorListenerAttached = '1';
-			img.addEventListener('error', onCardImageError, {passive: true});
+	// 轮播控制函数
+	goToSlide(carouselId, index, event) {
+		if (event) event.stopPropagation();
+		const carousel = document.getElementById(carouselId);
+		if (!carousel) return;
+		
+		const total = parseInt(carousel.dataset.total);
+		const slides = carousel.querySelectorAll('.carousel-slide');
+		const dots = carousel.querySelectorAll('.carousel-dot');
+		const counter = carousel.querySelector('.carousel-counter');
+		
+		// 更新当前索引
+		carousel.dataset.current = index;
+		
+		// 更新slide显示
+		slides.forEach((slide, i) => {
+			slide.classList.toggle('active', i === index);
 		});
-	}
-
-	function onCardImageError(event){
-		const img = event.target;
-		if(!img || img.dataset.imageRefreshing === '1') return;
-		const threadId = img.dataset.threadId;
-		if(!threadId) return;
-		img.dataset.imageRefreshing = '1';
-		img.src = PLACEHOLDER_IMAGE;
-		const channelId = img.dataset.channelId || null;
-		queueImageRefresh(threadId, channelId, img);
-	}
-
-	function queueImageRefresh(threadId, channelId, img){
-		const key = String(threadId);
-		let entry = state.imageRefreshQueue.get(key);
-		if(!entry){
-			entry = {
-				threadId: threadId,
-				channelId: channelId ? channelId : null,
-				imgElements: new Set()
-			};
-			state.imageRefreshQueue.set(key, entry);
+		
+		// 更新dots状态
+		dots.forEach((dot, i) => {
+			dot.classList.toggle('active', i === index);
+		});
+		
+		// 更新计数器
+		if (counter) {
+			counter.textContent = `${index + 1}/${total}`;
 		}
-		entry.imgElements.add(img);
-		scheduleImageRefresh();
-	}
+	},
 
-	function scheduleImageRefresh(){
-		if(state.imageRefreshProcessing) return;
-		if(state.imageRefreshTimer) return;
-		state.imageRefreshTimer = setTimeout(flushImageRefreshQueue, IMAGE_REFRESH_DEBOUNCE);
-	}
+	prevSlide(carouselId, event) {
+		if (event) event.stopPropagation();
+		const carousel = document.getElementById(carouselId);
+		if (!carousel) return;
+		
+		const current = parseInt(carousel.dataset.current);
+		const total = parseInt(carousel.dataset.total);
+		const newIndex = (current - 1 + total) % total;
+		this.goToSlide(carouselId, newIndex);
+	},
 
-	async function flushImageRefreshQueue(){
-		if(state.imageRefreshTimer){
-			clearTimeout(state.imageRefreshTimer);
-			state.imageRefreshTimer = null;
+	nextSlide(carouselId, event) {
+		if (event) event.stopPropagation();
+		const carousel = document.getElementById(carouselId);
+		if (!carousel) return;
+		
+		const current = parseInt(carousel.dataset.current);
+		const total = parseInt(carousel.dataset.total);
+		const newIndex = (current + 1) % total;
+		this.goToSlide(carouselId, newIndex);
+	},
+
+	resetFollowState() {
+		this.state.followThreads = [];
+		this.state.followTotal = 0;
+		this.state.followFetched = false;
+		this.state.followAvailableTags = [];
+		this.state.followNeedsRefresh = true;
+		if (this.state.view === 'follows') {
+			this.state.results = [];
+			this.state.totalResults = 0;
+			this.renderResults();
 		}
-		if(state.imageRefreshProcessing){
-			scheduleImageRefresh();
+	},
+
+	// --- URL 状态同步 ---
+	saveStateToUrl() {
+		const params = new URLSearchParams();
+		
+		// 视图模式
+		if (this.state.view !== 'search') {
+			params.set('view', this.state.view);
+		}
+		
+		// 频道
+		if (this.state.channelId) {
+			params.set('channel', this.state.channelId);
+		}
+		
+		// 搜索关键词
+		const searchInput = document.getElementById('search-input');
+		const query = searchInput?.value?.trim();
+		if (query) {
+			params.set('q', query);
+		}
+		
+		// 日期范围
+		const dateStart = document.getElementById('date-start')?.value;
+		const dateEnd = document.getElementById('date-end')?.value;
+		if (dateStart) params.set('from', dateStart);
+		if (dateEnd) params.set('to', dateEnd);
+		
+		// 排序
+		const sortMethod = document.getElementById('sort-method')?.value;
+		if (sortMethod && sortMethod !== 'comprehensive') {
+			params.set('sort', sortMethod);
+		}
+		if (this.state.sortOrder !== 'desc') {
+			params.set('order', this.state.sortOrder);
+		}
+		
+		// 标签
+		if (this.state.includedTags.size > 0) {
+			params.set('tags', Array.from(this.state.includedTags).join(','));
+		}
+		if (this.state.excludedTags.size > 0) {
+			params.set('exclude', Array.from(this.state.excludedTags).join(','));
+		}
+		
+		// 标签逻辑
+		if (this.state.tagLogic !== 'and') {
+			params.set('logic', this.state.tagLogic);
+		}
+		
+		// 更新 URL（不刷新页面）
+		const newUrl = params.toString() ? `${location.pathname}?${params}` : location.pathname;
+		history.replaceState(null, '', newUrl);
+	},
+
+	loadStateFromUrl() {
+		const params = new URLSearchParams(location.search);
+		
+		// 视图模式
+		const view = params.get('view');
+		if (view === 'follows') {
+			this.state.view = 'follows';
+		}
+		
+		// 频道
+		const channel = params.get('channel');
+		if (channel) {
+			this.state.channelId = channel;
+		}
+		
+		// 搜索关键词
+		const query = params.get('q');
+		if (query) {
+			const searchInput = document.getElementById('search-input');
+			if (searchInput) searchInput.value = query;
+		}
+		
+		// 日期范围
+		const dateStart = params.get('from');
+		const dateEnd = params.get('to');
+		if (dateStart) {
+			const el = document.getElementById('date-start');
+			if (el) el.value = dateStart;
+		}
+		if (dateEnd) {
+			const el = document.getElementById('date-end');
+			if (el) el.value = dateEnd;
+		}
+		
+		// 排序
+		const sortMethod = params.get('sort');
+		if (sortMethod) {
+			const el = document.getElementById('sort-method');
+			if (el) el.value = sortMethod;
+		}
+		const sortOrder = params.get('order');
+		if (sortOrder === 'asc') {
+			this.state.sortOrder = 'asc';
+		}
+		
+		// 标签
+		const tags = params.get('tags');
+		if (tags) {
+			tags.split(',').filter(t => t.trim()).forEach(t => this.state.includedTags.add(t.trim()));
+		}
+		const exclude = params.get('exclude');
+		if (exclude) {
+			exclude.split(',').filter(t => t.trim()).forEach(t => this.state.excludedTags.add(t.trim()));
+		}
+		
+		// 标签逻辑
+		const logic = params.get('logic');
+		if (logic === 'or') {
+			this.state.tagLogic = 'or';
+		}
+	},
+	updateFollowBadge() {
+		const badge = document.getElementById('sidebar-badge');
+		if (!badge) return;
+		if (this.state.unreadCount > 0) {
+			badge.textContent = Math.min(this.state.unreadCount, 99).toString();
+			badge.classList.remove('hidden');
+		} else {
+			badge.classList.add('hidden');
+		}
+	},
+	async refreshUnreadCount() {
+		if (!this.state.token) {
+			this.state.unreadCount = 0;
+			this.updateFollowBadge();
+			return;
+		}
+		const data = await this.fetchAPI('/follows/unread-count', 'GET');
+		if (data && typeof data.unread_count === 'number') {
+			this.state.unreadCount = data.unread_count;
+		} else {
+			this.state.unreadCount = 0;
+		}
+		this.updateFollowBadge();
+	},
+	async markFollowsViewed() {
+		if (!this.state.token || this.markingFollows || this.state.unreadCount === 0) return;
+		this.markingFollows = true;
+		try {
+			await this.fetchAPI('/follows/mark-viewed', 'POST', {});
+			this.state.unreadCount = 0;
+			this.updateFollowBadge();
+			this.state.followThreads = this.state.followThreads.map(thread => ({
+				...thread,
+				has_update: false,
+				last_viewed_at: new Date().toISOString()
+			}));
+		} catch (err) {
+			console.warn('标记关注已读失败', err);
+		} finally {
+			this.markingFollows = false;
+		}
+	},
+
+	async removeFollow(threadId, event) {
+		if (event) event.stopPropagation();
+		if (!this.state.token) return;
+		
+		try {
+			const response = await this.fetchAPI(`/follows/${threadId}`, 'DELETE');
+			if (response) {
+				// 从本地列表中移除
+				this.state.followThreads = this.state.followThreads.filter(
+					t => String(t.thread_id) !== String(threadId)
+				);
+				this.state.followTotal = Math.max(0, this.state.followTotal - 1);
+				
+				// 如果当前在关注视图，更新显示
+				if (this.state.view === 'follows') {
+					this.applyFollowFilters();
+					this.renderResults();
+				}
+				
+				this.showToast('已取消关注');
+			}
+		} catch (err) {
+			console.error('取消关注失败', err);
+			this.showToast('取消关注失败');
+		}
+	},
+	async fetchFollowThreads(force = false) {
+		if (!this.state.token) {
+			this.resetFollowState();
+			return;
+		}
+		if (this.state.followFetched && !force && !this.state.followNeedsRefresh) {
+			return;
+		}
+		const limit = this.state.followFetchLimit || 10000;
+		try {
+			const data = await this.fetchAPI(`/follows?limit=${limit}&offset=0`, 'GET');
+			if (!data) return;
+			const threads = Array.isArray(data.threads) ? data.threads : [];
+			this.state.followThreads = threads.map(thread => ({
+				...thread,
+				thread_id: thread.thread_id != null ? String(thread.thread_id) : thread.thread_id,
+				channel_id: thread.channel_id != null ? String(thread.channel_id) : thread.channel_id,
+				tags: Array.isArray(thread.tags) ? thread.tags : []
+			}));
+			this.state.followTotal = data.total ?? this.state.followThreads.length;
+			const tagSet = new Set();
+			this.state.followThreads.forEach(t => (t.tags || []).forEach(tag => tagSet.add(tag)));
+			this.state.followAvailableTags = Array.from(tagSet);
+			this.state.followFetched = true;
+			this.state.followNeedsRefresh = false;
+		} catch (err) {
+			console.error('获取关注列表失败', err);
+			this.state.followNeedsRefresh = true;
+		}
+	},
+	applyFollowFilters() {
+		const threads = Array.isArray(this.state.followThreads) ? [...this.state.followThreads] : [];
+		const searchInput = document.getElementById('search-input');
+		const keywordRaw = (searchInput?.value || '').trim().toLowerCase();
+		let authorQuery = null;
+		const keywordTokens = [];
+		if (keywordRaw.length) {
+			keywordRaw.split(/\s+/).forEach(token => {
+				if (token.startsWith('author:')) {
+					authorQuery = token.slice(7);
+				} else {
+					keywordTokens.push(token);
+				}
+			});
+		}
+		const includeTags = Array.from(this.state.includedTags);
+		const excludeTags = Array.from(this.state.excludedTags);
+		const selectedChannel = this.state.channelId ? String(this.state.channelId) : null;
+		const dateStartValue = document.getElementById('date-start')?.value || null;
+		const dateEndValue = document.getElementById('date-end')?.value || null;
+		const dateStart = dateStartValue ? new Date(dateStartValue) : null;
+		const dateEnd = dateEndValue ? new Date(dateEndValue) : null;
+
+		const filtered = threads.filter(thread => {
+			const tags = Array.isArray(thread.tags) ? thread.tags : [];
+			const matchesInclude = includeTags.length === 0
+				|| (this.state.tagLogic === 'and'
+					? includeTags.every(tag => tags.includes(tag))
+					: includeTags.some(tag => tags.includes(tag)));
+			if (!matchesInclude) return false;
+
+			const matchesExclude = excludeTags.length === 0 || excludeTags.every(tag => !tags.includes(tag));
+			if (!matchesExclude) return false;
+
+			if (selectedChannel && String(thread.channel_id) !== selectedChannel) return false;
+
+			const createdAt = thread.created_at ? new Date(thread.created_at) : null;
+			if (dateStart && (!createdAt || createdAt < dateStart)) return false;
+			if (dateEnd && (!createdAt || createdAt > dateEnd)) return false;
+
+			if (authorQuery) {
+				const author = thread.author || {};
+				const authorName = (author.username || author.global_name || '').toLowerCase();
+				if (!authorName.includes(authorQuery.toLowerCase())) return false;
+			}
+
+			if (keywordTokens.length) {
+				const haystack = [
+					thread.title,
+					thread.first_message_excerpt,
+					tags.join(' ')
+				].join(' ').toLowerCase();
+				const matchesKeywords = keywordTokens.every(token => haystack.includes(token));
+				if (!matchesKeywords) return false;
+			}
+
+			return true;
+		});
+
+		const sortMethod = document.getElementById('sort-method')?.value || 'comprehensive';
+		const sortOrder = this.state.sortOrder === 'asc' ? 'asc' : 'desc';
+		filtered.sort((a, b) => {
+			const va = this.getFollowSortValue(a, sortMethod);
+			const vb = this.getFollowSortValue(b, sortMethod);
+			return sortOrder === 'asc' ? va - vb : vb - va;
+		});
+
+		this.state.results = filtered;
+		this.state.totalResults = filtered.length;
+		if (this.state.view === 'follows') {
+			this.renderTags();
+		}
+		return filtered;
+	},
+	getFollowSortValue(thread, method) {
+		const createdAt = thread.created_at ? new Date(thread.created_at).getTime() : 0;
+		const lastActive = thread.last_active_at ? new Date(thread.last_active_at).getTime() : createdAt;
+		const latestUpdate = thread.latest_update_at ? new Date(thread.latest_update_at).getTime() : lastActive;
+		switch (method) {
+			case 'created_at':
+				return createdAt;
+			case 'last_active':
+				return lastActive;
+			case 'reply_count':
+				return thread.reply_count ?? 0;
+			case 'reaction_count':
+				return thread.reaction_count ?? 0;
+			default:
+				return latestUpdate;
+		}
+	},
+
+	init() {
+		this.handleAuthHash();
+		this.loadStateFromUrl(); // 从 URL 恢复状态
+		this.renderChannels();
+		this.renderUserArea();
+		this.updateSortOrderIcon(); // 更新排序图标
+		this.setupEventListeners();
+		this.setupBannerScrollObserver(); // 设置banner滚动监听
+		this.renderBannerScopeOptions(); // 渲染banner申请范围选项
+		
+		// 更新视图导航状态
+		if (this.state.view === 'follows') {
+			document.getElementById('nav-search').className = 'w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-discord-element text-discord-muted';
+			document.getElementById('nav-follows').className = 'w-full flex items-center gap-3 px-3 py-2 rounded bg-discord-element text-white relative';
+			document.getElementById('banner-section').classList.add('hidden');
+			document.getElementById('view-title').innerText = '关注列表';
+		}
+		
+		// 恢复banner折叠状态
+		if (this.bannerCollapsed) {
+			document.getElementById('banner-section')?.classList.add('collapsed');
+		}
+		
+		if (this.state.token) {
+			this.checkAuth();
+		} else {
+			// 没有 token，跳转到登录页面
+			this.redirectToLogin();
+			return;
+		}
+		this.executeSearch();
+		window.addEventListener('resize', () => { if (window.innerWidth >= 768) this.toggleSidebar(false); });
+		window.addEventListener('popstate', () => {
+			this.loadStateFromUrl();
+			this.renderChannels();
+			this.updateSortOrderIcon();
+			this.executeSearch();
+		});
+	},
+
+	renderBannerScopeOptions() {
+		const scopeSelect = document.getElementById('banner-scope');
+		if (!scopeSelect) return;
+		
+		// 清空现有选项
+		scopeSelect.innerHTML = '<option value="">请选择展示范围</option>';
+		
+		// 添加全频道选项
+		const globalOption = document.createElement('option');
+		globalOption.value = 'global';
+		globalOption.textContent = '🌐 全频道（最多3个）';
+		scopeSelect.appendChild(globalOption);
+		
+		// 添加各频道选项
+		if (window.CHANNEL_CATEGORIES) {
+			window.CHANNEL_CATEGORIES.forEach(category => {
+				const optgroup = document.createElement('optgroup');
+				optgroup.label = category.name;
+				
+				category.channels.forEach(channel => {
+					const option = document.createElement('option');
+					option.value = channel.id;
+					option.textContent = `📋 ${channel.name}（最多5个）`;
+					optgroup.appendChild(option);
+				});
+				
+				scopeSelect.appendChild(optgroup);
+			});
+		}
+	},
+
+	// --- Mobile Detail Overlay Logic ---
+	openMobileDetail(post) {
+		if (window.innerWidth >= 768) return; // Desktop uses hover
+
+		const overlay = document.getElementById('mobile-detail-overlay');
+		const card = document.getElementById('mobile-detail-card');
+
+		// Generate Full Content
+		const user = post.author || {};
+		const authorAvatar = user.avatar_url || (user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`);
+		
+		// 关注列表优先使用 latest_update_link
+		const defaultWebLink = `https://discord.com/channels/${window.GUILD_ID || '@me'}/${post.thread_id}`;
+		const defaultAppLink = `discord://discord.com/channels/${window.GUILD_ID || '@me'}/${post.thread_id}`;
+		const webLink = (this.state.view === 'follows' && post.latest_update_link) ? post.latest_update_link : defaultWebLink;
+		const appLink = (this.state.view === 'follows' && post.latest_update_link) ? post.latest_update_link.replace('https://discord.com', 'discord://discord.com') : defaultAppLink;
+		
+		const authorDisplayName = user.global_name || user.name || user.username || 'Unknown';
+		const authorUsername = user.name || user.username || '';
+		const encodedAuthorUsername = encodeURIComponent(authorUsername);
+		const authorNameHtml = authorUsername
+			? `<span class="text-xs text-discord-primary truncate max-w-[80px] cursor-pointer hover:text-white transition-colors" data-username="${encodedAuthorUsername}" onclick="app.handleAuthorClick(event, this.dataset.username)">${authorDisplayName}</span>`
+			: `<span class="text-xs text-gray-400 truncate max-w-[80px]">${authorDisplayName}</span>`;
+		
+		// 取消关注按钮（仅在关注列表视图显示）
+		const unfollowBtn = this.state.view === 'follows'
+			? `<button onclick="app.removeFollow('${post.thread_id}', event); app.closeMobileDetail();" class="bg-discord-red/20 hover:bg-discord-red text-discord-red hover:text-white px-3 py-1.5 rounded text-xs font-bold border border-discord-red/30 transition-colors flex items-center gap-1">
+					<span class="material-symbols-outlined text-xs">remove_circle</span> 取消关注
+			   </button>`
+			: '';
+
+		// 生成轮播组件
+		const mobileCarouselId = `mobile-carousel-${post.thread_id}`;
+		const carouselHtml = this.renderCarousel(post.thumbnail_urls, post.thread_id, mobileCarouselId);
+
+		card.innerHTML = `
+                    <!-- Top: Close Button -->
+                    <button class="absolute top-3 right-3 z-20 bg-black/50 text-white rounded-full p-1.5 backdrop-blur-sm" onclick="app.closeMobileDetail()">
+                        <span class="material-symbols-outlined text-lg">close</span>
+                    </button>
+                    
+                    <!-- 1. Image Section with Carousel -->
+                    <div class="card-image-container mobile-carousel-container w-full relative flex-shrink-0 border-b border-white/10">
+                        ${carouselHtml}
+                    </div>
+
+                    <!-- 2. Scrollable Content -->
+                    <div class="content-scroll-area">
+                        <div class="flex flex-wrap gap-1.5 mb-3">
+                             ${(post.tags || []).map(t => `<span class="text-[10px] bg-discord-sidebar text-discord-muted px-2 py-1 rounded border border-white/5">#${t}</span>`).join('')}
+                        </div>
+                        <h3 class="text-white font-bold text-lg mb-3 leading-snug">${post.title}</h3>
+                        <div class="md-content text-sm text-gray-300 mb-6">
+                            ${this.parseMarkdown(post.first_message_excerpt, true)}
+                        </div>
+                    </div>
+
+                    <!-- 3. Fixed Bottom Actions (Button Row) -->
+                    <div class="p-4 border-t border-white/10 bg-discord-element flex flex-col gap-3 flex-shrink-0">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center gap-2">
+                                <img src="${authorAvatar}" class="w-6 h-6 rounded-full">
+                                ${authorNameHtml}
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <a href="${appLink}" class="bg-discord-primary text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 shadow">
+                                    <span class="material-symbols-outlined text-xs">open_in_new</span> APP
+                                </a>
+                                <a href="${webLink}" target="_blank" class="bg-discord-sidebar text-white px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1 border border-white/10">
+                                    <span class="material-symbols-outlined text-xs">public</span> WEB
+                                </a>
+                            </div>
+                        </div>
+                        ${unfollowBtn ? `<div class="flex justify-center">${unfollowBtn}</div>` : ''}
+                    </div>
+                `;
+
+		overlay.classList.remove('hidden');
+		// Trigger Reflow
+		void overlay.offsetWidth;
+		overlay.classList.add('active');
+		document.body.style.overflow = 'hidden'; // Lock background scroll
+	},
+
+	closeMobileDetail(e) {
+		if (e) e.stopPropagation();
+		const overlay = document.getElementById('mobile-detail-overlay');
+		overlay.classList.remove('active');
+		setTimeout(() => {
+			overlay.classList.add('hidden');
+			document.body.style.overflow = '';
+		}, 300);
+	},
+
+	// --- Render Results (Grid) ---
+	renderResults() {
+		const grid = document.getElementById('results-grid');
+		const spinner = document.getElementById('loading-spinner');
+		if (spinner) spinner.classList.add('hidden');
+		document.getElementById('result-stats').innerText = `找到 ${this.state.totalResults} 结果`;
+		const loadMoreBtn = document.getElementById('load-more-btn');
+		if (loadMoreBtn) {
+			const hideLoadMore = this.state.view !== 'search' || this.state.results.length === 0 || this.state.results.length >= this.state.totalResults;
+			loadMoreBtn.classList.toggle('hidden', hideLoadMore);
+		}
+
+		if (!this.state.results.length) {
+			grid.innerHTML = `<div class="col-span-full text-center py-12 text-discord-muted"><span class="material-symbols-outlined text-5xl mb-4 opacity-50">search_off</span><p>没有找到相关帖子</p></div>`;
 			return;
 		}
 
-		const queueEntries = Array.from(state.imageRefreshQueue.values());
-		state.imageRefreshQueue = new Map();
-		if(queueEntries.length === 0) return;
+		grid.innerHTML = this.state.results.map((post, index) => {
+			// Store post data in DOM for easy retrieval
+			const postJson = encodeURIComponent(JSON.stringify(post));
 
-		const entryMap = new Map(queueEntries.map(entry => [String(entry.threadId), entry]));
-		const payload = {
-			items: queueEntries.map(entry => ({
-				thread_id: entry.threadId,
-				channel_id: entry.channelId ?? undefined
-			}))
-		};
+			const user = post.author || {};
+			const authorName = user.global_name || user.name || user.username || "Unknown";
+			const authorAvatar = user.avatar_url || (user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`);
+			const authorUsername = user.name || user.username || "";
+			const encodedAuthorUsername = encodeURIComponent(authorUsername);
+			const authorLabelHtml = authorUsername
+				? `<span class="text-[10px] text-discord-primary truncate max-w-[60px] cursor-pointer hover:text-white transition-colors" data-username="${encodedAuthorUsername}" onclick="app.handleAuthorClick(event, this.dataset.username)">${authorName}</span>`
+				: `<span class="text-[10px] text-gray-400 truncate max-w-[60px]">${authorName}</span>`;
+			
+			// 关注列表优先使用 latest_update_link
+			const defaultWebLink = `https://discord.com/channels/${window.GUILD_ID || '@me'}/${post.thread_id}`;
+			const defaultAppLink = `discord://discord.com/channels/${window.GUILD_ID || '@me'}/${post.thread_id}`;
+			const webLink = (this.state.view === 'follows' && post.latest_update_link) ? post.latest_update_link : defaultWebLink;
+			const appLink = (this.state.view === 'follows' && post.latest_update_link) ? post.latest_update_link.replace('https://discord.com', 'discord://discord.com') : defaultAppLink;
 
-		state.imageRefreshProcessing = true;
-		try{
-			const res = await fetch(window.AUTH_URL + '/fetch-images', {
-				method: 'POST',
-				credentials: 'include',
-				headers: {
-					'Content-Type': 'application/json',
-					...authHeaders()
-				},
-				body: JSON.stringify(payload)
-			});
-			if(!res || !res.ok){
-				console.error('刷新封面失败:', res ? res.status : 'unknown');
-				entryMap.forEach(entry=>{
-					entry.imgElements.forEach(img=>{
-						img.dataset.imageRefreshing = '0';
-					});
-				});
-				return;
-			}
-			const data = await res.json();
-			handleImageRefreshResponse(data, entryMap);
-		}catch(error){
-			console.error('刷新封面请求异常:', error);
-			entryMap.forEach(entry=>{
-				entry.imgElements.forEach(img=>{
-					img.dataset.imageRefreshing = '0';
-				});
-			});
-		}finally{
-			state.imageRefreshProcessing = false;
-			if(state.imageRefreshQueue.size){
-				scheduleImageRefresh();
-			}
+			let badgeHtml = (this.state.view === 'follows' && post.has_update) ? `<span class="absolute top-2 right-2 bg-discord-red text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-md z-20">NEW</span>` : '';
+
+			// 生成多图排版（默认状态）
+			const multiImageHtml = this.renderMultiImageGrid(post.thumbnail_urls, post.thread_id);
+			// 生成轮播（悬停状态，桌面端）
+			const carouselId = `carousel-${post.thread_id}-${index}`;
+			const carouselHtml = this.renderCarousel(post.thumbnail_urls, post.thread_id, carouselId);
+			const imageCount = this.normalizeThumbnailList(post.thumbnail_urls).length;
+
+			// Desktop Hover Action Buttons
+			const unfollowBtn = this.state.view === 'follows' 
+				? `<button onclick="app.removeFollow('${post.thread_id}', event)" class="bg-discord-red/20 hover:bg-discord-red text-discord-red hover:text-white px-3 py-1 rounded text-xs font-bold border border-discord-red/30 hover:border-discord-red transition-colors">取消关注</button>`
+				: '';
+			const desktopActions = `
+                        <div class="desktop-actions hidden gap-2 mt-3 pt-3 border-t border-white/10 justify-end">
+                             ${unfollowBtn}
+                             <a href="${appLink}" class="bg-discord-primary hover:bg-discord-hover text-white px-3 py-1 rounded text-xs font-bold transition-colors">APP</a>
+                             <a href="${webLink}" target="_blank" class="bg-discord-sidebar hover:bg-gray-700 text-white px-3 py-1 rounded text-xs font-bold border border-white/10 transition-colors">WEB</a>
+                        </div>
+                    `;
+
+			return `
+                    <div class="card-wrapper" onclick='app.openMobileDetail(JSON.parse(decodeURIComponent("${postJson}")))' style="--stack-index: ${20 - (index % 10)};"> <!-- Decreasing z-index for stacking context safety -->
+                        <div class="card-inner group cursor-pointer">
+                            ${badgeHtml}
+                            <!-- Image Container with Multi-Image Grid (default) and Carousel (hover) -->
+                            <div class="card-image-container overflow-hidden">
+                            	<div class="card-img-default">${multiImageHtml}</div>
+                            	<div class="card-img-hover">${carouselHtml}</div>
+                            </div>
+                            
+                            <!-- Content -->
+                            <div class="p-3 md:p-4 flex flex-col flex-1 min-h-0 bg-[#202225]">
+                                <div class="flex flex-wrap gap-1 mb-2 flex-shrink-0">
+                                    ${(post.tags || []).slice(0, 2).map(t => `<span class="text-[10px] bg-discord-sidebar text-discord-muted px-1.5 py-0.5 rounded border border-white/5">#${t}</span>`).join('')}
+                                </div>
+
+                                <h3 class="text-white font-bold text-sm md:text-base leading-tight mb-2 line-clamp-2 group-hover:text-discord-primary transition-colors">
+                                    ${post.title}
+                                </h3>
+                                
+                                <div class="md-content text-xs text-discord-muted mb-2 line-clamp-3 flex-1">
+                                    ${this.parseMarkdown(post.first_message_excerpt)}
+                                </div>
+
+                                <!-- Footer Info -->
+                                <div class="flex items-center justify-between pt-2 border-t border-white/5 mt-auto opacity-80 flex-shrink-0">
+                                    <div class="flex items-center gap-2">
+                                        <img src="${authorAvatar}" class="w-4 h-4 rounded-full">
+                                        ${authorLabelHtml}
+                                    </div>
+                                    <div class="flex items-center gap-2 text-discord-muted text-[10px]">
+                                        <span class="flex items-center gap-0.5"><span class="material-symbols-outlined text-[12px]">chat</span> ${post.reply_count}</span>
+                                        <span class="flex items-center gap-0.5"><span class="material-symbols-outlined text-[12px]">favorite</span> ${post.reaction_count}</span>
+                                    </div>
+                                </div>
+                                ${desktopActions}
+                            </div>
+                        </div>
+                    </div>
+                    `;
+		}).join('');
+	},
+
+	// --- Helpers ---
+	toggleSidebar(show) {
+		this.state.sidebarOpen = show;
+		const sidebar = document.getElementById('sidebar');
+		const backdrop = document.getElementById('sidebar-backdrop');
+		if (show) {
+			sidebar.classList.remove('-translate-x-full');
+			backdrop.classList.remove('hidden');
+			setTimeout(() => backdrop.classList.remove('opacity-0'), 10);
+		} else {
+			sidebar.classList.add('-translate-x-full');
+			backdrop.classList.add('opacity-0');
+			setTimeout(() => backdrop.classList.add('hidden'), 300);
 		}
-	}
+	},
 
-	function handleImageRefreshResponse(data, entryMap){
-		if(!data || !Array.isArray(data.results)){
-			entryMap.forEach(entry=>{
-				entry.imgElements.forEach(img=>{
-					img.dataset.imageRefreshing = '0';
-				});
-			});
+	handleAuthHash() {
+		const m = location.hash.match(/[#&]token=([^&]+)/);
+		console.log(m)
+		if (m) {
+			localStorage.setItem('auth_token', m[1]);
+			location.hash = '';
+			this.state.token = m[1];
+			this.resetFollowState();
+		}
+	},
+
+	async fetchAPI(endpoint, method, body) {
+		const h = { 'Content-Type': 'application/json' };
+		if (this.state.token) h['Authorization'] = `Bearer ${this.state.token}`;
+		try {
+			const r = await fetch(`${window.AUTH_URL}${endpoint}`, { method, headers: h, body: body ? JSON.stringify(body) : null });
+			if (r.status === 401) { this.logout(false); return null; }
+			if (r.status === 204) return null;
+			if (!r.ok) throw new Error(r.status);
+			return await r.json();
+		} catch (e) {
+			if (endpoint.includes('/search') && this.state.results.length === 0) return this.getMockData();
+			return null;
+		}
+	},
+
+	async executeSearch(reset = true) {
+		if (reset) { this.state.results = []; }
+		this.state.isLoading = true;
+		this.renderResults(); // Render partial/loading state
+		const spinner = document.getElementById('loading-spinner');
+		if (spinner) spinner.classList.remove('hidden');
+
+		if (this.state.view === 'follows') {
+			await this.fetchFollowThreads();
+			this.applyFollowFilters();
+			await this.markFollowsViewed();
+			this.state.isLoading = false;
+			if (spinner) spinner.classList.add('hidden');
+			this.renderResults();
+			if (window.innerWidth < 768) this.toggleSidebar(false);
+			if (reset) this.saveStateToUrl(); // 保存状态到 URL
 			return;
 		}
 
-		data.results.forEach(result=>{
-			const key = String(result.thread_id);
-			const entry = entryMap.get(key);
-			console.log(key, entry)
-			if(!entry) return;
-			const updatedUrl = result && result.updated && result.thumbnail_url ? result.thumbnail_url : null;
-			entry.imgElements.forEach(img=>{
-				img.dataset.imageRefreshing = '0';
-				if(updatedUrl){
-					const finalUrl = updatedUrl.includes('?')
-						? `${updatedUrl}&_ts=${Date.now()}`
-						: `${updatedUrl}?_ts=${Date.now()}`;
-					img.src = finalUrl;
-					img.setAttribute('data-src', updatedUrl);
-				} else {
-					img.remove();
-				}
-			});
-			if(updatedUrl){
-				applyThumbnailToState(result.thread_id, updatedUrl);
-			}
-			entryMap.delete(key);
-		});
+		const excludeThreadIds = this.collectLoadedThreadIds();
 
-		entryMap.forEach(entry=>{
-			entry.imgElements.forEach(img=>{
-				img.dataset.imageRefreshing = '0';
-			});
-		});
-
-		attachImageErrorHandlers();
-	}
-
-	function applyThumbnailToState(threadId, newUrl){
-		const numericId = threadId;
-		const updateList = list=>{
-			if(!Array.isArray(list)) return;
-			list.forEach(item=>{
-				const candidate = item.thread_id ?? item.id ?? item.threadId;
-				if(candidate != null && candidate === numericId){
-					item.thumbnail_url = newUrl;
-				}
-			});
+		const body = {
+			channel_ids: this.state.channelId ? [this.state.channelId] : null,
+			include_tags: Array.from(this.state.includedTags),
+			exclude_tags: Array.from(this.state.excludedTags),
+			tag_logic: this.state.tagLogic,
+			keywords: document.getElementById('search-input').value || null,
+			created_after: document.getElementById('date-start').value || null,
+			created_before: document.getElementById('date-end').value || null,
+			sort_method: document.getElementById('sort-method').value,
+			sort_order: this.state.sortOrder,
+			limit: this.state.limit
 		};
-		updateList(state.filtered);
-		updateList(state.follows);
-	}
 
-	function renderPagination(page, total){
-		const btn = (p, label, disabled=false, current=false)=>`<button class="page-btn" ${disabled?"disabled":""} ${current?"aria-current=\"page\"":""} data-page="${p}">${label}</button>`;
-		const items = [];
-		items.push(btn(Math.max(1,page-1), "上一页", page<=1));
-		const windowSize = 5; 
-		const start = Math.max(1, page - Math.floor(windowSize/2)); 
-		const end = Math.min(total, start + windowSize - 1);
-		for(let i=start;i<=end;i++) items.push(btn(i, i, false, i===page));
-		items.push(btn(Math.min(total,page+1), "下一页", page>=total));
-		el.pagination.innerHTML = items.join("");
-	}
-
-	/** 事件绑定 **/
-	function bindEvents(){
-		// 搜索按钮
-		el.searchBtn.addEventListener('click', ()=>{
-			if(state.viewMode === 'follows'){
-				// 关注列表模式：客户端过滤
-				state.followsPage = 1;
-				state.followsQuery = el.keyword.value;
-				applyFollowsFilter();
-				renderFollowsInMain();
-			} else {
-				// 搜索模式：API搜索
-				state.page=1;
-				state.query=el.keyword.value;
-				syncAndSearch();
-			}
-		});
-
-		// 关键词输入防抖
-		el.keyword.addEventListener('input', debounce(()=>{
-			if(state.viewMode === 'follows'){
-				// 关注列表模式：客户端过滤
-				state.followsPage = 1;
-				state.followsQuery = el.keyword.value;
-				applyFollowsFilter();
-				renderFollowsInMain();
-			} else {
-				// 搜索模式：API搜索
-				state.page=1;
-				state.query=el.keyword.value;
-				syncAndSearch(true);
-			}
-		}, 250));
-
-		// 时间筛选改变
-		el.timeFrom.addEventListener('change', ()=>{
-			state.timeFrom = el.timeFrom.value ? new Date(el.timeFrom.value) : null;
-			if(state.viewMode === 'follows'){
-				state.followsPage = 1;
-				applyFollowsFilter();
-				renderFollowsInMain();
-			} else {
-				state.page = 1;
-				syncAndSearch();
-			}
-		});
-
-		el.timeTo.addEventListener('change', ()=>{
-			state.timeTo = el.timeTo.value ? new Date(el.timeTo.value) : null;
-			if(state.viewMode === 'follows'){
-				state.followsPage = 1;
-				applyFollowsFilter();
-				renderFollowsInMain();
-			} else {
-				state.page = 1;
-				syncAndSearch();
-			}
-		});
-
-		// 排序改变
-		el.sort.addEventListener('change', ()=>{
-			state.sort = el.sort.value;
-			if(state.viewMode === 'follows'){
-				state.followsPage = 1;
-				applyFollowsFilter();
-				renderFollowsInMain();
-			} else {
-				state.page = 1;
-				syncAndSearch();
-			}
-		});
-
-		// 每页数量改变
-		el.perPage.addEventListener('change', ()=>{
-			const newPerPage = +el.perPage.value || 24;
-			if(state.viewMode === 'follows'){
-				state.followsPerPage = newPerPage;
-				state.followsPage = 1;
-				renderFollowsInMain();
-			} else {
-				state.perPage = newPerPage;
-				state.page = 1;
-				syncAndSearch();
-			}
-		});
-
-		// 帖子打开方式改变
-		if(el.openMode){
-			el.openMode.addEventListener('change', ()=>{
-				const value = el.openMode.value === 'web' ? 'web' : 'app';
-				state.openMode = value;
-				try{
-					window.localStorage.setItem('open_mode', value);
-				}catch{}
-			});
+		if (excludeThreadIds.length) {
+			body.exclude_thread_ids = excludeThreadIds;
 		}
 
-		// 标签逻辑改变
-		el.tagLogic.addEventListener('change', ()=>{
-			state.tagLogic = el.tagLogic.value;
-			if(state.viewMode === 'follows'){
-				// 关注模式下标签逻辑固定为 AND，不需要处理
-				// 但为了一致性，仍然更新状态
-				state.followsPage = 1;
-				applyFollowsFilter();
-				renderFollowsInMain();
-			} else {
-				state.page = 1;
-				syncAndSearch();
-			}
-		});
-
-		// 分页点击
-		el.pagination.addEventListener('click', (e)=>{
-			const b = e.target.closest('button[data-page]');
-			if(!b) return;
-			const p = +b.getAttribute('data-page');
-			if(!isNaN(p)) {
-				if(state.viewMode === 'follows'){
-					// 关注模式：更新关注列表页码
-					state.followsPage = p;
-					renderFollowsInMain();
-					writeToURL(true);
-				} else {
-					// 搜索模式：更新搜索页码
-					state.page = p;
-					syncAndSearch();
+		const data = await this.fetchAPI('/search', 'POST', body);
+		if (data) {
+			const incomingResults = Array.isArray(data.results) ? data.results : [];
+			const existingIds = reset ? new Set() : new Set(this.state.results.map(post => String(post.thread_id)));
+			const dedupedIncoming = incomingResults.filter(post => {
+				const id = String(post.thread_id);
+				if (!id || existingIds.has(id)) {
+					return false;
 				}
-			}
-		});
-		
-		// 频道列表点击
-		el.channelList.addEventListener('click', (e)=>{
-			const item = e.target.closest('.channel-item');
-			if(!item) return;
-			
-			const channelId = item.getAttribute('data-channel-id') || null;
-			state.selectedChannel = channelId;
-			state.page = 1;
-			state.tagStates.clear(); // 切换频道时清空标签选择
-			state.viewMode = 'search'; // 切换回搜索模式
-			updateBannerVisibility();
-			
-			// 更新UI
-			document.querySelectorAll('.channel-item').forEach(el => el.classList.remove('active'));
-			item.classList.add('active');
-			
-			syncAndSearch();
-		});
-
-		// 标签模式切换
-		if(el.tagModeSwitch){
-			el.tagModeSwitch.addEventListener('change', ()=>{
-				state.tagMode = el.tagModeSwitch.checked ? 'excluded' : 'included';
-			});
-		}
-		
-		// 标签胶囊点击
-		el.tagPills.addEventListener('click', (e)=>{
-			const pill = e.target.closest('.tag-pill');
-			if(!pill) return;
-			
-			const tag = pill.getAttribute('data-tag');
-			if(tag){
-				if(state.viewMode === 'follows'){
-					// 关注列表模式：客户端过滤
-					cycleFollowsTagState(tag);
-					state.followsPage = 1;
-					applyFollowsFilter();
-					renderFollowsInMain();
-				} else {
-					// 搜索模式：API搜索
-					cycleTagState(tag);
-					state.page = 1;
-					syncAndSearch();
-				}
-			}
-		});
-
-		// 侧边栏导航按钮
-		document.querySelectorAll('.nav-btn').forEach(btn => {
-			btn.addEventListener('click', ()=>{
-				const panel = btn.getAttribute('data-panel');
-				switchPanel(panel);
-			});
-		});
-
-		// 抽屉菜单切换
-		if(el.drawerToggle){
-			el.drawerToggle.addEventListener('click', ()=>{
-				el.sidebar.classList.toggle('open');
-			});
-
-			// 点击外部关闭抽屉
-			document.addEventListener('click', (e)=>{
-				if(window.innerWidth > 720) return;
-				if(!el.sidebar.contains(e.target) && !el.drawerToggle.contains(e.target)){
-					el.sidebar.classList.remove('open');
-				}
-			});
-		}
-		
-		// 关注列表事件委托
-		if(el.followsContent){
-			el.followsContent.addEventListener('click', (e)=>{
-				// 取消关注按钮
-				const unfollowBtn = e.target.closest('.btn-unfollow');
-				if(unfollowBtn){
-					const threadId = unfollowBtn.getAttribute('data-thread-id');
-					if(threadId){
-						unfollowThread(threadId);
-					}
-					return;
-				}
-				
-				// Discord链接
-				const discordLink = e.target.closest('.discord-link');
-				if(discordLink){
-					e.preventDefault();
-					const guild = discordLink.getAttribute('data-guild');
-					const channel = discordLink.getAttribute('data-channel');
-					const thread = discordLink.getAttribute('data-thread');
-					openDiscordLink(guild, channel, thread);
-					return;
-				}
-			});
-		}
-		
-		// 结果区域事件委托
-		el.results.addEventListener('click', (e)=>{
-			// 点击作者跳转搜索
-			const authorBadge = e.target.closest('.badge-author');
-			if(authorBadge){
-				const authorUsername = (authorBadge.getAttribute('data-author') || '').trim();
-				if(authorUsername){
-					state.query = `author:${authorUsername}`;
-					el.keyword.value = state.query;
-					state.page = 1;
-					syncAndSearch();
-					window.scrollTo({top:0, behavior:'smooth'});
-				}
-				return;
-			}
-			
-			// 点击标签（这里暂时不做处理，因为现在标签在侧边栏）
-			
-			// 点击图片弹出大图
-			const img = e.target.closest('.card-img');
-			if(img){
-				const src = img.getAttribute('data-src');
-				if(src) openImagePopup(src);
-				return;
-			}
-			
-			// 点击 Discord 链接
-			const discordLink = e.target.closest('.discord-link');
-			if(discordLink){
-				e.preventDefault();
-				const guild = discordLink.getAttribute('data-guild');
-				const channel = discordLink.getAttribute('data-channel');
-				const thread = discordLink.getAttribute('data-thread');
-				openDiscordLink(guild, channel, thread);
-				return;
-			}
-			
-			// 取消关注按钮（关注列表视图）
-			const unfollowBtn = e.target.closest('.btn-unfollow');
-			if(unfollowBtn && !unfollowBtn.classList.contains('disabled')){
-				const threadId = unfollowBtn.getAttribute('data-thread-id');
-				const authorId = unfollowBtn.getAttribute('data-author-id');
-				if(threadId){
-					unfollowThread(threadId, authorId);
-				}
-				return;
-			}
-		});
-		
-		// 浏览器前进后退
-		window.addEventListener('popstate', ()=>{
-			readFromURL();
-			hydrateControls();
-			updateBannerVisibility();
-			fetchSearchResults();
-		});
-	}
-	
-	/** Discord 链接跳转 **/
-	function openDiscordLink(guild, channel, thread){
-		const safeGuild = guild ? String(guild) : '';
-		const safeChannel = channel && channel !== 'null' && channel !== 'undefined' ? String(channel) : '';
-		const safeThread = thread && thread !== 'null' && thread !== 'undefined' ? String(thread) : '';
-		const segments = [];
-		if(safeGuild) segments.push(safeGuild);
-		if(safeThread) segments.push(safeThread);
-		const path = segments.join('/');
-		const appUrl = path ? `discord://-/channels/${path}` : 'discord://-/channels';
-		const webUrl = path ? `https://discord.com/channels/${path}` : 'https://discord.com/channels';
-
-		if(state.openMode === 'web' || !path){
-			window.open(webUrl, '_blank', 'noopener,noreferrer');
-			return;
-		}
-
-		const iframe = document.createElement('iframe');
-		iframe.style.display = 'none';
-		iframe.src = appUrl;
-		document.body.appendChild(iframe);
-
-		let opened = false;
-		const timeout = setTimeout(()=>{
-			if(!opened){
-				window.open(webUrl, '_blank', 'noopener,noreferrer');
-			}
-			document.body.removeChild(iframe);
-		}, 1500);
-
-		const onBlur = ()=>{
-			opened = true;
-			clearTimeout(timeout);
-			setTimeout(()=> document.body.removeChild(iframe), 100);
-			window.removeEventListener('blur', onBlur);
-		};
-		window.addEventListener('blur', onBlur);
-
-		window.location.href = appUrl;
-	}
-
-	
-	/** 图片弹出层 **/
-	function openImagePopup(src){
-		const popup = document.createElement('div');
-		popup.className = 'image-popup';
-		popup.innerHTML = `
-			<div class="popup-backdrop"></div>
-			<div class="popup-content">
-				<img src="${escapeAttr(src)}" alt="大图预览">
-				<button class="popup-close" aria-label="关闭">✕</button>
-			</div>
-		`;
-		document.body.appendChild(popup);
-		
-		const close = ()=>{ popup.remove(); };
-		popup.querySelector('.popup-backdrop').addEventListener('click', close);
-		popup.querySelector('.popup-close').addEventListener('click', close);
-		document.addEventListener('keydown', function onEsc(e){
-			if(e.key==='Escape'){
-				close();
-				document.removeEventListener('keydown', onEsc);
-			}
-		});
-	}
-
-	function hydrateControls(){
-		el.keyword.value = state.query;
-		el.sort.value = state.sort;
-		el.perPage.value = String(state.perPage);
-		if(el.openMode){
-			el.openMode.value = state.openMode;
-		}
-		el.tagLogic.value = state.tagLogic;
-		el.timeFrom.value = state.timeFrom ? toISODate(state.timeFrom) : "";
-		el.timeTo.value = state.timeTo ? toISODate(state.timeTo) : "";
-	}
-	
-	function toISODate(d){
-		const x = new Date(d);
-		x.setHours(0,0,0,0);
-		return x.toISOString().slice(0,10);
-	}
-
-	function syncAndSearch(replace=false){
-		writeToURL(replace);
-		fetchSearchResults();
-	}
-
-	/** 登录 **/
-	async function login(){
-		window.location.href = window.AUTH_URL + "/auth/login";
-	}
-
-	/** 退出登录 **/
-	async function logout(){
-		try{
-			window.localStorage.removeItem('auth_token');
-			window.AUTH_TOKEN = null;
-			window.location.href = window.AUTH_URL + "/auth/logout";
-		}catch(e){
-			console.error('退出登录失败:', e);
-			alert('退出登录失败，请稍后重试');
-		}
-	}
-
-	/** 加载关注列表 **/
-	async function loadFollows(){
-		if(!state.authed) return;
-		
-		state.loading = true;
-		showLoadingPlaceholders();
-		
-		try{
-			const res = await fetch(window.AUTH_URL + '/follows/', {
-				credentials: 'include',
-				headers: authHeaders()
-			});
-			
-			if(res && res.ok){
-				const data = await res.json();
-				state.follows = data.threads || [];
-				state.followsTotal = data.total || 0;
-				
-				// 提取所有唯一的tags
-				extractFollowsTags();
-				
-				// 应用筛选和排序
-				applyFollowsFilter();
-			}else{
-				state.follows = [];
-				state.followsTotal = 0;
-				state.followsAvailableTags = [];
-				state.filtered = [];
-				state.total = 0;
-			}
-		}catch(e){
-			console.error('加载关注列表失败:', e);
-			state.follows = [];
-			state.followsTotal = 0;
-			state.followsAvailableTags = [];
-			state.filtered = [];
-			state.total = 0;
-		}
-		
-		state.loading = false;
-		renderFollowsInMain();
-	}
-	
-	/** 从关注列表提取所有唯一tags **/
-	function extractFollowsTags(){
-		const tagsSet = new Set();
-		state.follows.forEach(thread => {
-			if(thread.tags && Array.isArray(thread.tags)){
-				thread.tags.forEach(tag => tagsSet.add(tag));
-			}
-		});
-		state.followsAvailableTags = Array.from(tagsSet).sort();
-	}
-	
-	/** 应用关注列表筛选 **/
-	function applyFollowsFilter(){
-		let filtered = state.follows;
-		
-		// 关键词搜索
-		if(state.followsQuery){
-			const query = state.followsQuery.toLowerCase();
-			filtered = filtered.filter(thread => {
-				const title = (thread.title || '').toLowerCase();
-				const excerpt = (thread.first_message_excerpt || '').toLowerCase();
-				return title.includes(query) || excerpt.includes(query);
-			});
-		}
-		
-		// Tag筛选
-		const includeTags = [];
-		const excludeTags = [];
-		state.followsTagStates.forEach((status, tag) => {
-			if(status === 'included') includeTags.push(tag);
-			else if(status === 'excluded') excludeTags.push(tag);
-		});
-		
-		if(includeTags.length > 0 || excludeTags.length > 0){
-			filtered = filtered.filter(thread => {
-				const threadTags = thread.tags || [];
-				
-				// 排除标签：只要包含任意排除标签就过滤掉
-				if(excludeTags.length > 0){
-					const hasExcluded = excludeTags.some(tag => threadTags.includes(tag));
-					if(hasExcluded) return false;
-				}
-				
-				// 包含标签：必须包含所有指定标签
-				if(includeTags.length > 0){
-					const hasAllIncluded = includeTags.every(tag => threadTags.includes(tag));
-					if(!hasAllIncluded) return false;
-				}
-				
+				existingIds.add(id);
 				return true;
 			});
+
+			this.state.results = reset ? dedupedIncoming : [...this.state.results, ...dedupedIncoming];
+			this.state.totalResults = data.total;
+			this.state.availableTags = data.available_tags || [];
+			if (reset && data.banner_carousel) this.state.banners = data.banner_carousel;
 		}
-		
-		// 时间筛选
-		if(state.timeFrom){
-			const fromTime = state.timeFrom.getTime();
-			filtered = filtered.filter(thread => {
-				const createdTime = new Date(thread.created_at).getTime();
-				return createdTime >= fromTime;
-			});
+
+		this.state.isLoading = false;
+		this.renderResults();
+		if (this.state.view === 'search') { this.renderTags(); if (reset) this.renderBanner(); }
+		if (window.innerWidth < 768) this.toggleSidebar(false);
+		if (reset) this.saveStateToUrl(); // 保存状态到 URL
+	},
+
+	loadMore() {
+		if (this.state.view === 'follows') return;
+		if (this.state.isLoading) return;
+		if (this.state.results.length >= this.state.totalResults) return;
+		this.executeSearch(false);
+	},
+
+	handleContentScroll() {
+		if (this.state.view === 'follows') return;
+		const container = document.getElementById('content-scroll');
+		if (!container) return;
+		if (this.state.isLoading) return;
+		if (!this.state.results.length) return;
+		if (this.state.results.length >= this.state.totalResults) return;
+
+		const { scrollTop, clientHeight, scrollHeight } = container;
+		const threshold = 200;
+		if (scrollTop + clientHeight >= scrollHeight - threshold) {
+			this.loadMore();
 		}
-		
-		if(state.timeTo){
-			const toTime = state.timeTo.getTime();
-			filtered = filtered.filter(thread => {
-				const createdTime = new Date(thread.created_at).getTime();
-				return createdTime <= toTime;
-			});
+	},
+
+	handleAuthorClick(event, encodedUsername) {
+		if (event) event.stopPropagation();
+		if (!encodedUsername) return;
+
+		let username = '';
+		try {
+			username = decodeURIComponent(encodedUsername);
+		} catch (err) {
+			username = encodedUsername;
 		}
+		this.applyAuthorSearch(username);
+	},
+
+	applyAuthorSearch(username) {
+		const normalized = (username || '').trim();
+		if (!normalized) return;
+
+		const searchInput = document.getElementById('search-input');
+		if (searchInput) {
+			searchInput.value = `author:${normalized}`;
+		}
+
+		this.state.includedTags.clear();
+		this.state.excludedTags.clear();
+
+		if (window.innerWidth < 768) {
+			this.closeMobileDetail();
+		}
+
+		if (this.state.view === 'follows') {
+			this.renderTags();
+			this.applyFollowFilters();
+			this.renderResults();
+			return;
+		}
+
+		if (this.state.view !== 'search') {
+			this.switchView('search');
+			return;
+		}
+
+		this.renderTags();
+		this.executeSearch();
+	},
+
+	renderTags() {
+		const container = document.getElementById('tag-cloud');
+		const tagsSection = document.getElementById('tags-section');
+		const baseTags = this.state.view === 'follows' ? this.state.followAvailableTags : this.state.availableTags;
+		const tags = new Set([...(baseTags || []), ...this.state.includedTags, ...this.state.excludedTags]);
 		
-		// 排序：按最近更新时间排序（没有更新时间则用发帖时间）
-		filtered.sort((a, b) => {
-			const aUpdateTime = a.latest_update_at ? new Date(a.latest_update_at).getTime() : new Date(a.created_at).getTime();
-			const bUpdateTime = b.latest_update_at ? new Date(b.latest_update_at).getTime() : new Date(b.created_at).getTime();
-			
-			// 根据排序方式决定升序还是降序
-			if(state.sort === 'created_asc'){
-				return aUpdateTime - bUpdateTime; // 升序
-			} else {
-				return bUpdateTime - aUpdateTime; // 降序（默认）
-			}
-		});
-		
-		state.filtered = filtered;
-		state.total = filtered.length;
-	}
-	
-	/** 在主界面渲染关注列表 **/
-	function renderFollowsInMain(){
-		const total = state.total;
-		const totalFollows = state.followsTotal;
-		const pages = Math.max(1, Math.ceil(total / state.followsPerPage));
-		if(state.followsPage > pages && pages > 0) state.followsPage = pages;
-		
-		// 更新搜索框显示当前查询
-		el.keyword.value = state.followsQuery;
-		
-		// 更新tag pills显示
-		updateTagPills();
-		
-		// 更新统计信息
-		const filterInfo = total !== totalFollows ? ` (筛选后 ${total} 个)` : '';
-		el.stats.textContent = `共 ${totalFollows} 个关注${filterInfo} · 第 ${state.followsPage}/${pages} 页`;
-		
-		if(totalFollows === 0){
-			el.results.innerHTML = '<div class="auth-required"><div class="auth-card"><h3>📌 暂无关注的帖子</h3><p>加入帖子后会自动添加到关注列表</p></div></div>';
-			el.pagination.innerHTML = '';
+		// 当没有可用标签时隐藏整个 tags-section
+		if (!tags.size) {
+			container.innerHTML = '';
+			if (tagsSection) tagsSection.classList.add('hidden');
 			return;
 		}
 		
-		if(total === 0){
-			el.results.innerHTML = '<div class="auth-required"><div class="auth-card"><h3>🔍 没有符合条件的帖子</h3><p>尝试调整搜索条件或标签筛选</p></div></div>';
-			el.pagination.innerHTML = '';
-			return;
-		}
+		// 有标签时显示 tags-section
+		if (tagsSection) tagsSection.classList.remove('hidden');
 		
-		// 分页
-		const start = (state.followsPage - 1) * state.followsPerPage;
-		const end = start + state.followsPerPage;
-		const pagedThreads = state.filtered.slice(start, end);
-		
-		// 渲染关注卡片
-		el.results.innerHTML = pagedThreads.map(thread => renderFollowCard(thread)).join("");
-		attachImageErrorHandlers();
-		
-		// 渲染分页
-		renderFollowsPagination(state.followsPage, pages);
-		
-		window.scrollTo({top: 0, behavior: 'smooth'});
-	}
-	
-	/** 渲染单个关注卡片 **/
-	function renderFollowCard(thread){
-		const channelName = state.availableChannels.get(String(thread.channel_id)) || `频道 ${thread.channel_id}`;
-		const created = fmtDate(thread.created_at);
-		const active = fmtDate(thread.last_active_at);
-		const hasUpdate = thread.has_update;
-		const updateBadge = hasUpdate ? '<span class="update-badge">🔔 有更新</span>' : '';
-		const guildId = window.GUILD_ID;
-		const hasThumbnail = Boolean(thread.thumbnail_url);
-		const cardClassParts = ['card'];
-		if(hasUpdate) cardClassParts.push('has-update-border');
-		if(!hasThumbnail) cardClassParts.push('card--no-thumb');
-		const mediaClassName = hasThumbnail ? 'card-media' : 'card-media card-media--no-thumb';
-		const mediaImgHtml = hasThumbnail
-			? `<div class="media-img"><img src="${escapeAttr(thread.thumbnail_url)}" alt="${escapeAttr(thread.title)} 缩略图" loading="lazy" class="card-img" data-src="${escapeAttr(thread.thumbnail_url)}" data-thread-id="${escapeAttr(String(thread.thread_id))}" data-channel-id="${thread.channel_id != null ? escapeAttr(String(thread.channel_id)) : ''}"></div>`
-			: "";
-		const excerptText = limitText(thread.first_message_excerpt||"", hasThumbnail ? 500 : 800);
-		const excerptHtml = `<div class="excerpt markdown-content">${renderMarkdown(excerptText)}</div>`;
-		
-		// 检查是否是用户自己的帖子（使用字符串比较避免精度问题）
-		const isOwnThread = state.user && String(thread.author_id) === String(state.user.id);
-		const unfollowBtn = isOwnThread
-			? '<span class="btn-unfollow disabled" title="不能取消关注自己的帖子">取消关注</span>'
-			: `<button class="btn-unfollow" data-thread-id="${escapeAttr(String(thread.thread_id))}" data-author-id="${escapeAttr(String(thread.author_id))}">取消关注</button>`;
-		
-		// 只要有 latest_update_link 就显示"查看最新版"按钮
-		const viewUpdateBtn = thread.latest_update_link
-			? `<a class="btn-link" href="${escapeAttr(thread.latest_update_link)}" target="_blank" rel="noopener">查看最新版</a>`
-			: '';
-		
-		return `
-		<article class="${cardClassParts.join(' ')}" tabindex="0">
-			<div class="${mediaClassName}">${mediaImgHtml}${excerptHtml}</div>
-			<div class="card-body">
-				<div class="follow-header-inline">
-					<h2 class="card-title" title="${escapeAttr(thread.title)}">${escapeHtml(thread.title)}</h2>
-					${updateBadge}
-				</div>
-				<div class="card-meta">
-					<span class="badge"><span class="dot"></span>${escapeHtml(channelName)}</span>
-					<span class="badge">🕒 ${escapeHtml(created)}</span>
-					<span class="badge">🔥 ${escapeHtml(active)}</span>
-					<span class="badge">💬 ${escapeHtml(thread.reply_count||0)}</span>
-					<span class="badge">⭐ ${escapeHtml(thread.reaction_count||0)}</span>
-				</div>
-			</div>
-			<div class="card-actions">
-				<div class="left"></div>
-				<div class="right follow-actions-inline">
-					${unfollowBtn}
-					${viewUpdateBtn}
-					<button class="btn-link discord-link" data-guild="${guildId}" data-channel="${thread.channel_id}" data-thread="${thread.thread_id}">打开原帖</button>
-				</div>
-			</div>
-		</article>`;
-	}
-	
-	/** 根据模式切换关注列表tag状态 **/
-	function cycleFollowsTagState(tag){
-		const current = state.followsTagStates.get(tag) || null;
-		const mode = state.tagMode; // 使用全局的tag模式
-		
-		if(current === mode){
-			// 如果已经是当前模式，则取消选择
-			state.followsTagStates.delete(tag);
+		container.innerHTML = Array.from(tags).map(t => {
+			let cls = "bg-discord-element border border-transparent text-discord-muted hover:border-gray-500";
+			let icon = "";
+			if (this.state.includedTags.has(t)) { cls = "tag-include border"; icon = "check"; }
+			else if (this.state.excludedTags.has(t)) { cls = "tag-exclude border"; icon = "block"; }
+			return `<button onclick="app.handleTagClick('${t}')" class="tag-pill text-xs px-2 py-1 rounded flex items-center gap-1 ${cls}">${icon ? `<span class="material-symbols-outlined text-[12px]">${icon}</span>` : ''}#${t}</button>`;
+		}).join('');
+	},
+
+	handleTagClick(tag) {
+		if (this.state.includedTags.has(tag) || this.state.excludedTags.has(tag)) { this.state.includedTags.delete(tag); this.state.excludedTags.delete(tag); }
+		else { this.state.tagMode === 'include' ? this.state.includedTags.add(tag) : this.state.excludedTags.add(tag); }
+		this.renderTags();
+		if (this.state.view === 'follows') {
+			this.applyFollowFilters();
+			this.renderResults();
+			this.saveStateToUrl();
 		} else {
-			// 否则设置为当前模式
-			state.followsTagStates.set(tag, mode);
+			this.executeSearch();
 		}
-	}
-	
-	/** 渲染关注列表分页 **/
-	function renderFollowsPagination(page, total){
-		if(total <= 1){
-			el.pagination.innerHTML = '';
-			return;
-		}
-		
-		const btn = (p, label, disabled=false, current=false)=>`<button class="page-btn follows-page-btn" ${disabled?"disabled":""} ${current?"aria-current=\"page\"":""} data-page="${p}">${label}</button>`;
-		const items = [];
-		items.push(btn(Math.max(1,page-1), "上一页", page<=1));
-		const windowSize = 5;
-		const start = Math.max(1, page - Math.floor(windowSize/2));
-		const end = Math.min(total, start + windowSize - 1);
-		for(let i=start;i<=end;i++) items.push(btn(i, i, false, i===page));
-		items.push(btn(Math.min(total,page+1), "下一页", page>=total));
-		el.pagination.innerHTML = items.join("");
-		
-		// 绑定分页点击事件
-		el.pagination.querySelectorAll('.follows-page-btn').forEach(btn => {
-			btn.addEventListener('click', ()=>{
-				const p = +btn.getAttribute('data-page');
-				if(!isNaN(p)){
-					state.followsPage = p;
-					renderFollowsInMain();
-				}
-			});
-		});
-	}
-	
-	/** 取消关注 **/
-	async function unfollowThread(threadId, authorId){
-		// 检查是否是自己的帖子
-		if(state.user && authorId && authorId === state.user.id){
-			alert('不能取消关注自己的帖子');
-			return;
-		}
-		
-		if(!confirm('确定要取消关注此帖吗？')) return;
-		
-		try{
-			const res = await fetch(window.AUTH_URL + `/follows/${threadId}`, {
-				method: 'DELETE',
-				credentials: 'include',
-				headers: authHeaders()
-			});
-			
-			if(res && res.ok){
-				// 重新加载关注列表
-				await loadFollows();
-				// 更新未读数量
-				await updateUnreadCount();
-			}else{
-				const data = await res.json().catch(() => ({}));
-				alert(data.detail || '取消关注失败');
-			}
-		}catch(e){
-			console.error('取消关注失败:', e);
-			alert('取消关注失败');
-		}
-	}
-	
-	/** 标记关注列表已查看 **/
-	async function markFollowsViewed(){
-		if(!state.authed) return;
-		
-		try{
-			await fetch(window.AUTH_URL + '/follows/mark-viewed', {
-				method: 'POST',
-				credentials: 'include',
-				headers: authHeaders()
-			});
-			
-			// 更新未读数量
-			await updateUnreadCount();
-		}catch(e){
-			console.error('标记已查看失败:', e);
-		}
-	}
-	
-	/** 更新未读数量 **/
-	async function updateUnreadCount(){
-		if(!state.authed) return;
-		
-		try{
-			const res = await fetch(window.AUTH_URL + '/follows/unread-count', {
-				credentials: 'include',
-				headers: authHeaders()
-			});
-			
-			if(res && res.ok){
-				const data = await res.json();
-				state.unreadCount = data.unread_count || 0;
-				updateUnreadBadge();
-			}
-		}catch(e){
-			console.error('更新未读数量失败:', e);
-		}
-	}
-	
-	/** 更新未读徽章显示 **/
-	function updateUnreadBadge(){
-		if(state.unreadCount > 0){
-			el.followsBadge.textContent = state.unreadCount > 99 ? '99+' : state.unreadCount;
-			el.followsBadge.classList.remove('hidden');
-		}else{
-			el.followsBadge.classList.add('hidden');
-		}
-	}
-		/** Banner轮播相关函数 **/
-	function updateBannerCarousel(newBanners){
-		// 检查新banner列表是否与当前列表不同
-		const bannersChanged = !arraysEqual(
-			state.bannerCarousel.map(b => b.thread_id),
-			newBanners.map(b => b.thread_id)
-		);
-		
-		if(bannersChanged){
-			// 检查当前显示的banner是否还在新列表中
-			const currentBanner = state.bannerCarousel[state.currentBannerIndex];
-			let newIndex = 0;
-			
-			if(currentBanner){
-				const foundIndex = newBanners.findIndex(b => b.thread_id === currentBanner.thread_id);
-				if(foundIndex !== -1){
-					// 当前banner仍在列表中，保持显示
-					newIndex = foundIndex;
-				}
-			}
-			
-			state.bannerCarousel = newBanners;
-			state.currentBannerIndex = newIndex;
-			renderBanner();
-		}else{
-			// 列表未变化，只更新数据但不改变索引
-			state.bannerCarousel = newBanners;
-		}
-	}
-	
-	function arraysEqual(a, b){
-		if(a.length !== b.length) return false;
-		for(let i = 0; i < a.length; i++){
-			if(a[i] !== b[i]) return false;
-		}
-		return true;
-	}
-	
-	function renderBanner(){
-		const bannerSection = document.getElementById('bannerCarousel');
-		if(!bannerSection) return;
-	
-		if(state.bannerAutoPlay){
-			clearInterval(state.bannerAutoPlay);
-			state.bannerAutoPlay = null;
-		}
-	
-		if(state.bannerCarousel.length === 0){
-			bannerSection.innerHTML = '<div class="banner-placeholder"><p>🎉 欢迎使用 Odysseia 论坛搜索</p></div>';
-			return;
-		}
-	
-		const guildId = window.GUILD_ID;
-		let track = bannerSection.querySelector('.banner-track');
-		const needsRebuild = !track || track.children.length !== state.bannerCarousel.length;
-	
-		if(needsRebuild){
-			const slidesHtml = state.bannerCarousel.map((item, idx) => `
-				<div class="banner-slide${idx === state.currentBannerIndex ? ' is-active' : ''}" data-index="${idx}" aria-hidden="${idx === state.currentBannerIndex ? 'false' : 'true'}">
-					<div class="banner-image-wrapper">
-						<img src="${escapeAttr(item.cover_image_url)}"
-							 alt="${escapeAttr(item.title)}"
-							 class="banner-image"
-							 loading="lazy">
-					</div>
-					<div class="banner-overlay">
-						<div class="banner-content">
-							<h2 class="banner-title">${escapeHtml(item.title)}</h2>
-							<a href="#" class="banner-link discord-link"
-							   data-guild="${guildId}"
-							   data-channel="${item.channel_id}"
-							   data-thread="${item.thread_id}">
-								查看详情 →
-							</a>
-						</div>
-					</div>
-				</div>
-			`).join('');
-	
-			const indicatorsHtml = state.bannerCarousel.length > 1
-				? state.bannerCarousel.map((_, idx) => `
-					<button type="button"
-							class="banner-indicator${idx === state.currentBannerIndex ? ' active' : ''}"
-							data-index="${idx}"
-							aria-label="切换到第 ${idx + 1} 个 Banner"
-							${idx === state.currentBannerIndex ? 'aria-current="true"' : 'aria-current="false"'}>
-					</button>
-				`).join('')
-				: '';
-	
-			bannerSection.innerHTML = `
-				<div class="banner-container">
-					<div class="banner-track">
-						${slidesHtml}
-					</div>
-					${state.bannerCarousel.length > 1 ? `
-					<div class="banner-controls">
-						<button class="banner-nav-btn banner-prev" aria-label="上一个" type="button">‹</button>
-						<button class="banner-nav-btn banner-next" aria-label="下一个" type="button">›</button>
-					</div>
-					<div class="banner-indicators">
-						${indicatorsHtml}
-					</div>
-					` : ''}
-				</div>
-			`;
-	
-			track = bannerSection.querySelector('.banner-track');
-	
-			if(state.bannerCarousel.length > 1){
-				const prevBtn = bannerSection.querySelector('.banner-prev');
-				const nextBtn = bannerSection.querySelector('.banner-next');
-	
-				if(prevBtn){
-					prevBtn.addEventListener('click', () => navigateBanner(-1));
-				}
-	
-				if(nextBtn){
-					nextBtn.addEventListener('click', () => navigateBanner(1));
-				}
-	
-				bannerSection.querySelectorAll('.banner-indicator').forEach(indicator => {
-					indicator.addEventListener('click', (e) => {
-						const index = parseInt(e.currentTarget.getAttribute('data-index'));
-						if(!isNaN(index) && index !== state.currentBannerIndex){
-							state.currentBannerIndex = index;
-							renderBanner();
-						}
-					});
-				});
-			}
-	
-			bannerSection.querySelectorAll('.discord-link').forEach(link => {
-				link.addEventListener('click', (e) => {
-					e.preventDefault();
-					const target = e.currentTarget;
-					const guild = target.getAttribute('data-guild');
-					const channel = target.getAttribute('data-channel');
-					const thread = target.getAttribute('data-thread');
-					openDiscordLink(guild, channel, thread);
-				});
-			});
-		}
-	
-		if(track){
-			track.style.transform = `translateX(-${state.currentBannerIndex * 100}%)`;
-		}
-	
-		bannerSection.querySelectorAll('.banner-slide').forEach((slide, idx) => {
-			const isActive = idx === state.currentBannerIndex;
-			slide.classList.toggle('is-active', isActive);
-			slide.setAttribute('aria-hidden', isActive ? 'false' : 'true');
-		});
-	
-		bannerSection.querySelectorAll('.banner-indicator').forEach((indicator, idx) => {
-			const isActive = idx === state.currentBannerIndex;
-			indicator.classList.toggle('active', isActive);
-			indicator.setAttribute('aria-current', isActive ? 'true' : 'false');
-		});
-	
-		if(state.bannerCarousel.length > 1){
-			state.bannerAutoPlay = setInterval(() => navigateBanner(1), 5000);
-		}
-	}
-	
-	function updateBannerVisibility(){
-		const bannerSection = document.getElementById('bannerCarousel');
-		if(!bannerSection) return;
-	
-		if(state.viewMode === 'follows'){
-			bannerSection.classList.add('hidden');
-			if(state.bannerAutoPlay){
-				clearInterval(state.bannerAutoPlay);
-				state.bannerAutoPlay = null;
-			}
-		}else{
-			bannerSection.classList.remove('hidden');
-			renderBanner();
-		}
-	}
-	
-	function navigateBanner(direction){
-		if(state.bannerCarousel.length === 0) return;
-		
-		state.currentBannerIndex += direction;
-		
-		// 循环处理
-		if(state.currentBannerIndex < 0){
-			state.currentBannerIndex = state.bannerCarousel.length - 1;
-		}else if(state.currentBannerIndex >= state.bannerCarousel.length){
-			state.currentBannerIndex = 0;
-		}
-		
-		renderBanner();
-	}
+	},
 
-	/** 检查认证 **/
-	async function checkAuth(){
-		try{
-			const res = await fetch(window.AUTH_URL + '/auth/checkauth', {
-				credentials:'include',
-				headers: authHeaders()
+	setTagMode(m) {
+		this.state.tagMode = m;
+		this.renderTags();
+		/* Update UI classes omitted for brevity */
+		if (this.state.view === 'follows') {
+			this.applyFollowFilters();
+			this.renderResults();
+			this.saveStateToUrl();
+		} else {
+			this.executeSearch();
+		}
+	},
+	setTagLogic(l) {
+		this.state.tagLogic = l;
+		if (this.state.view === 'follows') {
+			this.applyFollowFilters();
+			this.renderResults();
+			this.saveStateToUrl();
+		} else {
+			this.executeSearch();
+		}
+	},
+
+	renderChannels() {
+		const container = document.getElementById('channel-list-container');
+		let html = '';
+
+		// Add "All Channels" button
+		const isGlobal = this.state.channelId === null;
+		html += `
+	           <div class="space-y-1 pb-4">
+	               <button onclick="app.selectChannel('global')" class="w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-discord-element transition-colors text-left ${isGlobal ? 'bg-discord-element text-white font-bold' : 'text-discord-muted'}">
+	                   <span class="material-symbols-outlined text-sm">apps</span> 全部频道
+	               </button>
+	           </div>
+	       `;
+
+		// Iterate categories
+		if (window.CHANNEL_CATEGORIES) {
+			window.CHANNEL_CATEGORIES.forEach(category => {
+				html += `<div class="mt-4 mb-2 px-3 text-xs font-bold text-discord-muted uppercase">${category.name}</div>`;
+				html += `<div class="space-y-1">`;
+				category.channels.forEach(c => {
+					const isActive = this.state.channelId === c.id;
+					const icon = c.icon || 'chat_bubble';
+					html += `
+	                   <button onclick="app.selectChannel('${c.id}')" class="w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-discord-element transition-colors text-left ${isActive ? 'bg-discord-element text-white font-bold' : 'text-discord-muted'}">
+	                       <span class="material-symbols-outlined text-sm">${icon}</span> ${c.name}
+	                   </button>`;
+				});
+				html += `</div>`;
 			});
-			if(res && res.ok){
-				const data = await res.json();
-				state.authed = data.loggedIn !== false;
-				state.user = data.user || null;
-				state.unreadCount = data.unread_count || 0;
+		}
+
+		container.innerHTML = html;
+	},
+	selectChannel(id) {
+		this.state.channelId = id === 'global' ? null : id;
+		this.renderChannels();
+		if (this.state.view === 'follows') {
+			this.applyFollowFilters();
+			this.renderResults();
+			this.saveStateToUrl();
+		} else {
+			this.executeSearch();
+		}
+	},
+
+	renderUserArea() {
+		const el = document.getElementById('user-area');
+		if (this.state.user) {
+			const url = this.state.user.avatar ? `https://cdn.discordapp.com/avatars/${this.state.user.id}/${this.state.user.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`;
+			el.innerHTML = `<img src="${url}" class="w-8 h-8 rounded-full"><div class="flex-1 min-w-0"><div class="text-xs font-bold text-white truncate">${this.state.user.global_name}</div></div><button onclick="app.logout()" class="text-muted"><span class="material-symbols-outlined">logout</span></button>`;
+		} else { el.innerHTML = `<button onclick="app.login()" class="w-full bg-discord-primary text-white py-2 rounded text-sm">Discord 登录</button>`; }
+	},
+	login() { window.location.href = `${window.AUTH_URL}/auth/login`; },
+	logout(r = true) {
+		localStorage.removeItem('auth_token');
+		this.state.token = null;
+		this.state.user = null;
+		this.resetFollowState();
+		this.state.unreadCount = 0;
+		this.updateFollowBadge();
+		this.renderUserArea();
+		if (r) window.location.href = `${window.AUTH_URL}/auth/logout`;
+	},
+
+	// Banner状态
+	bannerCollapsed: localStorage.getItem('banner_collapsed') === 'true',
+	currentBannerIndex: 0,
+	bannerAutoplayTimer: null,
+
+	renderBanner() {
+		const el = document.getElementById('banner-section');
+		const sidebarBanner = document.getElementById('sidebar-banner');
+		
+		// 如果已折叠，确保元素状态正确
+		if (this.bannerCollapsed) {
+			el.classList.add('collapsed');
+		}
+		
+		// 准备banner数据
+		let banners = this.state.banners || [];
+		if (!banners.length) {
+			// 使用默认banner占位
+			banners = [{
+				title: '欢迎来到类脑索引',
+				cover_image_url: 'banner.png',
+				thread_id: null
+			}];
+		}
+		
+		el.classList.remove('hidden');
+		
+		// 渲染轮播内容（包含模糊背景层）
+		const slidesHtml = banners.map((banner, idx) => `
+			<div class="banner-slide ${idx === 0 ? 'active' : ''}" data-index="${idx}">
+				<div class="banner-blur-bg" style="background-image: url('${banner.cover_image_url}')"></div>
+				<img src="${banner.cover_image_url}" onerror="this.src='banner.png'; this.previousElementSibling.style.backgroundImage='url(banner.png)'">
+			</div>
+		`).join('');
+		
+		const dotsHtml = banners.length > 1 ? `
+			<div class="banner-dots">
+				${banners.map((_, idx) => `
+					<button class="banner-dot ${idx === 0 ? 'active' : ''}" data-index="${idx}" onclick="app.goToBannerSlide(${idx})"></button>
+				`).join('')}
+			</div>
+		` : '';
+		
+		const navButtons = banners.length > 1 ? `
+			<button class="banner-nav-btn banner-prev" onclick="app.prevBannerSlide()">
+				<span class="material-symbols-outlined">chevron_left</span>
+			</button>
+			<button class="banner-nav-btn banner-next" onclick="app.nextBannerSlide()">
+				<span class="material-symbols-outlined">chevron_right</span>
+			</button>
+		` : '';
+		
+		document.getElementById('banner-slides').innerHTML = slidesHtml;
+		document.getElementById('banner-title').innerText = banners[0].title;
+		
+		// 添加导航按钮和指示点
+		const container = el.querySelector('.banner-container');
+		
+		// 移除旧的导航元素
+		container.querySelectorAll('.banner-dots, .banner-nav-btn').forEach(e => e.remove());
+		
+		// 添加新的导航元素
+		if (dotsHtml) container.insertAdjacentHTML('beforeend', dotsHtml);
+		if (navButtons) container.insertAdjacentHTML('beforeend', navButtons);
+		
+		// 启动自动轮播
+		this.startBannerAutoplay();
+		
+		// 更新侧边栏迷你banner
+		this.updateSidebarBanner();
+		
+		// 更新跳转按钮显示状态
+		this.updateBannerLinks();
+	},
+
+	startBannerAutoplay() {
+		this.stopBannerAutoplay();
+		const banners = this.state.banners || [];
+		if (banners.length <= 1) return;
+		
+		this.bannerAutoplayTimer = setInterval(() => {
+			this.nextBannerSlide();
+		}, 5000);
+	},
+
+	stopBannerAutoplay() {
+		if (this.bannerAutoplayTimer) {
+			clearInterval(this.bannerAutoplayTimer);
+			this.bannerAutoplayTimer = null;
+		}
+	},
+
+	goToBannerSlide(index) {
+		const banners = this.state.banners || [];
+		if (!banners.length) return;
+		
+		this.currentBannerIndex = index;
+		const slides = document.querySelectorAll('#banner-slides .banner-slide');
+		const dots = document.querySelectorAll('.banner-dots .banner-dot');
+		const titleEl = document.getElementById('banner-title');
+		
+		slides.forEach((slide, i) => slide.classList.toggle('active', i === index));
+		dots.forEach((dot, i) => dot.classList.toggle('active', i === index));
+		if (titleEl && banners[index]) {
+			titleEl.innerText = banners[index].title;
+		}
+		
+		// 同步更新侧边栏banner
+		this.updateSidebarBannerSlide(index);
+		
+		// 更新跳转按钮显示状态
+		this.updateBannerLinks();
+		
+		// 重启自动播放计时器
+		this.startBannerAutoplay();
+	},
+
+	prevBannerSlide() {
+		const banners = this.state.banners || [];
+		if (!banners.length) return;
+		const newIndex = (this.currentBannerIndex - 1 + banners.length) % banners.length;
+		this.goToBannerSlide(newIndex);
+	},
+
+	nextBannerSlide() {
+		const banners = this.state.banners || [];
+		if (!banners.length) return;
+		const newIndex = (this.currentBannerIndex + 1) % banners.length;
+		this.goToBannerSlide(newIndex);
+	},
+
+	openCurrentBannerApp() {
+		const banners = this.state.banners || [];
+		const current = banners[this.currentBannerIndex];
+		if (!current || !current.thread_id) return;
+		
+		const appLink = `discord://discord.com/channels/${window.GUILD_ID || '@me'}/${current.thread_id}`;
+		window.location.href = appLink;
+	},
+
+	openCurrentBannerWeb() {
+		const banners = this.state.banners || [];
+		const current = banners[this.currentBannerIndex];
+		if (!current || !current.thread_id) return;
+		
+		const webLink = `https://discord.com/channels/${window.GUILD_ID || '@me'}/${current.thread_id}`;
+		window.open(webLink, '_blank');
+	},
+
+	updateBannerLinks() {
+		const banners = this.state.banners || [];
+		const current = banners[this.currentBannerIndex];
+		const hasLink = current && current.thread_id;
+		
+		// 主 Banner 跳转按钮
+		const bannerLinks = document.getElementById('banner-links');
+		if (bannerLinks) {
+			bannerLinks.classList.toggle('hidden', !hasLink);
+		}
+		
+		// 侧边栏 Banner 跳转按钮
+		const sidebarAppBtn = document.getElementById('sidebar-banner-app-btn');
+		const sidebarWebBtn = document.getElementById('sidebar-banner-web-btn');
+		if (sidebarAppBtn) {
+			sidebarAppBtn.classList.toggle('hidden', !hasLink);
+		}
+		if (sidebarWebBtn) {
+			sidebarWebBtn.classList.toggle('hidden', !hasLink);
+		}
+	},
+
+	toggleBannerCollapse() {
+		this.bannerCollapsed = !this.bannerCollapsed;
+		localStorage.setItem('banner_collapsed', this.bannerCollapsed);
+		
+		const el = document.getElementById('banner-section');
+		el.classList.toggle('collapsed', this.bannerCollapsed);
+		
+		// 折叠时停止自动播放
+		if (this.bannerCollapsed) {
+			this.stopBannerAutoplay();
+		} else {
+			this.startBannerAutoplay();
+		}
+	},
+
+	// 侧边栏Banner状态
+	sidebarBannerClosed: false,
+	sidebarBannerDragging: false,
+	sidebarBannerDragOffset: { x: 0, y: 0 },
+
+	closeSidebarBanner() {
+		const el = document.getElementById('sidebar-banner');
+		if (el) {
+			el.classList.add('closing');
+			this.sidebarBannerClosed = true;
+			setTimeout(() => {
+				el.classList.remove('visible', 'closing');
+			}, 200);
+		}
+	},
+
+	updateSidebarBanner() {
+		const sidebarBanner = document.getElementById('sidebar-banner');
+		if (!sidebarBanner) return;
+		
+		const banners = this.state.banners || [];
+		if (!banners.length) {
+			// 使用默认banner
+			banners.push({
+				title: '欢迎来到类脑索引',
+				cover_image_url: 'banner.png',
+				thread_id: null
+			});
+		}
+		
+		// 渲染侧边栏banner
+		const sidebarSlidesHtml = banners.map((banner, idx) => `
+			<div class="sidebar-banner-slide ${idx === this.currentBannerIndex ? 'active' : ''}" data-index="${idx}"
+				 onclick="${banner.thread_id ? `app.openCurrentBannerWeb()` : ''}"
+				 style="${banner.thread_id ? 'cursor: pointer;' : ''}">
+				<img src="${banner.cover_image_url}" class="w-full h-full object-cover" onerror="this.src='banner.png'">
+			</div>
+		`).join('');
+		
+		sidebarBanner.querySelector('.sidebar-banner-slides').innerHTML = sidebarSlidesHtml;
+		sidebarBanner.querySelector('.sidebar-banner-title').innerText = banners[this.currentBannerIndex]?.title || '欢迎';
+		
+		// 更新跳转按钮显示状态
+		this.updateBannerLinks();
+	},
+
+	setupSidebarBannerDrag() {
+		const sidebarBanner = document.getElementById('sidebar-banner');
+		if (!sidebarBanner) return;
+		
+		const dragHandle = sidebarBanner.querySelector('.sidebar-banner-drag-handle');
+		if (!dragHandle) return;
+		
+		const startDrag = (e) => {
+			// 阻止选中文本
+			e.preventDefault();
+			
+			this.sidebarBannerDragging = true;
+			sidebarBanner.classList.add('dragging');
+			
+			const rect = sidebarBanner.getBoundingClientRect();
+			const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+			const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+			
+			this.sidebarBannerDragOffset = {
+				x: clientX - rect.left,
+				y: clientY - rect.top
+			};
+			
+			document.addEventListener('mousemove', onDrag);
+			document.addEventListener('mouseup', stopDrag);
+			document.addEventListener('touchmove', onDrag, { passive: false });
+			document.addEventListener('touchend', stopDrag);
+		};
+		
+		const onDrag = (e) => {
+			if (!this.sidebarBannerDragging) return;
+			
+			e.preventDefault();
+			
+			const clientX = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+			const clientY = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+			
+			let newX = clientX - this.sidebarBannerDragOffset.x;
+			let newY = clientY - this.sidebarBannerDragOffset.y;
+			
+			// 限制在视口范围内
+			const bannerWidth = sidebarBanner.offsetWidth;
+			const bannerHeight = sidebarBanner.offsetHeight;
+			const maxX = window.innerWidth - bannerWidth;
+			const maxY = window.innerHeight - bannerHeight;
+			
+			newX = Math.max(0, Math.min(newX, maxX));
+			newY = Math.max(0, Math.min(newY, maxY));
+			
+			sidebarBanner.style.left = newX + 'px';
+			sidebarBanner.style.top = newY + 'px';
+			sidebarBanner.style.right = 'auto';
+		};
+		
+		const stopDrag = () => {
+			this.sidebarBannerDragging = false;
+			sidebarBanner.classList.remove('dragging');
+			
+			document.removeEventListener('mousemove', onDrag);
+			document.removeEventListener('mouseup', stopDrag);
+			document.removeEventListener('touchmove', onDrag);
+			document.removeEventListener('touchend', stopDrag);
+		};
+		
+		dragHandle.addEventListener('mousedown', startDrag);
+		dragHandle.addEventListener('touchstart', startDrag, { passive: false });
+	},
+
+	updateSidebarBannerSlide(index) {
+		const sidebarBanner = document.getElementById('sidebar-banner');
+		if (!sidebarBanner) return;
+		
+		const slides = sidebarBanner.querySelectorAll('.sidebar-banner-slide');
+		const titleEl = sidebarBanner.querySelector('.sidebar-banner-title');
+		const banners = this.state.banners || [];
+		
+		slides.forEach((slide, i) => slide.classList.toggle('active', i === index));
+		if (titleEl && banners[index]) {
+			titleEl.innerText = banners[index].title;
+		}
+	},
+
+	setupBannerScrollObserver() {
+		const bannerSection = document.getElementById('banner-section');
+		const sidebarBanner = document.getElementById('sidebar-banner');
+		
+		if (!bannerSection || !sidebarBanner) return;
+		
+		const observer = new IntersectionObserver((entries) => {
+			entries.forEach(entry => {
+				// 当主banner不可见时，显示侧边栏banner（如果没有被用户关闭）
+				const isMainVisible = entry.isIntersecting;
+				const isInSearchView = this.state.view === 'search';
 				
-				// 更新未读徽章
-				updateUnreadBadge();
-				
-				// 更新用户信息显示
-				if(state.user){
-					el.userName.textContent = state.user.global_name || state.user.username || '用户';
-					if(state.user.avatar){
-						const avatarUrl = `https://cdn.discordapp.com/avatars/${state.user.id}/${state.user.avatar}.png?size=128`;
-						el.userAvatar.src = avatarUrl;
-						el.userAvatar.alt = state.user.username;
-					} else {
-						el.userAvatar.src = `https://cdn.discordapp.com/embed/avatars/${(parseInt(state.user.id) >> 22) % 6}.png`;
-					}
+				if (!isMainVisible && isInSearchView && !this.bannerCollapsed && !this.sidebarBannerClosed) {
+					sidebarBanner.classList.add('visible');
 				} else {
-					// 未登录时显示默认状态
-					el.userName.textContent = '未登录';
-					el.userAvatar.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="50" fill="%23333"%3E%3C/circle%3E%3Ctext x="50" y="65" font-size="50" text-anchor="middle" fill="%23999"%3E?%3C/text%3E%3C/svg%3E';
-					el.userAvatar.alt = '未登录';
+					sidebarBanner.classList.remove('visible');
 				}
-			}else{
-				state.authed = false;
-				// 未登录时显示默认状态
-				el.userName.textContent = '未登录';
-				el.userAvatar.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="50" fill="%23333"%3E%3C/circle%3E%3Ctext x="50" y="65" font-size="50" text-anchor="middle" fill="%23999"%3E?%3C/text%3E%3C/svg%3E';
-				el.userAvatar.alt = '未登录';
+			});
+		}, {
+			threshold: 0.1,
+			rootMargin: '-50px 0px 0px 0px'
+		});
+		
+		observer.observe(bannerSection);
+		
+		// 设置拖动功能
+		this.setupSidebarBannerDrag();
+	},
+
+	// Banner申请相关
+	openBannerApplicationModal() {
+		const modal = document.getElementById('banner-application-modal');
+		if (modal) {
+			modal.classList.remove('hidden');
+			modal.classList.add('active');
+			document.body.style.overflow = 'hidden';
+		}
+	},
+
+	closeBannerApplicationModal() {
+		const modal = document.getElementById('banner-application-modal');
+		if (modal) {
+			modal.classList.remove('active');
+			setTimeout(() => {
+				modal.classList.add('hidden');
+				document.body.style.overflow = '';
+			}, 300);
+		}
+	},
+
+	async submitBannerApplication(event) {
+		event.preventDefault();
+		
+		const threadIdInput = document.getElementById('banner-thread-id');
+		const coverUrlInput = document.getElementById('banner-cover-url');
+		const scopeSelect = document.getElementById('banner-scope');
+		const submitBtn = document.getElementById('banner-submit-btn');
+		
+		const threadId = threadIdInput.value.trim();
+		const coverUrl = coverUrlInput.value.trim();
+		const scope = scopeSelect.value;
+		
+		// 验证
+		if (!threadId || !coverUrl || !scope) {
+			this.showBannerApplicationError('请填写所有必填字段');
+			return;
+		}
+		
+		if (!/^\d{17,20}$/.test(threadId)) {
+			this.showBannerApplicationError('帖子ID必须是17-20位数字');
+			return;
+		}
+		
+		if (!coverUrl.startsWith('http://') && !coverUrl.startsWith('https://')) {
+			this.showBannerApplicationError('封面图链接必须以http://或https://开头');
+			return;
+		}
+		
+		// 禁用提交按钮
+		submitBtn.disabled = true;
+		submitBtn.innerHTML = '<span class="material-symbols-outlined animate-spin">progress_activity</span> 提交中...';
+		
+		try {
+			const response = await this.fetchAPI('/banner/apply', 'POST', {
+				thread_id: threadId,
+				cover_image_url: coverUrl,
+				target_scope: scope
+			});
+			
+			if (response && response.success) {
+				this.closeBannerApplicationModal();
+				this.showToast('✅ Banner申请已提交，等待审核');
+				// 清空表单
+				threadIdInput.value = '';
+				coverUrlInput.value = '';
+				scopeSelect.value = '';
+			} else {
+				this.showBannerApplicationError(response?.message || '提交失败，请重试');
 			}
-		}catch(e){
-			console.error('检查认证失败:', e);
-			state.authed = false;
-			el.userName.textContent = '未登录';
-			el.userAvatar.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Ccircle cx="50" cy="50" r="50" fill="%23333"%3E%3C/circle%3E%3Ctext x="50" y="65" font-size="50" text-anchor="middle" fill="%23999"%3E?%3C/text%3E%3C/svg%3E';
-			el.userAvatar.alt = '未登录';
+		} catch (error) {
+			this.showBannerApplicationError('网络错误，请重试');
+		} finally {
+			submitBtn.disabled = false;
+			submitBtn.innerHTML = '<span class="material-symbols-outlined">send</span> 提交申请';
+		}
+	},
+
+	showBannerApplicationError(message) {
+		const errorEl = document.getElementById('banner-application-error');
+		if (errorEl) {
+			errorEl.textContent = message;
+			errorEl.classList.remove('hidden');
+			setTimeout(() => errorEl.classList.add('hidden'), 5000);
+		}
+	},
+
+	showToast(message) {
+		// 创建临时toast提示
+		const toast = document.createElement('div');
+		toast.className = 'fixed bottom-20 left-1/2 transform -translate-x-1/2 bg-discord-element text-white px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity duration-300';
+		toast.textContent = message;
+		document.body.appendChild(toast);
+		
+		setTimeout(() => {
+			toast.style.opacity = '0';
+			setTimeout(() => toast.remove(), 300);
+		}, 3000);
+	},
+
+	switchView(v) {
+		this.state.view = v;
+		document.getElementById('nav-search').className = v === 'search' ? 'w-full flex items-center gap-3 px-3 py-2 rounded bg-discord-element text-white' : 'w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-discord-element text-discord-muted';
+		document.getElementById('nav-follows').className = v === 'follows' ? 'w-full flex items-center gap-3 px-3 py-2 rounded bg-discord-element text-white relative' : 'w-full flex items-center gap-3 px-3 py-2 rounded hover:bg-discord-element text-discord-muted relative';
+		document.getElementById('banner-section').classList.toggle('hidden', v !== 'search');
+		const showTags = (v === 'search' || v === 'follows');
+		document.getElementById('tags-section').classList.toggle('hidden', !showTags);
+		document.getElementById('view-title').innerText = v === 'search' ? '搜索结果' : '关注列表';
+		this.executeSearch();
+	},
+
+	checkAuth() {
+		this.fetchAPI('/auth/checkauth', 'GET').then(d => {
+			if (d && d.loggedIn) {
+				this.state.user = d.user;
+				this.state.followNeedsRefresh = true;
+				this.renderUserArea();
+				this.refreshUnreadCount();
+			} else {
+				// 未登录，跳转到登录页面
+				this.redirectToLogin();
+			}
+		}).catch(() => {
+			// 请求失败，跳转到登录页面
+			this.redirectToLogin();
+		});
+	},
+
+	redirectToLogin() {
+		// 保存当前页面 URL 以便登录后返回
+		const currentUrl = window.location.href;
+		const loginUrl = `login.html?redirect=${encodeURIComponent(currentUrl)}`;
+		window.location.href = loginUrl;
+	},
+	toggleSortOrder() {
+		this.state.sortOrder = this.state.sortOrder === 'asc' ? 'desc' : 'asc';
+		this.updateSortOrderIcon();
+		if (this.state.view === 'follows') {
+			this.applyFollowFilters();
+			this.renderResults();
+			this.saveStateToUrl();
+		} else {
+			this.executeSearch();
+		}
+	},
+
+	updateSortOrderIcon() {
+		const btn = document.getElementById('sort-order-btn');
+		if (!btn) return;
+		const icon = btn.querySelector('.material-symbols-outlined');
+		if (icon) {
+			icon.textContent = this.state.sortOrder === 'asc' ? 'arrow_upward' : 'arrow_downward';
+		}
+	},
+	setupEventListeners() {
+		let typingTimer;
+		const searchInput = document.getElementById('search-input');
+		if (searchInput) {
+			searchInput.addEventListener('input', () => {
+				clearTimeout(typingTimer);
+				typingTimer = setTimeout(() => {
+					if (this.state.view === 'follows') {
+						this.applyFollowFilters();
+						this.renderResults();
+					} else {
+						this.executeSearch();
+					}
+				}, 600);
+			});
+		}
+		const contentScroll = document.getElementById('content-scroll');
+		if (contentScroll) {
+			contentScroll.addEventListener('scroll', () => this.handleContentScroll());
+		}
+	},
+
+	parseMarkdown(text, expanded = false) {
+		if (!text) return "";
+		let html = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+			.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+			.replace(/`([^`]+)`/g, '<code>$1</code>')
+			.replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank">$1</a>')
+			.replace(/\n/g, '<br>');
+		if (expanded) {
+			html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>').replace(/^## (.*$)/gim, '<h2>$1</h2>');
+		}
+		return html;
+	},
+
+	collectLoadedThreadIds() {
+		if (!this.state.results || !this.state.results.length) return [];
+		const ids = new Set();
+		this.state.results.forEach(post => {
+			const rawId = post?.thread_id ?? null;
+			if (rawId === null || rawId === undefined) return;
+			const normalized = rawId.toString();
+			if (normalized.trim().length === 0) return;
+			ids.add(normalized);
+		});
+		return Array.from(ids);
+	},
+
+	getMockData() {
+		const r = [];
+		const imgs = [
+			'https://placehold.co/800x400/202225/5865F2?text=Image+1',
+			'https://placehold.co/600x800/36393f/3ba55c?text=Image+2',
+			'https://placehold.co/1200x600/000/fff?text=Image+3',
+			'https://placehold.co/400x400/ed4245/fff?text=Image+4',
+			'https://placehold.co/500x300/4752c4/fff?text=Image+5',
+			'https://placehold.co/300x500/3ba55c/fff?text=Image+6'
+		];
+		for (let i = 0; i < 12; i++) {
+			// 根据索引生成不同数量的图片来测试各种布局
+			const imageCount = (i % 6) + 1; // 1-6张图
+			const postImages = imgs.slice(0, imageCount);
+			
+			r.push({
+				thread_id: `mock-${i}`, channel_id: "1001", author_id: "u1",
+				title: i % 2 === 0 ? "Discord 门户设计规范讨论 (v3.0 更新)" : "这是一个标题很长很长的测试帖子用于检测换行和截断效果",
+				thumbnail_urls: postImages,
+				first_message_excerpt: `这里是测试内容。包含 **粗体**, \`代码\`, 以及 [链接](https://discord.com)。\n\n第二行内容。\n> 引用文本效果\n\n此帖包含 ${imageCount} 张图片。`,
+				created_at: new Date().toISOString(), reply_count: 12, reaction_count: 34,
+				tags: ['design', 'ui', 'fix'], author: { username: "User" + i, global_name: "Designer " + i }
+			});
+		}
+		return { results: r, total: 99, available_tags: ['ui', 'design', 'code'], banner_carousel: [{ title: "Welcome", cover_image_url: "https://placehold.co/1200x400/202225/5865F2" }] };
+	},
+
+	handleImageError(event, threadId, channelId) {
+		const imgElement = event.target;
+		imgElement.onerror = null;
+		imgElement.src = this.getPlaceholderImage();
+		this.scheduleThumbnailRefresh({ thread_id: threadId, channel_id: channelId || null }, imgElement);
+	},
+
+	scheduleThumbnailRefresh(item, imgElement) {
+		if (!this.state.failedImages) this.initializeImageRecovery();
+		const key = String(item.thread_id);
+		const entry = this.state.failedImages.get(key);
+		if (entry) {
+			entry.elements.add(imgElement);
+		} else {
+			this.state.failedImages.set(key, { item, elements: new Set([imgElement]) });
+		}
+	},
+
+	initializeImageRecovery() {
+		if (!this.state.failedImages) {
+			this.state.failedImages = new Map();
+		}
+		if (!this.state.imageRefreshTimer) {
+			this.state.imageRefreshTimer = setInterval(() => this.flushImageRecoveryQueue(), 5000);
+			window.addEventListener('beforeunload', () => {
+				if (this.state.imageRefreshTimer) clearInterval(this.state.imageRefreshTimer);
+			});
+		}
+	},
+
+	cleanupImageRecoveryTimer() {
+		if (this.state.failedImages && this.state.failedImages.size === 0 && this.state.imageRefreshTimer) {
+			clearInterval(this.state.imageRefreshTimer);
+			this.state.imageRefreshTimer = null;
+		}
+	},
+
+	async flushImageRecoveryQueue() {
+		if (!this.state.failedImages || this.state.failedImages.size === 0 || this.state.isRefreshingImages) {
+			this.cleanupImageRecoveryTimer();
+			return;
+		}
+
+		const batchEntries = Array.from(this.state.failedImages.entries()).slice(0, 10);
+		batchEntries.forEach(([key]) => this.state.failedImages.delete(key));
+
+		const payload = {
+		    items: batchEntries.map(([key, entry]) => {
+		        const channelValue = entry.item.channel_id;
+		        return {
+		            thread_id: entry.item.thread_id,
+		            channel_id: channelValue !== undefined && channelValue !== null && channelValue !== '' ? channelValue : undefined,
+		        };
+		    }),
+		};
+
+		this.state.isRefreshingImages = true;
+		const response = await this.fetchAPI('/fetch-images', 'POST', payload);
+		this.state.isRefreshingImages = false;
+
+		if (!response || !Array.isArray(response.results)) {
+		    batchEntries.forEach(([key, entry]) => {
+		        this.state.failedImages.set(key, entry);
+		        entry.elements.forEach(img => {
+		            if (!img.dataset.retried) {
+		                img.dataset.retried = 'true';
+		                img.src = 'https://placehold.co/600x300/2f3136/72767d?text=Retrying...';
+		            } else {
+		                img.src = 'https://placehold.co/600x300/000/fff?text=Image+Error';
+		            }
+		        });
+		    });
+		    this.cleanupImageRecoveryTimer();
+		    return;
+		}
+
+		const responseMap = new Map(response.results.map(item => [String(item.thread_id), item]));
+
+		batchEntries.forEach(([, entry]) => {
+			const key = String(entry.item.thread_id);
+			const result = responseMap.get(key);
+			
+			// 检查是否有错误
+			if (result && result.error != null) {
+				// 有错误，从failedImages移除（不再重试）
+				// 根据错误类型显示不同占位图
+				const errorPlaceholder = result.error === 'no_image_found' 
+					? this.getPlaceholderImage() 
+					: 'https://placehold.co/600x300/000/fff?text=Image+Error';
+				entry.elements.forEach(img => {
+					img.src = errorPlaceholder;
+				});
+				// 不重新加入 failedImages，停止重试
+				return;
+			}
+			
+			entry.elements.forEach(img => {
+				const nextUrl = this.getPrimaryThumbnail(result) || this.getPlaceholderImage();
+				img.src = nextUrl;
+				if (result && result.thumbnail_urls && result.thumbnail_urls.length) {
+					this.updateLocalThumbnail(key, result.thumbnail_urls);
+				} else {
+					img.src = 'https://placehold.co/600x300/000/fff?text=Image+Error';
+				}
+			});
+			if (!result || !result.thumbnail_urls || !result.thumbnail_urls.length) {
+				this.state.failedImages.set(key, entry);
+			}
+		});
+
+		this.cleanupImageRecoveryTimer();
+	},
+
+	updateLocalThumbnail(threadId, thumbnailUrls) {
+		const targetId = String(threadId);
+		const normalized = this.normalizeThumbnailList(thumbnailUrls);
+		if (!normalized.length) {
+			return;
+		}
+		const result = this.state.results.find(post => String(post.thread_id) === targetId);
+		if (result) {
+			result.thumbnail_urls = normalized;
+			if (result.thumbnail_url && !normalized.includes(result.thumbnail_url)) {
+				result.thumbnail_urls.unshift(result.thumbnail_url);
+			}
 		}
 	}
+};
 
-	/** 启动 **/
-	(async function init(){
-		readFromURL();
-		await checkAuth();
-		await initChannels();
-		hydrateControls();
-		updateBannerVisibility();
-		
-		if(state.authed){
-			// 根据viewMode决定初始加载内容
-			if(state.viewMode === 'follows'){
-				// 切换到关注列表面板
-				switchPanel('follows');
-			} else {
-				await fetchSearchResults();
-			}
-		}else{
-			render();
-		}
-		
-		bindEvents();
-	})();
-})();
+document.addEventListener('DOMContentLoaded', () => app.init());
