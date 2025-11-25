@@ -66,9 +66,9 @@
 	<div class="fixed inset-0 bg-black/70 z-30 hidden md:hidden opacity-0 transition-opacity duration-300"
 		id="sidebar-backdrop" onclick="app.toggleSidebar(false)"></div>
 
-	<!-- Mobile Detail Overlay (全局唯一的详情弹窗容器) -->
-	<div class="mobile-overlay md:hidden" id="mobile-detail-overlay" onclick="app.closeMobileDetail(event)">
-		<div class="mobile-expanded-card" id="mobile-detail-card" onclick="event.stopPropagation()">
+	<!-- Detail Overlay (全局唯一的详情弹窗容器，移动端和桌面端通用) -->
+	<div class="detail-overlay" id="mobile-detail-overlay" onclick="app.closeMobileDetail(event)">
+		<div class="detail-expanded-card" id="mobile-detail-card" onclick="event.stopPropagation()">
 			<!-- Content Injected by JS -->
 		</div>
 	</div>

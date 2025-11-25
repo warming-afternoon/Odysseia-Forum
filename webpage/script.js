@@ -567,10 +567,8 @@ const app = {
 		}
 	},
 
-	// --- Mobile Detail Overlay Logic ---
+	// --- Detail Overlay Logic (统一移动端和桌面端) ---
 	openMobileDetail(post) {
-		if (window.innerWidth >= 768) return; // Desktop uses hover
-
 		const overlay = document.getElementById('mobile-detail-overlay');
 		const card = document.getElementById('mobile-detail-card');
 
@@ -599,8 +597,8 @@ const app = {
 			: '';
 
 		// 生成轮播组件
-		const mobileCarouselId = `mobile-carousel-${post.thread_id}`;
-		const carouselHtml = this.renderCarousel(post.thumbnail_urls, post.thread_id, mobileCarouselId);
+		const detailCarouselId = `detail-carousel-${post.thread_id}`;
+		const carouselHtml = this.renderCarousel(post.thumbnail_urls, post.thread_id, detailCarouselId);
 
 		card.innerHTML = `
                     <!-- Top: Close Button -->
@@ -609,7 +607,7 @@ const app = {
                     </button>
                     
                     <!-- 1. Image Section with Carousel -->
-                    <div class="card-image-container mobile-carousel-container w-full relative flex-shrink-0 border-b border-white/10">
+                    <div class="card-image-container detail-carousel-container w-full relative flex-shrink-0 border-b border-white/10">
                         ${carouselHtml}
                     </div>
 
@@ -798,12 +796,15 @@ const app = {
 			if (!r.ok) throw new Error(r.status);
 			return await r.json();
 		} catch (e) {
-			if (endpoint.includes('/search') && this.state.results.length === 0) return this.getMockData();
 			return null;
 		}
 	},
 
 	async executeSearch(reset = true) {
+		// 保存当前结果，以便请求失败时恢复
+		const previousResults = this.state.results;
+		const previousTotal = this.state.totalResults;
+		
 		if (reset) { this.state.results = []; }
 		this.state.isLoading = true;
 		this.renderResults(); // Render partial/loading state
@@ -858,6 +859,10 @@ const app = {
 			this.state.totalResults = data.total;
 			this.state.availableTags = data.available_tags || [];
 			if (reset && data.banner_carousel) this.state.banners = data.banner_carousel;
+		} else if (reset) {
+			// 请求失败时恢复原有结果
+			this.state.results = previousResults;
+			this.state.totalResults = previousTotal;
 		}
 
 		this.state.isLoading = false;

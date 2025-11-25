@@ -1124,68 +1124,22 @@
 	backdrop-filter: blur(4px);
 }
 
-/* --- 桌面端悬浮 (Hover) --- */
+/* --- 桌面端卡片样式 (移除悬停展开，改为点击弹窗) --- */
 @media (min-width: 768px) {
-	.card-wrapper:hover {
-		z-index: 50;
-		transition: z-index 0s;
-	}
-
+	/* 桌面端卡片悬停时只有简单的高亮效果，不再扩展 */
 	.card-wrapper:hover .card-inner {
-		top: -20px;
-		left: -15px;
-		right: -15px;
-		bottom: auto;
-		/* 向外扩张 */
-		width: calc(100% + 30px);
-		height: auto;
-		min-height: 100%;
-		transform: translateY(-5px) scale(1.02);
-		box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
-		background-color: #292b2f;
 		border-color: #5865F2;
+		box-shadow: 0 8px 16px -4px rgba(0, 0, 0, 0.4);
 	}
 
-	/* 悬浮时图片变大并完整显示 */
-	.card-wrapper:hover .card-image-container {
-		aspect-ratio: unset;
-		height: 14rem;
-	}
-
-	/* 悬停时隐藏多图网格，显示轮播 */
-	.card-wrapper:hover .card-img-default {
-		display: none;
-	}
-
-	.card-wrapper:hover .card-img-hover {
-		display: block;
-	}
-
-	.card-wrapper:hover .card-img {
-		object-fit: contain;
-		background: #000;
-	}
-
-	.card-wrapper:hover .md-content {
-		-webkit-line-clamp: unset !important;
-		display: block !important;
-		max-height: 300px;
-		overflow-y: auto;
-	}
-
-	.card-wrapper:hover .desktop-actions {
-		display: flex;
-		animation: fadeIn 0.3s ease;
-	}
-
-	/* 悬停时显示轮播按钮 */
-	.card-wrapper:hover .carousel-btn {
-		opacity: 1;
+	/* 桌面端隐藏 desktop-actions，因为改用弹窗 */
+	.desktop-actions {
+		display: none !important;
 	}
 }
 
-/* --- 移动端点击展开 (Mobile Expanded) --- */
-.mobile-overlay {
+/* --- 详情弹窗 (移动端和桌面端通用) --- */
+.detail-overlay {
 	position: fixed;
 	inset: 0;
 	z-index: 60;
@@ -1199,15 +1153,17 @@
 	transition: opacity 0.3s ease;
 }
 
-.mobile-overlay.active {
+.detail-overlay.active {
 	opacity: 1;
 	pointer-events: auto;
 }
 
-/* 移动端展开后的卡片样式 */
-.mobile-expanded-card {
+/* 详情弹窗卡片样式 */
+.detail-expanded-card {
 	width: 90vw;
+	max-width: 600px;
 	height: 85vh;
+	max-height: 800px;
 	background: #202225;
 	border-radius: 12px;
 	display: flex;
@@ -1221,57 +1177,57 @@
 	border: 1px solid #40444b;
 }
 
-.mobile-overlay.active .mobile-expanded-card {
+.detail-overlay.active .detail-expanded-card {
 	transform: scale(1);
 	opacity: 1;
 }
 
-/* 移动端展开：图片优先策略 */
-.mobile-expanded-card .card-image-container {
+/* 详情弹窗：图片区域 */
+.detail-expanded-card .card-image-container {
 	height: 45%;
 	/* 占据近一半高度 */
 	background: #000;
 }
 
-.mobile-expanded-card .card-img {
+.detail-expanded-card .card-img {
 	object-fit: contain;
 }
 
-.mobile-expanded-card .content-scroll-area {
+.detail-expanded-card .content-scroll-area {
 	flex: 1;
 	overflow-y: auto;
 	padding: 16px;
 }
 
-/* 移动端轮播容器 */
-.mobile-carousel-container {
+/* 详情弹窗轮播容器 */
+.detail-carousel-container {
 	height: 45%;
 }
 
-.mobile-carousel-container .carousel {
+.detail-carousel-container .carousel {
 	height: 100%;
 }
 
-.mobile-carousel-container .carousel-btn {
+.detail-carousel-container .carousel-btn {
 	opacity: 1;
 	width: 36px;
 	height: 36px;
 }
 
-.mobile-carousel-container .carousel-btn .material-symbols-outlined {
+.detail-carousel-container .carousel-btn .material-symbols-outlined {
 	font-size: 24px;
 }
 
-.mobile-carousel-container .carousel-dots {
+.detail-carousel-container .carousel-dots {
 	bottom: 12px;
 }
 
-.mobile-carousel-container .carousel-dot {
+.detail-carousel-container .carousel-dot {
 	width: 8px;
 	height: 8px;
 }
 
-.mobile-carousel-container .carousel-dot.active {
+.detail-carousel-container .carousel-dot.active {
 	width: 20px;
 }
 
