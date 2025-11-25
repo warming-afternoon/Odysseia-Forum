@@ -321,7 +321,7 @@ class ReviewView(discord.ui.View):
     async def _archive_review(self, application, status: str, reviewer_id: int):
         """在存档频道留档"""
         try:
-            archive_channel = self.bot.get_channel(self.archive_thread_id)
+            archive_channel = self.bot.fetch_channel(self.archive_thread_id)
             if archive_channel is None:
                 logger.error("存档频道不存在，无法发送审核记录")
                 return
