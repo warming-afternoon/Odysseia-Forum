@@ -6,7 +6,7 @@ const app = {
 		channelId: null,
 		query: '',
 		dateStart: null, dateEnd: null,
-		sortMethod: 'comprehensive', sortOrder: 'desc',
+		sortMethod: 'last_active', sortOrder: 'desc',
 		limit: 20,
 		tagMode: 'include', tagLogic: 'and',
 		includedTags: new Set(), excludedTags: new Set(), availableTags: [],

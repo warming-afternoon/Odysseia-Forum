@@ -17,6 +17,74 @@
 	background: #18191c;
 }
 
+/* --- 排序下拉框样式 --- */
+.sort-select-wrapper {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	background: #2f3136;
+	padding: 6px 10px;
+	border-radius: 8px;
+	border: 1px solid rgba(255, 255, 255, 0.08);
+	position: relative;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.sort-select-wrapper:hover {
+	border-color: rgba(255, 255, 255, 0.15);
+	background: #36393f;
+}
+
+.sort-select-wrapper:focus-within {
+	border-color: #5865F2;
+	box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.25);
+}
+
+.sort-select {
+	appearance: none;
+	-webkit-appearance: none;
+	background: transparent;
+	border: none;
+	color: #dcddde;
+	font-size: 13px;
+	font-weight: 500;
+	cursor: pointer;
+	padding-right: 20px;
+	min-width: 70px;
+}
+
+.sort-select:focus {
+	outline: none;
+}
+
+.sort-select option {
+	background: #2f3136;
+	color: #dcddde;
+	padding: 10px;
+	font-size: 13px;
+}
+
+.sort-select option:hover,
+.sort-select option:checked {
+	background: #5865F2;
+	color: white;
+}
+
+.sort-select-arrow {
+	position: absolute;
+	right: 8px;
+	font-size: 18px;
+	color: #72767d;
+	pointer-events: none;
+	transition: transform 0.2s ease;
+}
+
+.sort-select-wrapper:focus-within .sort-select-arrow {
+	color: #5865F2;
+	transform: rotate(180deg);
+}
+
 /* --- Banner 轮播样式 --- */
 .banner-section {
 	position: relative;
