@@ -1021,6 +1021,16 @@ const app = {
 			this.saveStateToUrl();
 		}
 	},
+	setTagLogic(l) {
+		this.state.tagLogic = l;
+		if (this.state.view === 'follows') {
+			this.applyFollowFilters();
+			this.renderResults();
+			this.saveStateToUrl();
+		} else {
+			this.executeSearch();
+		}
+	},
 
 	renderChannels() {
 		const container = document.getElementById('channel-list-container');
