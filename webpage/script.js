@@ -1001,23 +1001,24 @@ const app = {
 	setTagMode(m) {
 		this.state.tagMode = m;
 		this.renderTags();
-		/* Update UI classes omitted for brevity */
-		if (this.state.view === 'follows') {
-			this.applyFollowFilters();
-			this.renderResults();
-			this.saveStateToUrl();
-		} else {
-			this.executeSearch();
+		
+		// 更新按钮样式
+		const includeBtn = document.getElementById('mode-include');
+		const excludeBtn = document.getElementById('mode-exclude');
+		if (includeBtn && excludeBtn) {
+			if (m === 'include') {
+				includeBtn.className = 'flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-discord-green/20 text-discord-green border border-discord-green flex-shrink-0';
+				excludeBtn.className = 'flex items-center gap-1 text-xs px-2 py-0.5 rounded text-discord-muted border border-transparent hover:border-discord-red hover:text-discord-red flex-shrink-0';
+			} else {
+				includeBtn.className = 'flex items-center gap-1 text-xs px-2 py-0.5 rounded text-discord-muted border border-transparent hover:border-discord-green hover:text-discord-green flex-shrink-0';
+				excludeBtn.className = 'flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-discord-red/20 text-discord-red border border-discord-red flex-shrink-0';
+			}
 		}
-	},
-	setTagLogic(l) {
-		this.state.tagLogic = l;
+		
 		if (this.state.view === 'follows') {
 			this.applyFollowFilters();
 			this.renderResults();
 			this.saveStateToUrl();
-		} else {
-			this.executeSearch();
 		}
 	},
 
