@@ -1023,6 +1023,20 @@ const app = {
 	},
 	setTagLogic(l) {
 		this.state.tagLogic = l;
+		
+		// 更新按钮样式
+		const andBtn = document.getElementById('logic-and');
+		const orBtn = document.getElementById('logic-or');
+		if (andBtn && orBtn) {
+			if (l === 'and') {
+				andBtn.className = 'text-xs font-bold px-2 py-0.5 rounded bg-discord-primary text-white flex-shrink-0';
+				orBtn.className = 'text-xs font-bold px-2 py-0.5 rounded text-discord-muted hover:text-white flex-shrink-0';
+			} else {
+				andBtn.className = 'text-xs font-bold px-2 py-0.5 rounded text-discord-muted hover:text-white flex-shrink-0';
+				orBtn.className = 'text-xs font-bold px-2 py-0.5 rounded bg-discord-primary text-white flex-shrink-0';
+			}
+		}
+		
 		if (this.state.view === 'follows') {
 			this.applyFollowFilters();
 			this.renderResults();
