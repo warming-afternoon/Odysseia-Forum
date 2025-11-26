@@ -419,11 +419,11 @@ class Search(commands.Cog):
 
                 threads, total_threads = await repo.search_threads_with_count(
                     search_qo,
-                    offset,
-                    limit,
-                    total_display_count,
-                    exploration_factor,
-                    strength_weight,
+                    limit=limit,
+                    offset=offset,
+                    total_display_count=total_display_count,
+                    exploration_factor=exploration_factor,
+                    strength_weight=strength_weight,
                 )
 
             if threads:
