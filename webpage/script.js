@@ -568,7 +568,22 @@ const app = {
 	},
 
 	// --- Detail Overlay Logic (统一移动端和桌面端) ---
-	openMobileDetail(post) {
+	openMobileDetail(postOrId) {
+		let post;
+		if (typeof postOrId === 'string') {
+			// 通过 thread_id 从 results 或 followThreads 中查找 post
+			post = this.state.results.find(p => String(p.thread_id) === postOrId);
+			if (!post) {
+				post = this.state.followThreads.find(p => String(p.thread_id) === postOrId);
+			}
+			if (!post) {
+				console.error('找不到帖子:', postOrId);
+				return;
+			}
+		} else {
+			post = postOrId;
+		}
+		
 		const overlay = document.getElementById('mobile-detail-overlay');
 		const card = document.getElementById('mobile-detail-card');
 
@@ -677,8 +692,7 @@ const app = {
 		}
 
 		grid.innerHTML = this.state.results.map((post, index) => {
-			// Store post data in DOM for easy retrieval
-			const postJson = encodeURIComponent(JSON.stringify(post));
+			const threadId = String(post.thread_id);
 
 			const user = post.author || {};
 			const authorName = user.global_name || user.name || user.username || "Unknown";
@@ -716,15 +730,23 @@ const app = {
                         </div>
                     `;
 
-			return `
-                    <div class="card-wrapper" onclick='app.openMobileDetail(JSON.parse(decodeURIComponent("${postJson}")))' style="--stack-index: ${20 - (index % 10)};"> <!-- Decreasing z-index for stacking context safety -->
-                        <div class="card-inner group cursor-pointer">
-                            ${badgeHtml}
-                            <!-- Image Container with Multi-Image Grid (default) and Carousel (hover) -->
+			// 根据是否有图片决定渲染方式
+			const hasImages = imageCount > 0;
+			const imageContainerHtml = hasImages ? `
+                            <!-- Image Container with Multi-Image Grid -->
                             <div class="card-image-container overflow-hidden">
                             	<div class="card-img-default">${multiImageHtml}</div>
                             	<div class="card-img-hover">${carouselHtml}</div>
-                            </div>
+                            </div>` : '';
+			
+			// 没有图片时扩大预览行数
+			const excerptClampClass = hasImages ? 'line-clamp-3' : 'line-clamp-8';
+
+			return `
+                    <div class="card-wrapper" onclick="app.openMobileDetail('${threadId}')" style="--stack-index: ${20 - (index % 10)};"> <!-- Decreasing z-index for stacking context safety -->
+                        <div class="card-inner group cursor-pointer">
+                            ${badgeHtml}
+                            ${imageContainerHtml}
                             
                             <!-- Content -->
                             <div class="p-3 md:p-4 flex flex-col flex-1 min-h-0 bg-[#202225]">
@@ -736,7 +758,7 @@ const app = {
                                     ${post.title}
                                 </h3>
                                 
-                                <div class="md-content text-xs text-discord-muted mb-2 line-clamp-3 flex-1">
+                                <div class="md-content text-xs text-discord-muted mb-2 ${excerptClampClass} flex-1">
                                     ${this.parseMarkdown(post.first_message_excerpt)}
                                 </div>
 
@@ -916,12 +938,11 @@ const app = {
 			searchInput.value = `author:${normalized}`;
 		}
 
-		this.state.includedTags.clear();
-		this.state.excludedTags.clear();
+		// 保留已选择的标签筛选，不再清除
+		// this.state.includedTags.clear();
+		// this.state.excludedTags.clear();
 
-		if (window.innerWidth < 768) {
-			this.closeMobileDetail();
-		}
+		this.closeMobileDetail();
 
 		if (this.state.view === 'follows') {
 			this.renderTags();
