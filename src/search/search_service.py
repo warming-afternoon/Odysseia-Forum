@@ -133,11 +133,21 @@ class SearchService:
             if query.author_name:
                 normalized_author_name = query.author_name.strip()
                 if normalized_author_name:
-                    filters.append(
-                        Thread.author.has(
-                            func.lower(Author.name) == normalized_author_name.lower()
-                        )
-                    )
+                    # 使用子查询来查找匹配的作者 ID
+                    search_pattern = f"%{normalized_author_name}%"
+                    author_subquery = select(Author.id).where(
+                        (func.lower(Author.name) == normalized_author_name.lower()) |
+                        (Author.global_name.like(search_pattern)) |  # type: ignore
+                        (Author.display_name.like(search_pattern))  # type: ignore
+                    )# type: ignore
+                    author_result = await self.session.execute(author_subquery)
+                    matched_author_ids = set(author_result.scalars().all())
+
+                    if query.include_authors:
+                        # 如果同时指定了ID和名称，则取交集
+                        final_include_author_ids.intersection_update(matched_author_ids)
+                    else:
+                        final_include_author_ids = matched_author_ids
 
             # 应用作者过滤器
             if final_include_author_ids:
