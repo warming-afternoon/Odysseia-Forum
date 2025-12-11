@@ -10,6 +10,8 @@ from .author import Author
 from .thread_follow import ThreadFollow
 from .banner_application import BannerApplication, BannerCarousel, BannerWaitlist
 from .user_collection import UserCollection
+from .booklist import Booklist
+from .booklist_item import BooklistItem
 
 # 这一行是为了让 Alembic/SQLModel 能够发现所有模型
 __all__ = [
@@ -27,4 +29,6 @@ __all__ = [
     "BannerCarousel",
     "BannerWaitlist",
     "UserCollection",
+    "Booklist",
+    "BooklistItem",
 ]
