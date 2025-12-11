@@ -60,7 +60,7 @@ async def login():
         "client_id": _AUTH_CONFIG["client_id"],
         "redirect_uri": _AUTH_CONFIG["redirect_uri"],
         "response_type": "code",
-        "scope": "identify guilds.members.read"
+        "scope": "identify"
     }
     
     auth_url = f"https://discord.com/api/oauth2/authorize?{urlencode(params)}"
@@ -123,10 +123,11 @@ async def callback(code: Optional[str] = None):
             user = user_response.json()
             
             # 验证用户是否在服务器中
+            bot_token = _AUTH_CONFIG.get("bot_token")
             member_response = await client.get(
-                f"https://discord.com/api/users/@me/guilds/{_AUTH_CONFIG['guild_id']}/member",
-                headers=headers
-            )
+                    f"https://discord.com/api/guilds/{_AUTH_CONFIG['guild_id']}/members/{user['id']}",
+                    headers={"Authorization": f"Bot {bot_token}"}
+                )
             
             if member_response.status_code != 200:
                 error_url = f"{_AUTH_CONFIG['frontend_url']}?error=你不在社区内"
