@@ -2,6 +2,9 @@ import json
 from fastapi import FastAPI
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from .v1.routers import (
     preferences,
     search,
@@ -36,12 +39,33 @@ except (FileNotFoundError, KeyError):
 docs_url = "/docs" if enable_docs else None
 redoc_url = "/redoc" if enable_docs else None
 
+# 定义安全方案
+security_schemes = {
+    "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT",
+        "description": "输入 JWT Token，格式: Bearer <token>"
+    }
+}
+
 app = FastAPI(
     title="Odysseia Forum Bot API",
     description="Odysseia 论坛机器人 API 服务",
     version="1.0.0",
     docs_url=docs_url,
     redoc_url=redoc_url,
+    openapi_tags=[
+        {"name": "系统", "description": "系统相关接口"},
+        {"name": "认证", "description": "用户认证相关接口"},
+        {"name": "搜索", "description": "搜索相关接口"},
+        {"name": "偏好", "description": "用户偏好设置"},
+        {"name": "收藏", "description": "用户收藏管理"},
+        {"name": "书单", "description": "书单管理"},
+        {"name": "关注", "description": "帖子关注管理"},
+        {"name": "横幅", "description": "横幅申请系统"},
+        {"name": "图片", "description": "图片获取接口"},
+    ],
 )
 
 # 配置 CORS
@@ -105,3 +129,48 @@ async def root():
             "booklists": "/v1/booklists",
         },
     }
+
+
+# 覆盖 OpenAPI 配置以包含安全方案
+@app.on_event("startup")
+async def startup_event():
+    """应用启动时的事件处理"""
+    # 初始化安全配置
+    from .v1.dependencies.security import initialize_api_security
+    from .v1.routers.auth import initialize_auth_config
+    
+    initialize_api_security()
+    initialize_auth_config()
+
+
+def custom_openapi():
+    """自定义 OpenAPI 配置，添加安全方案"""
+    if app.openapi_schema:
+        return app.openapi_schema
+    
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    
+    # 添加安全方案
+    openapi_schema["components"]["securitySchemes"] = security_schemes
+    
+    # 为需要认证的路由添加全局安全要求
+    # 注意：这不会影响不需要认证的路由
+    for path, methods in openapi_schema.get("paths", {}).items():
+        for method, details in methods.items():
+            # 检查路由是否需要认证（这里简化处理，实际应根据路由判断）
+            # 对于需要认证的路由，添加安全要求
+            if path not in ["/v1/health", "/", "/v1/auth/login", "/v1/auth/callback", "/v1/auth/checkauth"]:
+                if "security" not in details:
+                    details["security"] = [{"BearerAuth": []}]
+    
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+
+# 应用自定义 OpenAPI 配置
+app.openapi = custom_openapi
