@@ -40,6 +40,7 @@ from src.api.v1.routers import (
     meta as meta_api,
     fetch_images as fetch_images_api,
     banner as banner_api,
+    booklists as booklists_api,
 )
 from src.api.main import app as fastapi_app
 from src.api.v1.dependencies.security import initialize_api_security
@@ -268,6 +269,7 @@ async def main():
             search_api.search_cog_instance = search_cog
         if collection_cog:
             search_api.collection_cog_instance = collection_cog
+            booklists_api.collection_cog_instance = collection_cog
         search_api.async_session_factory = AsyncSessionFactory
         meta_api.cache_service_instance = bot.cache_service
         search_api.cache_service_instance = bot.cache_service

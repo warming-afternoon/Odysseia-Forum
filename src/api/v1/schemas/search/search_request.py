@@ -96,4 +96,3 @@ class SearchRequest(BaseModel):
     offset: int = Field(
         default=0, ge=0, description="结果的偏移页（已弃用，为兼容旧版本保留）"
     )
-

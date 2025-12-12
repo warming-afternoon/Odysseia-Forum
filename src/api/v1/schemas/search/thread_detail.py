@@ -3,6 +3,7 @@ from typing import Optional, List
 from datetime import datetime
 from .author import AuthorDetail
 
+
 class ThreadDetail(BaseModel):
     """
     API 响应中单个帖子的详细信息模型

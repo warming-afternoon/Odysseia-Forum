@@ -45,7 +45,7 @@ security_schemes = {
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "JWT",
-        "description": "输入 JWT Token，格式: Bearer <token>"
+        "description": "输入 JWT Token，格式: Bearer <token>",
     }
 }
 
@@ -138,7 +138,7 @@ async def startup_event():
     # 初始化安全配置
     from .v1.dependencies.security import initialize_api_security
     from .v1.routers.auth import initialize_auth_config
-    
+
     initialize_api_security()
     initialize_auth_config()
 
@@ -147,27 +147,33 @@ def custom_openapi():
     """自定义 OpenAPI 配置，添加安全方案"""
     if app.openapi_schema:
         return app.openapi_schema
-    
+
     openapi_schema = get_openapi(
         title=app.title,
         version=app.version,
         description=app.description,
         routes=app.routes,
     )
-    
+
     # 添加安全方案
     openapi_schema["components"]["securitySchemes"] = security_schemes
-    
+
     # 为需要认证的路由添加全局安全要求
     # 注意：这不会影响不需要认证的路由
     for path, methods in openapi_schema.get("paths", {}).items():
         for method, details in methods.items():
             # 检查路由是否需要认证（这里简化处理，实际应根据路由判断）
             # 对于需要认证的路由，添加安全要求
-            if path not in ["/v1/health", "/", "/v1/auth/login", "/v1/auth/callback", "/v1/auth/checkauth"]:
+            if path not in [
+                "/v1/health",
+                "/",
+                "/v1/auth/login",
+                "/v1/auth/callback",
+                "/v1/auth/checkauth",
+            ]:
                 if "security" not in details:
                     details["security"] = [{"BearerAuth": []}]
-    
+
     app.openapi_schema = openapi_schema
     return app.openapi_schema
 

@@ -7,6 +7,7 @@ from ..base import PaginatedResponse
 from .author import AuthorDetail
 from ..banner import BannerItem
 
+
 class SearchResponse(PaginatedResponse[ThreadDetail]):
     """搜索接口的最终响应体"""
 

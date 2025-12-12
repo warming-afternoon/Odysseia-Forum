@@ -3,8 +3,10 @@ from typing import Optional, List
 from datetime import datetime
 from ..search.author import AuthorDetail
 
+
 class BooklistItemDetail(BaseModel):
     """书单项目详情，包含帖子信息"""
+
     booklist_item_id: int = Field(description="书单项ID")
     thread_id: int = Field(description="帖子ID")
     channel_id: int = Field(description="频道ID")
@@ -17,6 +19,7 @@ class BooklistItemDetail(BaseModel):
     comment: Optional[str] = Field(None, description="书单主对该帖子的推荐语")
     display_order: int = Field(description="排序权重")
     added_at: datetime = Field(description="加入书单的时间")
+    collected_flag: bool = Field(False, description="当前用户是否收藏了该帖子")
 
     @field_serializer("thread_id", "channel_id")
     def serialize_ids(self, value: int) -> str:

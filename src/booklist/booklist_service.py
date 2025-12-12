@@ -1,5 +1,6 @@
 import logging
 from typing import List, Optional, Tuple
+from sqlalchemy import false
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select, delete, and_, func, desc, asc, or_
 
@@ -249,9 +250,7 @@ class BooklistService:
             await self.session.commit()
             for item in new_booklist_items:
                 await self.session.refresh(item)
-            logger.info(
-                f"{len(new_booklist_items)} 个帖子已添加到书单 {booklist_id}"
-            )
+            # logger.info(f"{len(new_booklist_items)} 个帖子已添加到书单 {booklist_id}")
             return new_booklist_items
         except Exception as e:
             logger.error(f"批量添加帖子到书单失败: {e}", exc_info=True)
@@ -285,61 +284,9 @@ class BooklistService:
                     booklist.item_count = 0
                 self.session.add(booklist)
                 await self.session.commit()
-            logger.info(
-                f"{deleted_count} 个帖子已从书单 {booklist_id} 移除"
-            )
+            logger.info(f"{deleted_count} 个帖子已从书单 {booklist_id} 移除")
 
         return deleted_count
-
-    async def get_booklist_items(
-        self,
-        booklist_id: int,
-        page: int = 1,
-        per_page: int = 50,
-    ) -> Tuple[List[BooklistItemDetail], int]:
-        """
-        获取书单内的帖子详情（包含帖子信息和作者）
-        """
-        offset = (page - 1) * per_page
-        # 查询关联项
-        query = (
-            select(BooklistItem, Thread, Author)
-            .join(Thread, BooklistItem.thread_id == Thread.thread_id)  # type: ignore
-            .join(Author, Thread.author_id == Author.id)  # type: ignore
-            .where(BooklistItem.booklist_id == booklist_id)  # type: ignore
-            .order_by(asc(BooklistItem.display_order), desc(BooklistItem.created_at))
-        )
-
-        # 计数
-        count_stmt = select(func.count()).select_from(query.alias("sub"))
-        count_result = await self.session.execute(count_stmt)
-        total = count_result.scalar_one_or_none() or 0
-
-        # 获取数据
-        data_stmt = query.offset(offset).limit(per_page)
-        result = await self.session.execute(data_stmt)
-        rows = result.all()
-
-        items = []
-        for item, thread, author in rows:
-            author_detail = AuthorDetail.model_validate(author)
-            item_detail = BooklistItemDetail(
-                booklist_item_id=item.id,
-                thread_id=thread.thread_id,
-                channel_id=thread.channel_id,
-                title=thread.title,
-                author=author_detail,
-                created_at=thread.created_at,
-                reaction_count=thread.reaction_count,
-                reply_count=thread.reply_count,
-                thumbnail_urls=thread.thumbnail_urls or [],
-                comment=item.comment,
-                display_order=item.display_order,
-                added_at=item.created_at,
-            )
-            items.append(item_detail)
-
-        return items, total
 
     async def increment_view_count(self, booklist_id: int) -> None:
         """

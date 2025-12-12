@@ -6,6 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy import null
 
 from shared.database import AsyncSessionFactory
+from src.collection.cog import CollectionCog
+from src.shared.enum.collection_type import CollectionType
 from src.booklist.booklist_service import BooklistService
 from src.booklist.booklist_item_service import BooklistItemService
 from src.api.v1.dependencies.security import require_auth
@@ -22,6 +24,8 @@ from src.api.v1.schemas.booklist import (
 from src.api.v1.schemas.base import PaginatedResponse
 
 logger = logging.getLogger(__name__)
+
+collection_cog_instance: CollectionCog | None = None
 
 router = APIRouter(prefix="/booklist", tags=["书单"])
 
@@ -76,13 +80,24 @@ async def create_booklist(
         )
 
 
-@router.get("/list/page", summary="分页搜索公开书单", response_model=PaginatedResponse[BooklistDetail])
+@router.get(
+    "/list/page",
+    summary="分页搜索公开书单",
+    response_model=PaginatedResponse[BooklistDetail],
+)
 async def list_public_booklists(
     owner_id: Optional[int] = Query(None, description="筛选创建者用户ID"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
-    search_by_collect: Optional[bool] = Query(None, description="从当前用户收藏的书单中筛选"),
-    sort_method: int = Query(4, description="排序方法: 1-书单内帖子数量, 2-被浏览次数,3-被收藏次数,4-创建时间,5-最后更新时间"),
-    sort_order: str = Query("desc", description="排序顺序: 'asc'(升序) 或 'desc'(降序)"),
+    search_by_collect: Optional[bool] = Query(
+        None, description="从当前用户收藏的书单中筛选"
+    ),
+    sort_method: int = Query(
+        4,
+        description="排序方法: 1-书单内帖子数量, 2-被浏览次数,3-被收藏次数,4-创建时间,5-最后更新时间",
+    ),
+    sort_order: str = Query(
+        "desc", description="排序顺序: 'asc'(升序) 或 'desc'(降序)"
+    ),
     page: int = Query(1, ge=1, description="页码，从1开始"),
     per_page: int = Query(20, ge=1, le=100, description="每页数量"),
     current_user: Dict[str, Any] = Depends(require_auth),
@@ -117,8 +132,7 @@ async def list_public_booklists(
             )
 
         results = [
-            BooklistDetail.model_validate(b, from_attributes=True)
-            for b in booklists
+            BooklistDetail.model_validate(b, from_attributes=True) for b in booklists
         ]
         return PaginatedResponse(
             total=total,
@@ -134,12 +148,21 @@ async def list_public_booklists(
         )
 
 
-@router.get("/my/list/page", summary="分页搜索我的书单", response_model=PaginatedResponse[BooklistDetail])
+@router.get(
+    "/my/list/page",
+    summary="分页搜索我的书单",
+    response_model=PaginatedResponse[BooklistDetail],
+)
 async def list_my_booklists(
     is_public: Optional[bool] = Query(None, description="筛选公开状态 (不传则不筛选)"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
-    sort_method: int = Query(4, description="排序方法: 1-书单内帖子数量, 2-被浏览次数,3-被收藏次数,4-创建时间,5-最后更新时间"),
-    sort_order: str = Query("desc", description="排序顺序: 'asc'(升序) 或 'desc'(降序)"),
+    sort_method: int = Query(
+        4,
+        description="排序方法: 1-书单内帖子数量, 2-被浏览次数,3-被收藏次数,4-创建时间,5-最后更新时间",
+    ),
+    sort_order: str = Query(
+        "desc", description="排序顺序: 'asc'(升序) 或 'desc'(降序)"
+    ),
     page: int = Query(1, ge=1, description="页码，从1开始"),
     per_page: int = Query(20, ge=1, le=100, description="每页数量"),
     current_user: Dict[str, Any] = Depends(require_auth),
@@ -170,17 +193,33 @@ async def list_my_booklists(
                 per_page=per_page,
             )
 
-        results = [
-            BooklistDetail.model_validate(b, from_attributes=True)
-            for b in booklists
-        ]
+        # 检查收藏状态
+        collected_booklist_ids = set()
+        user_id = int(current_user["id"])
+        if user_id and booklists and collection_cog_instance:
+            booklist_ids = [b.id for b in booklists if b.id is not None]
+            async with (
+                collection_cog_instance.get_collection_service() as collection_service
+            ):
+                collected_booklist_ids = (
+                    await collection_service.get_collected_target_ids(
+                        user_id, CollectionType.BOOKLIST, booklist_ids
+                    )
+                )
+
+        results = []
+        for b in booklists:
+            detail = BooklistDetail.model_validate(b, from_attributes=True)
+            if b.id in collected_booklist_ids:
+                detail.collected_flag = True
+            results.append(detail)
+
         return PaginatedResponse(
             total=total,
             limit=per_page,
             offset=(page - 1) * per_page,
             results=results,
         )
-
     except Exception as e:
         logger.error(f"列出我的书单失败: {e}", exc_info=True)
         raise HTTPException(
@@ -188,7 +227,9 @@ async def list_my_booklists(
         )
 
 
-@router.get("/detail/{booklist_id}", summary="获取书单详情", response_model=BooklistDetail)
+@router.get(
+    "/detail/{booklist_id}", summary="获取书单详情", response_model=BooklistDetail
+)
 async def get_booklist(
     booklist_id: int, current_user: Dict[str, Any] = Depends(require_auth)
 ):
@@ -224,7 +265,9 @@ async def get_booklist(
         )
 
 
-@router.put("/update/{booklist_id}", summary="更新书单", response_model=BooklistUpdateResponse)
+@router.put(
+    "/update/{booklist_id}", summary="更新书单", response_model=BooklistUpdateResponse
+)
 async def update_booklist(
     booklist_id: int,
     title: Optional[str] = None,
@@ -454,7 +497,7 @@ async def get_booklist_items(
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
     """
-    分页获取书单内的帖子详情（包含帖子信息和作者）
+    分页获取书单内的帖子详情
 
     - booklist_id: 书单ID
     - page: 页码
@@ -469,18 +512,37 @@ async def get_booklist_items(
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="书单不存在"
                 )
-            if not booklist.is_public and booklist.owner_id != int(
-                current_user["id"]
-            ):
+            if not booklist.is_public and booklist.owner_id != int(current_user["id"]):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN, detail="无权查看此书单内容"
                 )
 
-            items, total = await service.get_booklist_items(
+            item_service = BooklistItemService(session)
+            items, total = await item_service.get_booklist_items_with_details(
                 booklist_id=booklist_id,
+                display_type=booklist.display_type,
                 page=page,
                 per_page=per_page,
             )
+
+            # 检查收藏状态
+            collected_thread_ids = set()
+            user_id = int(current_user["id"])
+            if user_id and items and collection_cog_instance:
+                thread_ids = [item.thread_id for item in items]
+                async with (
+                    collection_cog_instance.get_collection_service() as collection_service
+                ):
+                    collected_thread_ids = (
+                        await collection_service.get_collected_target_ids(
+                            user_id, CollectionType.THREAD, thread_ids
+                        )
+                    )
+
+            # 更新收藏状态
+            for item in items:
+                if item.thread_id in collected_thread_ids:
+                    item.collected_flag = True
 
         return PaginatedResponse(
             total=total,
