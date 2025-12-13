@@ -99,13 +99,12 @@ class BooklistItemService:
         self,
         booklist_id: int,
         display_type: int,
-        page: int = 1,
-        per_page: int = 50,
+        limit: int = 50,
+        offset: int = 0,
     ) -> Tuple[List[BooklistItemDetail], int]:
         """
         分页获取书单内的帖子详情，并根据指定的排序方式排序
         """
-        offset = (page - 1) * per_page
 
         query = (
             select(BooklistItem, Thread, Author)
@@ -128,7 +127,7 @@ class BooklistItemService:
         total = count_result.scalar_one_or_none() or 0
 
         # 获取数据
-        data_stmt = query.offset(offset).limit(per_page)
+        data_stmt = query.offset(offset * limit).limit(limit)
         result = await self.session.execute(data_stmt)
         rows = result.all()
 

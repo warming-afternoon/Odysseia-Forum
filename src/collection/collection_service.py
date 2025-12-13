@@ -217,7 +217,7 @@ class CollectionService:
         if model_class is Thread:
             join_on_condition = Thread.thread_id == UserCollection.target_id
         elif model_class is Booklist:
-            join_on_condition = model_class.id == UserCollection.target_id
+            join_on_condition = Booklist.id == UserCollection.target_id
         else:
             raise AttributeError(
                 f"Model {model_class.__name__} does not have a recognized primary key for joining."
@@ -242,7 +242,7 @@ class CollectionService:
 
         # 获取数据
         data_stmt = (
-            base_query.order_by(desc(UserCollection.create_at))
+            base_query.order_by(desc(UserCollection.created_at))
             .offset(offset)
             .limit(per_page)
         )

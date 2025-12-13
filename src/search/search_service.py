@@ -16,6 +16,7 @@ from search.qo.thread_search import ThreadSearchQuery
 from core.tag_service import TagService
 from shared.range_parser import parse_range_string
 from shared.enum.default_preferences import DefaultPreferences
+from shared.enum.collection_type import CollectionType
 from shared.time_parser import parse_time_string
 
 
@@ -397,7 +398,6 @@ class SearchService:
 
     async def get_tags_for_collections(self, user_id: int) -> Sequence[Tag]:
         """获取指定用户收藏的所有帖子的唯一标签列表"""
-        from shared.enum.collection_type import CollectionType
 
         statement = (
             select(Tag)

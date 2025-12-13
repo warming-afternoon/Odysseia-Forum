@@ -126,16 +126,16 @@ class BooklistService:
         owner_id: Optional[int] = None,
         is_public: Optional[bool] = None,
         keywords: Optional[str] = None,
+        included_thread_id: Optional[int] = None,
         collected_by_user_id: Optional[int] = None,
         sort_method: int = 4,
         sort_order: str = "desc",
-        page: int = 1,
-        per_page: int = 20,
+        limit: int = 10,
+        offset: int = 0,
     ) -> Tuple[List[Booklist], int]:
         """
         分页搜索书单
         """
-        offset = (page - 1) * per_page
         query = select(Booklist)
 
         if owner_id is not None:
@@ -159,20 +159,29 @@ class BooklistService:
                     UserCollection.target_type == CollectionType.BOOKLIST.value,
                 ),
             )
+        if included_thread_id is not None:
+            query = query.join(
+                BooklistItem,
+                Booklist.id == BooklistItem.booklist_id,  # type: ignore
+            ).where(BooklistItem.thread_id == included_thread_id)
 
         # 排序
-        sort_field = {
+        sort_field_map = {
             1: Booklist.item_count,
             2: Booklist.view_count,
             3: Booklist.collection_count,
             4: Booklist.created_at,
             5: Booklist.updated_at,
-        }.get(sort_method, Booklist.created_at)
+            6: UserCollection.created_at,
+        }
+        sort_field = sort_field_map.get(sort_method, Booklist.created_at)
 
-        if sort_order.lower() == "asc":
-            query = query.order_by(asc(sort_field))
-        else:
-            query = query.order_by(desc(sort_field))
+        # 如果按收藏时间排序，但 collected_by_user_id 未提供，则回退到默认排序
+        if sort_method == 6 and collected_by_user_id is None:
+            sort_field = Booklist.created_at
+
+        order_func = asc if sort_order.lower() == "asc" else desc
+        query = query.order_by(order_func(sort_field))
 
         # 计数
         count_stmt = select(func.count()).select_from(query.alias("sub"))
@@ -180,7 +189,7 @@ class BooklistService:
         total = count_result.scalar_one_or_none() or 0
 
         # 获取数据
-        data_stmt = query.offset(offset).limit(per_page)
+        data_stmt = query.offset(offset * limit).limit(limit)
         result = await self.session.execute(data_stmt)
         booklists = result.scalars().all()
 
