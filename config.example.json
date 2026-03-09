@@ -69,6 +69,18 @@
     "_comment_cookie_domain": "Cookie 域名，留空则使用默认（可选）"
   },
 
+  "channel_mappings": {
+    "_comment": "频道映射配置：将其它服务器/频道映射为某个频道的虚拟标签。搜索时选择虚拟标签可搜索到映射源频道的帖子。",
+    "_example": {
+      "目标频道ID": [
+        {
+          "tag_name": "显示为标签的名称",
+          "source_channel_ids": ["来源频道ID1", "来源频道ID2"]
+        }
+      ]
+    }
+  },
+
   "banner": {
     "enabled": true,
     "_comment_enabled": "是否启用Banner申请系统",

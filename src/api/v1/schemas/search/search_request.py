@@ -12,6 +12,9 @@ class SearchRequest(BaseModel):
     包含所有可用的搜索条件，用于精确查找论坛帖子
     """
 
+    guild_id: Optional[int] = Field(
+        default=None, description="要搜索的服务器ID，为空则不按服务器过滤"
+    )
     channel_ids: Optional[List[int]] = Field(
         default=None, description="要搜索的频道ID列表，为空则搜索所有频道"
     )

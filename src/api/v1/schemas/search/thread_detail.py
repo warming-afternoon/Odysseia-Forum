@@ -12,6 +12,7 @@ class ThreadDetail(BaseModel):
     """
 
     thread_id: int = Field(description="帖子的 Discord ID")
+    guild_id: int = Field(default=0, description="帖子所属的 Discord 服务器 ID")
     channel_id: int = Field(description="帖子所在频道的 Discord ID")
     title: str = Field(description="帖子标题")
     author: Optional[AuthorDetail] = Field(description="帖子作者的详细信息")
@@ -27,7 +28,7 @@ class ThreadDetail(BaseModel):
     tags: List[str] = Field(description="帖子关联的标签列表")
     collected_flag: bool = Field(default=False, description="当前用户是否收藏了此帖")
 
-    @field_serializer("thread_id", "channel_id")
+    @field_serializer("thread_id", "guild_id", "channel_id")
     def serialize_id(self, value: int) -> str:
         """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
         return str(value)

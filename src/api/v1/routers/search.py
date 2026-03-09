@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -25,6 +25,8 @@ collection_cog_instance: CollectionCog | None = None
 async_session_factory: async_sessionmaker | None = None
 config_service_instance: ConfigService | None = None
 cache_service_instance: CacheService | None = None
+# 频道映射配置: { target_channel_id: [ { "tag_name": str, "source_channel_ids": [int] } ] }
+channel_mappings_config: Dict[int, List[Dict]] = {}
 
 router = APIRouter(
     prefix="/search", tags=["帖子搜索"], dependencies=[Depends(require_auth)]
@@ -92,17 +94,76 @@ async def execute_search(
     if request.search_by_collection and current_user and "id" in current_user:
         user_id_for_collection_search = int(current_user["id"])
 
+    # 处理频道映射虚拟标签
+    effective_channel_ids = list(request.channel_ids) if request.channel_ids else None
+    effective_include_tags = list(request.include_tags)
+    effective_exclude_tags = list(request.exclude_tags)
+    # 记录实际搜索的频道集合，用于之后构建 available_tags
+    searched_channel_ids: set[int] = set()
+
+    has_mapping = False
+    if effective_channel_ids and len(effective_channel_ids) == 1:
+        origin_channel_id = effective_channel_ids[0]
+        mappings = channel_mappings_config.get(origin_channel_id, [])
+        if mappings:
+            has_mapping = True
+            virtual_tag_set = {m["tag_name"] for m in mappings}
+            mapping_tag_lookup = {m["tag_name"]: m for m in mappings}
+
+            # 分离虚拟标签和真实标签
+            included_virtual = [
+                t for t in effective_include_tags if t in virtual_tag_set
+            ]
+            excluded_virtual = [
+                t for t in effective_exclude_tags if t in virtual_tag_set
+            ]
+            effective_include_tags = [
+                t for t in effective_include_tags if t not in virtual_tag_set
+            ]
+            effective_exclude_tags = [
+                t for t in effective_exclude_tags if t not in virtual_tag_set
+            ]
+
+            excluded_channels: set[int] = set()
+            for vt in excluded_virtual:
+                excluded_channels.update(
+                    mapping_tag_lookup[vt].get("source_channel_ids", [])
+                )
+
+            if included_virtual:
+                # 有选中的虚拟标签 → 只搜索选中标签对应频道的交集
+                channel_sets = []
+                for vt in included_virtual:
+                    channel_sets.append(
+                        set(mapping_tag_lookup[vt].get("source_channel_ids", []))
+                    )
+                intersected = channel_sets[0]
+                for cs in channel_sets[1:]:
+                    intersected &= cs
+                intersected -= excluded_channels
+                effective_channel_ids = list(intersected)
+            else:
+                # 无选中虚拟标签 → 搜索原频道 + 所有映射频道（排除被排除的）
+                all_mapped: set[int] = set()
+                for m in mappings:
+                    all_mapped.update(m.get("source_channel_ids", []))
+                all_mapped -= excluded_channels
+                effective_channel_ids = [origin_channel_id] + list(all_mapped)
+
+            searched_channel_ids = set(effective_channel_ids)
+
     query_object = ThreadSearchQuery(
-        channel_ids=request.channel_ids,
-        include_tags=request.include_tags,
-        exclude_tags=request.exclude_tags,
+        guild_id=request.guild_id,
+        channel_ids=effective_channel_ids,
+        include_tags=effective_include_tags,
+        exclude_tags=effective_exclude_tags,
         tag_logic=request.tag_logic,
         keywords=final_keywords,
         exclude_keywords=final_exclude_keywords if final_exclude_keywords else None,
         exclude_keyword_exemption_markers=request.exclude_keyword_exemption_markers,
         include_authors=request.include_authors,
         exclude_authors=request.exclude_authors,
-        author_name=author_name,  # 使用解析出的作者名
+        author_name=author_name,
         created_after=request.created_after,
         created_before=request.created_before,
         active_after=request.active_after,
@@ -188,6 +249,7 @@ async def execute_search(
             # 手动创建 ThreadDetail 对象，确保字段正确映射
             thread_detail = ThreadDetail(
                 thread_id=thread.thread_id,
+                guild_id=thread.guild_id,
                 channel_id=thread.channel_id,
                 title=thread.title,
                 author=AuthorDetail.model_validate(thread.author)
@@ -205,19 +267,38 @@ async def execute_search(
             )
             results.append(thread_detail)
 
-        # 如果是单频道搜索，返回该频道的可用标签
-        available_tags = []
+        # 构建 available_tags：虚拟标签置顶 + 实际被搜索频道的真实标签（去重）
+        available_tags: list[str] = []
+        virtual_tags: list[str] = []
         target_channel_id = None
         if request.channel_ids and len(request.channel_ids) == 1:
             target_channel_id = request.channel_ids[0]
             if cache_service_instance:
-                all_channels = cache_service_instance.get_indexed_channels()
-                target_channel = next(
-                    (ch for ch in all_channels if ch.id == target_channel_id),
-                    None,
+                if has_mapping:
+                    mappings_for_tags = channel_mappings_config.get(
+                        target_channel_id, []
+                    )
+                    virtual_tags = [
+                        m["tag_name"] for m in mappings_for_tags
+                    ]
+
+                # 从实际搜索的频道集合聚合真实标签
+                real_tag_names: list[str] = []
+                seen_tag_names: set[str] = set()
+                channels_to_scan = (
+                    searched_channel_ids
+                    if searched_channel_ids
+                    else {target_channel_id}
                 )
-                if target_channel:
-                    available_tags = [tag.name for tag in target_channel.available_tags]
+                all_channels_cache = cache_service_instance.get_indexed_channels()
+                for ch in all_channels_cache:
+                    if ch.id in channels_to_scan:
+                        for tag in ch.available_tags:
+                            if tag.name not in seen_tag_names:
+                                seen_tag_names.add(tag.name)
+                                real_tag_names.append(tag.name)
+
+                available_tags = virtual_tags + real_tag_names
 
         # 获取Banner轮播列表
         banner_carousel = []
@@ -259,6 +340,7 @@ async def execute_search(
             offset=len(exclude_thread_ids),
             results=results,
             available_tags=available_tags,
+            virtual_tags=virtual_tags,
             banner_carousel=banner_carousel,
             unread_count=unread_count,
         )

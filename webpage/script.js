@@ -9,7 +9,7 @@ const app = {
 		sortMethod: 'last_active', sortOrder: 'desc',
 		limit: 20,
 		tagMode: 'include', tagLogic: 'and',
-		includedTags: new Set(), excludedTags: new Set(), availableTags: [],
+		includedTags: new Set(), excludedTags: new Set(), availableTags: [], virtualTags: [],
 		results: [], banners: [], totalResults: 0, unreadCount: 0,
 		isLoading: false, sidebarOpen: false,
 		failedImages: null, imageRefreshTimer: null, isRefreshingImages: false,
@@ -592,8 +592,9 @@ const app = {
 		const authorAvatar = user.avatar_url || (user.avatar ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png` : `https://cdn.discordapp.com/embed/avatars/0.png`);
 		
 		// 关注列表优先使用 latest_update_link
-		const defaultWebLink = `https://discord.com/channels/${window.GUILD_ID || '@me'}/${post.thread_id}`;
-		const defaultAppLink = `discord://discord.com/channels/${window.GUILD_ID || '@me'}/${post.thread_id}`;
+		const postGuildId = post.guild_id || window.GUILD_ID || '@me';
+		const defaultWebLink = `https://discord.com/channels/${postGuildId}/${post.thread_id}`;
+		const defaultAppLink = `discord://discord.com/channels/${postGuildId}/${post.thread_id}`;
 		const webLink = (this.state.view === 'follows' && post.latest_update_link) ? post.latest_update_link : defaultWebLink;
 		const appLink = (this.state.view === 'follows' && post.latest_update_link) ? post.latest_update_link.replace('https://discord.com', 'discord://discord.com') : defaultAppLink;
 		
@@ -704,8 +705,9 @@ const app = {
 				: `<span class="text-[10px] text-gray-400 truncate max-w-[60px]">${authorName}</span>`;
 			
 			// 关注列表优先使用 latest_update_link
-			const defaultWebLink = `https://discord.com/channels/${window.GUILD_ID || '@me'}/${post.thread_id}`;
-			const defaultAppLink = `discord://discord.com/channels/${window.GUILD_ID || '@me'}/${post.thread_id}`;
+			const postGuildId = post.guild_id || window.GUILD_ID || '@me';
+			const defaultWebLink = `https://discord.com/channels/${postGuildId}/${post.thread_id}`;
+			const defaultAppLink = `discord://discord.com/channels/${postGuildId}/${post.thread_id}`;
 			const webLink = (this.state.view === 'follows' && post.latest_update_link) ? post.latest_update_link : defaultWebLink;
 			const appLink = (this.state.view === 'follows' && post.latest_update_link) ? post.latest_update_link.replace('https://discord.com', 'discord://discord.com') : defaultAppLink;
 
@@ -880,6 +882,7 @@ const app = {
 			this.state.results = reset ? dedupedIncoming : [...this.state.results, ...dedupedIncoming];
 			this.state.totalResults = data.total;
 			this.state.availableTags = data.available_tags || [];
+			this.state.virtualTags = data.virtual_tags || [];
 			if (reset && data.banner_carousel) this.state.banners = data.banner_carousel;
 		} else if (reset) {
 			// 请求失败时恢复原有结果
@@ -960,34 +963,54 @@ const app = {
 		this.executeSearch();
 	},
 
+	getVirtualTagNames() {
+		return new Set(this.state.virtualTags || []);
+	},
+
 	renderTags() {
 		const container = document.getElementById('tag-cloud');
 		const tagsSection = document.getElementById('tags-section');
 		const baseTags = this.state.view === 'follows' ? this.state.followAvailableTags : this.state.availableTags;
 		const tags = new Set([...(baseTags || []), ...this.state.includedTags, ...this.state.excludedTags]);
 		
-		// 当没有可用标签时隐藏整个 tags-section
 		if (!tags.size) {
 			container.innerHTML = '';
 			if (tagsSection) tagsSection.classList.add('hidden');
 			return;
 		}
 		
-		// 有标签时显示 tags-section
 		if (tagsSection) tagsSection.classList.remove('hidden');
 		
+		const virtualTags = this.getVirtualTagNames();
+
 		container.innerHTML = Array.from(tags).map(t => {
-			let cls = "bg-discord-element border border-transparent text-discord-muted hover:border-gray-500";
+			const isVirtual = virtualTags.has(t);
+			let cls = "";
 			let icon = "";
-			if (this.state.includedTags.has(t)) { cls = "tag-include border"; icon = "check"; }
-			else if (this.state.excludedTags.has(t)) { cls = "tag-exclude border"; icon = "block"; }
-			return `<button onclick="app.handleTagClick('${t}')" class="tag-pill text-xs px-2 py-1 rounded flex items-center gap-1 ${cls}">${icon ? `<span class="material-symbols-outlined text-[12px]">${icon}</span>` : ''}#${t}</button>`;
+			if (this.state.includedTags.has(t)) {
+				cls = isVirtual ? "bg-indigo-500/30 border border-indigo-400 text-indigo-200" : "tag-include border";
+				icon = "check";
+			} else if (this.state.excludedTags.has(t)) {
+				cls = isVirtual ? "bg-red-500/20 border border-red-400/60 text-red-300" : "tag-exclude border";
+				icon = "block";
+			} else if (isVirtual) {
+				cls = "bg-indigo-500/15 border border-indigo-500/40 text-indigo-300 hover:border-indigo-400";
+			} else {
+				cls = "bg-discord-element border border-transparent text-discord-muted hover:border-gray-500";
+			}
+			const prefix = isVirtual ? '📌 ' : '#';
+			const safeTag = t.replace(/'/g, "\\'");
+			return `<button onclick="app.handleTagClick('${safeTag}')" class="tag-pill text-xs px-2 py-1 rounded flex items-center gap-1 ${cls}">${icon ? `<span class="material-symbols-outlined text-[12px]">${icon}</span>` : ''}${prefix}${t}</button>`;
 		}).join('');
 	},
 
 	handleTagClick(tag) {
-		if (this.state.includedTags.has(tag) || this.state.excludedTags.has(tag)) { this.state.includedTags.delete(tag); this.state.excludedTags.delete(tag); }
-		else { this.state.tagMode === 'include' ? this.state.includedTags.add(tag) : this.state.excludedTags.add(tag); }
+		if (this.state.includedTags.has(tag) || this.state.excludedTags.has(tag)) {
+			this.state.includedTags.delete(tag);
+			this.state.excludedTags.delete(tag);
+		} else {
+			this.state.tagMode === 'include' ? this.state.includedTags.add(tag) : this.state.excludedTags.add(tag);
+		}
 		this.renderTags();
 		if (this.state.view === 'follows') {
 			this.applyFollowFilters();

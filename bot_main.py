@@ -276,6 +276,29 @@ async def main():
         search_api.cache_service_instance = bot.cache_service
         search_api.config_service_instance = bot.config_service
 
+        # 注入频道映射配置
+        raw_mappings = bot.config.get("channel_mappings", {})
+        parsed_mappings = {}
+        for key, val in raw_mappings.items():
+            if key.startswith("_"):
+                continue
+            try:
+                ch_id = int(key)
+                if isinstance(val, list):
+                    parsed_mappings[ch_id] = [
+                        {
+                            "tag_name": m["tag_name"],
+                            "source_channel_ids": [
+                                int(c) for c in m.get("source_channel_ids", [])
+                            ],
+                        }
+                        for m in val
+                        if isinstance(m, dict) and "tag_name" in m
+                    ]
+            except (ValueError, TypeError):
+                continue
+        search_api.channel_mappings_config = parsed_mappings
+
         auth_section = (
             bot.config.get("auth", {}) if isinstance(bot.config, dict) else {}
         )

@@ -266,6 +266,7 @@ class FollowService:
 
                 thread_dict = {
                     "thread_id": str(thread.thread_id),
+                    "guild_id": str(thread.guild_id),
                     "channel_id": str(thread.channel_id),
                     "title": thread.title,
                     "author": author_data,
