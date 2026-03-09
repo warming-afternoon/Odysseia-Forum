@@ -14,8 +14,8 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 async_engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_size=20,
-    max_overflow=40,
+    pool_size=10,
+    max_overflow=20,
     pool_timeout=60,
     pool_pre_ping=True,
     pool_recycle=1800,

@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import re
+from functools import partial
 from typing import Sequence
 
 import rjieba
@@ -219,9 +221,12 @@ class SearchService:
                 ]
 
                 all_exclude_parts = []
+                loop = asyncio.get_running_loop()
                 for keyword in exclude_keywords_list:
-                    # 使用正则表达式分词，并处理前缀
-                    tokens = [tok.strip() for tok in rjieba.cut(keyword) if tok.strip()]
+                    raw_tokens = await loop.run_in_executor(
+                        None, partial(rjieba.cut, keyword)
+                    )
+                    tokens = [tok.strip() for tok in raw_tokens if tok.strip()]
                     if not tokens:
                         continue
 
