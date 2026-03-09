@@ -9,6 +9,7 @@ from api.v1.schemas.search import SearchRequest, SearchResponse, ThreadDetail
 from api.v1.schemas.search.author import AuthorDetail
 from banner.banner_service import BannerService
 from collection.cog import CollectionCog
+from core.collection_service import CollectionService
 from config.config_service import ConfigService
 from core.cache_service import CacheService
 from search.cog import Search
@@ -216,7 +217,6 @@ async def execute_search(
                 exclude_thread_ids=exclude_thread_ids,
             )
 
-            # 当排序方法为按创建时间排序时，不记录展示次数。其它外的排序方法均记录展示次数。
             # 当排序方法为按创建时间或收藏时间排序时，不记录展示次数
             count_view = not (
                 query_object.sort_method in ["created_at", "collected_at"]
@@ -232,86 +232,85 @@ async def execute_search(
                     thread_ids_to_update
                 )
 
-        # 检查收藏状态
-        collected_thread_ids = set()
-        user_id = (
-            int(current_user["id"]) if current_user and "id" in current_user else None
-        )
-        if user_id and threads:
-            thread_ids = [t.thread_id for t in threads]
-            async with collection_cog_instance.get_collection_service() as service:
-                collected_thread_ids = await service.get_collected_target_ids(
+            # 检查收藏状态（复用同一 session）
+            collected_thread_ids = set()
+            user_id = (
+                int(current_user["id"]) if current_user and "id" in current_user else None
+            )
+            if user_id and threads:
+                thread_ids = [t.thread_id for t in threads]
+                collection_service = CollectionService(session)
+                collected_thread_ids = await collection_service.get_collected_target_ids(
                     user_id, CollectionType.THREAD, thread_ids
                 )
 
-        # 预计算 channel_id → 匹配的虚拟标签名（用于帖子卡片标签展示）
-        channel_to_virtual: dict[int, list[str]] = {}
-        if has_mapping and effective_channel_ids:
-            origin_ch = request.channel_ids[0] if request.channel_ids else None
-            for m in channel_mappings_config.get(origin_ch or 0, []):
-                for src_id in m.get("source_channel_ids", []):
-                    channel_to_virtual.setdefault(src_id, []).append(m["tag_name"])
+            # 预计算 channel_id → 匹配的虚拟标签名（用于帖子卡片标签展示）
+            channel_to_virtual: dict[int, list[str]] = {}
+            if has_mapping and effective_channel_ids:
+                origin_ch = request.channel_ids[0] if request.channel_ids else None
+                for m in channel_mappings_config.get(origin_ch or 0, []):
+                    for src_id in m.get("source_channel_ids", []):
+                        channel_to_virtual.setdefault(src_id, []).append(m["tag_name"])
 
-        results = []
-        for thread in threads:
-            matched_virtual = channel_to_virtual.get(thread.channel_id, [])
-            thread_detail = ThreadDetail(
-                thread_id=thread.thread_id,
-                guild_id=thread.guild_id,
-                channel_id=thread.channel_id,
-                title=thread.title,
-                author=AuthorDetail.model_validate(thread.author)
-                if thread.author
-                else None,
-                created_at=thread.created_at,
-                last_active_at=thread.last_active_at,
-                reaction_count=thread.reaction_count,
-                reply_count=thread.reply_count,
-                display_count=thread.display_count,
-                first_message_excerpt=thread.first_message_excerpt,
-                thumbnail_urls=thread.thumbnail_urls or [],
-                tags=[tag.name for tag in thread.tags],
-                virtual_tags=matched_virtual,
-                collected_flag=thread.thread_id in collected_thread_ids,
-            )
-            results.append(thread_detail)
-
-        # 构建 available_tags：虚拟标签置顶 + 实际被搜索频道的真实标签（去重）
-        available_tags: list[str] = []
-        virtual_tags: list[str] = []
-        target_channel_id = None
-        if request.channel_ids and len(request.channel_ids) == 1:
-            target_channel_id = request.channel_ids[0]
-            if cache_service_instance:
-                if has_mapping:
-                    mappings_for_tags = channel_mappings_config.get(
-                        target_channel_id, []
-                    )
-                    virtual_tags = [
-                        m["tag_name"] for m in mappings_for_tags
-                    ]
-
-                # 从实际搜索的频道集合聚合真实标签
-                real_tag_names: list[str] = []
-                seen_tag_names: set[str] = set()
-                channels_to_scan = (
-                    searched_channel_ids
-                    if searched_channel_ids
-                    else {target_channel_id}
+            results = []
+            for thread in threads:
+                matched_virtual = channel_to_virtual.get(thread.channel_id, [])
+                thread_detail = ThreadDetail(
+                    thread_id=thread.thread_id,
+                    guild_id=thread.guild_id,
+                    channel_id=thread.channel_id,
+                    title=thread.title,
+                    author=AuthorDetail.model_validate(thread.author)
+                    if thread.author
+                    else None,
+                    created_at=thread.created_at,
+                    last_active_at=thread.last_active_at,
+                    reaction_count=thread.reaction_count,
+                    reply_count=thread.reply_count,
+                    display_count=thread.display_count,
+                    first_message_excerpt=thread.first_message_excerpt,
+                    thumbnail_urls=thread.thumbnail_urls or [],
+                    tags=[tag.name for tag in thread.tags],
+                    virtual_tags=matched_virtual,
+                    collected_flag=thread.thread_id in collected_thread_ids,
                 )
-                all_channels_cache = cache_service_instance.get_indexed_channels()
-                for ch in all_channels_cache:
-                    if ch.id in channels_to_scan:
-                        for tag in ch.available_tags:
-                            if tag.name not in seen_tag_names:
-                                seen_tag_names.add(tag.name)
-                                real_tag_names.append(tag.name)
+                results.append(thread_detail)
 
-                available_tags = virtual_tags + real_tag_names
+            # 构建 available_tags：虚拟标签置顶 + 实际被搜索频道的真实标签（去重）
+            available_tags: list[str] = []
+            virtual_tags: list[str] = []
+            target_channel_id = None
+            if request.channel_ids and len(request.channel_ids) == 1:
+                target_channel_id = request.channel_ids[0]
+                if cache_service_instance:
+                    if has_mapping:
+                        mappings_for_tags = channel_mappings_config.get(
+                            target_channel_id, []
+                        )
+                        virtual_tags = [
+                            m["tag_name"] for m in mappings_for_tags
+                        ]
 
-        # 获取Banner轮播列表
-        banner_carousel = []
-        async with async_session_factory() as session:
+                    # 从实际搜索的频道集合聚合真实标签
+                    real_tag_names: list[str] = []
+                    seen_tag_names: set[str] = set()
+                    channels_to_scan = (
+                        searched_channel_ids
+                        if searched_channel_ids
+                        else {target_channel_id}
+                    )
+                    all_channels_cache = cache_service_instance.get_indexed_channels()
+                    for ch in all_channels_cache:
+                        if ch.id in channels_to_scan:
+                            for tag in ch.available_tags:
+                                if tag.name not in seen_tag_names:
+                                    seen_tag_names.add(tag.name)
+                                    real_tag_names.append(tag.name)
+
+                    available_tags = virtual_tags + real_tag_names
+
+            # 获取 Banner 轮播列表（复用同一 session）
+            banner_carousel = []
             banner_service = BannerService(session)
             banners = await banner_service.get_active_banners(
                 channel_id=target_channel_id
@@ -326,22 +325,16 @@ async def execute_search(
                 for banner in banners
             ]
 
-        # 读取未读更新数量
-        unread_count = 0
-        try:
-            user_id = (
-                int(current_user["id"])
-                if current_user and "id" in current_user
-                else None
-            )
-            if user_id is not None:
-                async with async_session_factory() as session:
+            # 读取未读更新数量（复用同一 session）
+            unread_count = 0
+            try:
+                if user_id is not None:
                     follow_service = FollowService(session)
                     unread_count = await follow_service.get_unread_count(
                         user_id=user_id
                     )
-        except Exception:
-            unread_count = 0
+            except Exception:
+                unread_count = 0
 
         return SearchResponse(
             total=total_threads,

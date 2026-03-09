@@ -753,7 +753,7 @@ const app = {
                             <!-- Content -->
                             <div class="p-3 md:p-4 flex flex-col flex-1 min-h-0 bg-[#202225]">
                                 <div class="flex flex-wrap gap-1 mb-2 flex-shrink-0">
-                                    ${(post.virtual_tags || []).map(t => `<span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/40">#${t}</span>`).join('')}${(post.tags || []).slice(0, 2).map(t => `<span class="text-[10px] bg-discord-sidebar text-discord-muted px-1.5 py-0.5 rounded border border-white/5">#${t}</span>`).join('')}
+                                    ${(post.virtual_tags || []).map(t => `<span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/40">#${t}</span>`).join('')}${(post.tags || []).map(t => `<span class="text-[10px] bg-discord-sidebar text-discord-muted px-1.5 py-0.5 rounded border border-white/5">#${t}</span>`).join('')}
                                 </div>
 
                                 <h3 class="text-white font-bold text-sm md:text-base leading-tight mb-2 line-clamp-2 group-hover:text-discord-primary transition-colors">
@@ -810,28 +810,39 @@ const app = {
 		}
 	},
 
-	async fetchAPI(endpoint, method, body) {
+	async fetchAPI(endpoint, method, body, signal) {
 		const h = { 'Content-Type': 'application/json' };
 		if (this.state.token) h['Authorization'] = `Bearer ${this.state.token}`;
 		try {
-			const r = await fetch(`${window.AUTH_URL}${endpoint}`, { method, headers: h, body: body ? JSON.stringify(body) : null });
+			const opts = { method, headers: h, body: body ? JSON.stringify(body) : null };
+			if (signal) opts.signal = signal;
+			const r = await fetch(`${window.AUTH_URL}${endpoint}`, opts);
 			if (r.status === 401) { this.logout(false); return null; }
 			if (r.status === 204) return null;
 			if (!r.ok) throw new Error(r.status);
 			return await r.json();
 		} catch (e) {
+			if (e.name === 'AbortError') return null;
 			return null;
 		}
 	},
 
+	_searchAbortController: null,
+
+	abortCurrentSearch() {
+		if (this._searchAbortController) {
+			this._searchAbortController.abort();
+			this._searchAbortController = null;
+		}
+	},
+
 	async executeSearch(reset = true) {
-		// 保存当前结果，以便请求失败时恢复
 		const previousResults = this.state.results;
 		const previousTotal = this.state.totalResults;
 		
 		if (reset) { this.state.results = []; }
 		this.state.isLoading = true;
-		this.renderResults(); // Render partial/loading state
+		this.renderResults();
 		const spinner = document.getElementById('loading-spinner');
 		if (spinner) spinner.classList.remove('hidden');
 
@@ -843,9 +854,13 @@ const app = {
 			if (spinner) spinner.classList.add('hidden');
 			this.renderResults();
 			if (window.innerWidth < 768) this.toggleSidebar(false);
-			if (reset) this.saveStateToUrl(); // 保存状态到 URL
+			if (reset) this.saveStateToUrl();
 			return;
 		}
+
+		this.abortCurrentSearch();
+		const controller = new AbortController();
+		this._searchAbortController = controller;
 
 		const excludeThreadIds = this.collectLoadedThreadIds();
 
@@ -866,7 +881,10 @@ const app = {
 			body.exclude_thread_ids = excludeThreadIds;
 		}
 
-		const data = await this.fetchAPI('/search', 'POST', body);
+		const data = await this.fetchAPI('/search', 'POST', body, controller.signal);
+
+		if (controller.signal.aborted) return;
+
 		if (data) {
 			const incomingResults = Array.isArray(data.results) ? data.results : [];
 			const existingIds = reset ? new Set() : new Set(this.state.results.map(post => String(post.thread_id)));
@@ -885,7 +903,6 @@ const app = {
 			this.state.virtualTags = data.virtual_tags || [];
 			if (reset && data.banner_carousel) this.state.banners = data.banner_carousel;
 		} else if (reset) {
-			// 请求失败时恢复原有结果
 			this.state.results = previousResults;
 			this.state.totalResults = previousTotal;
 		}
@@ -895,7 +912,7 @@ const app = {
 		if (this.state.view === 'search') { this.renderTags(); if (reset) this.renderBanner(); }
 		if (window.innerWidth < 768) this.toggleSidebar(false);
 		if (reset) this.saveStateToUrl();
-		this.saveBrowseState();
+		if (!this._resumePending) this.saveBrowseState();
 	},
 
 	loadMore() {
@@ -1115,63 +1132,106 @@ const app = {
 		}
 	},
 
+	_resumePending: false,
+	_resumeAutoCloseTimer: null,
+
 	tryResumeBrowse(channelId) {
 		const saved = this.loadBrowseState(channelId);
-		if (!saved) {
-			this.executeSearch();
-			return;
+		if (saved) {
+			this._resumePending = true;
+			this.showResumeToast(saved, channelId);
 		}
-		this.showResumePrompt(saved, channelId);
+		this.executeSearch();
 	},
 
-	showResumePrompt(savedState, channelId) {
+	dismissResumeToast(didRestore) {
+		clearTimeout(this._resumeAutoCloseTimer);
+		this._resumeAutoCloseTimer = null;
+		this._resumePending = false;
+		const el = document.getElementById('resume-toast');
+		if (el) {
+			el.classList.add('translate-y-full', 'opacity-0');
+			setTimeout(() => el.remove(), 300);
+		}
+		if (!didRestore) this.saveBrowseState();
+	},
+
+	showResumeToast(savedState, channelId) {
+		this.dismissResumeToast();
+		this._resumePending = true;
+
 		const count = savedState.results.length;
 		const total = savedState.totalResults;
 		const ago = this.formatTimeAgo(savedState.savedAt);
 
-		const existing = document.getElementById('resume-prompt-overlay');
-		if (existing) existing.remove();
+		const filters = [];
+		if (savedState.keywords) filters.push(savedState.keywords);
+		if (savedState.includedTags && savedState.includedTags.length) filters.push(savedState.includedTags.map(t => '#' + t).join(' '));
+		const filterText = filters.length ? `<span class="text-discord-muted"> · ${filters.join(' · ')}</span>` : '';
 
-		const overlay = document.createElement('div');
-		overlay.id = 'resume-prompt-overlay';
-		overlay.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] backdrop-blur-sm';
-		overlay.innerHTML = `
-			<div class="bg-discord-sidebar border border-white/10 rounded-xl p-6 max-w-sm w-[90%] shadow-2xl">
-				<h3 class="text-white font-bold text-base mb-2">继续浏览</h3>
-				<p class="text-discord-muted text-sm mb-4">
-					你在此分区上次浏览了 <span class="text-white font-medium">${count}</span> / ${total} 个结果（${ago}），是否从上次的位置继续？
-				</p>
-				<div class="flex gap-3">
-					<button id="resume-btn-yes" class="flex-1 bg-discord-primary hover:bg-discord-primary/80 text-white text-sm font-bold py-2 rounded-lg transition-colors">继续浏览</button>
-					<button id="resume-btn-no" class="flex-1 bg-discord-element hover:bg-discord-element/80 text-discord-muted text-sm font-bold py-2 rounded-lg transition-colors border border-white/10">重新开始</button>
+		const toast = document.createElement('div');
+		toast.id = 'resume-toast';
+		toast.className = 'fixed z-[9999] transition-all duration-300 translate-y-full opacity-0 bottom-4 right-4 max-md:right-2 max-md:left-2 max-md:right-2';
+		toast.innerHTML = `
+			<div class="bg-discord-sidebar/95 backdrop-blur-md border border-white/10 rounded-xl p-4 shadow-2xl max-w-xs max-md:max-w-none">
+				<div class="flex items-start gap-3">
+					<div class="flex-1 min-w-0">
+						<p class="text-white text-sm font-medium mb-1">上次浏览了 ${count}/${total} 个结果<span class="text-discord-muted text-xs">（${ago}）</span></p>
+						<p class="text-discord-muted text-xs truncate">${filterText ? '条件:' + filterText : '从上次的位置继续？'}</p>
+					</div>
+					<button onclick="app.dismissResumeToast()" class="text-discord-muted hover:text-white flex-shrink-0 mt-0.5">
+						<span class="material-symbols-outlined text-base">close</span>
+					</button>
+				</div>
+				<div class="flex gap-2 mt-3">
+					<button id="resume-btn-yes" class="flex-1 bg-discord-primary hover:bg-discord-primary/80 text-white text-xs font-bold py-1.5 rounded-lg transition-colors">恢复</button>
+					<button id="resume-btn-no" class="flex-1 bg-discord-element hover:bg-discord-element/80 text-discord-muted text-xs font-bold py-1.5 rounded-lg transition-colors border border-white/10">忽略</button>
 				</div>
 			</div>`;
-		document.body.appendChild(overlay);
+		document.body.appendChild(toast);
+
+		requestAnimationFrame(() => {
+			toast.classList.remove('translate-y-full', 'opacity-0');
+		});
+
+		this._resumeAutoCloseTimer = setTimeout(() => {
+			this.dismissResumeToast();
+		}, 15000);
 
 		document.getElementById('resume-btn-yes').onclick = () => {
-			overlay.remove();
+			this.dismissResumeToast(true);
 			this.restoreBrowseState(savedState);
 		};
 		document.getElementById('resume-btn-no').onclick = () => {
-			overlay.remove();
+			this.dismissResumeToast();
 			this.clearBrowseState(channelId);
-			this.executeSearch();
 		};
-		overlay.addEventListener('click', (e) => {
-			if (e.target === overlay) {
-				overlay.remove();
-				this.clearBrowseState(channelId);
-				this.executeSearch();
-			}
-		});
 	},
 
 	restoreBrowseState(saved) {
+		this.abortCurrentSearch();
+
 		this.state.results = saved.results;
 		this.state.totalResults = saved.totalResults;
 		this.state.availableTags = saved.availableTags || [];
 		this.state.virtualTags = saved.virtualTags || [];
 		if (saved.banners) this.state.banners = saved.banners;
+
+		this.state.includedTags = new Set(saved.includedTags || []);
+		this.state.excludedTags = new Set(saved.excludedTags || []);
+		this.state.tagLogic = saved.tagLogic || 'and';
+		this.state.sortOrder = saved.sortOrder || 'desc';
+		const searchInput = document.getElementById('search-input');
+		if (searchInput) searchInput.value = saved.keywords || '';
+		const sortMethod = document.getElementById('sort-method');
+		if (sortMethod) sortMethod.value = saved.sortMethod || 'comprehensive';
+		const dateStart = document.getElementById('date-start');
+		if (dateStart) dateStart.value = saved.dateStart || '';
+		const dateEnd = document.getElementById('date-end');
+		if (dateEnd) dateEnd.value = saved.dateEnd || '';
+		this.updateSortOrderIcon();
+
+		this.state.isLoading = false;
 		this.renderResults();
 		this.renderTags();
 		this.renderBanner();
@@ -1773,6 +1833,14 @@ const app = {
 			availableTags: this.state.availableTags,
 			virtualTags: this.state.virtualTags,
 			banners: this.state.banners,
+			keywords: document.getElementById('search-input')?.value || '',
+			includedTags: Array.from(this.state.includedTags),
+			excludedTags: Array.from(this.state.excludedTags),
+			tagLogic: this.state.tagLogic,
+			sortMethod: document.getElementById('sort-method')?.value || 'comprehensive',
+			sortOrder: this.state.sortOrder,
+			dateStart: document.getElementById('date-start')?.value || '',
+			dateEnd: document.getElementById('date-end')?.value || '',
 			savedAt: Date.now(),
 		};
 		try {

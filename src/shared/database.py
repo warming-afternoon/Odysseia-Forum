@@ -11,7 +11,15 @@ from shared.fts5_tokenizer import register_jieba_tokenizer
 DB_PATH = "data/database.db"
 DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 
-async_engine = create_async_engine(DATABASE_URL, echo=False)
+async_engine = create_async_engine(
+    DATABASE_URL,
+    echo=False,
+    pool_size=20,
+    max_overflow=40,
+    pool_timeout=60,
+    pool_pre_ping=True,
+    pool_recycle=1800,
+)
 
 metadata_obj = MetaData()
 thread_fts_table = Table(
