@@ -26,6 +26,9 @@ class ThreadDetail(BaseModel):
         default_factory=list, description="帖子首楼图片 URL 列表（按出现顺序）"
     )
     tags: List[str] = Field(description="帖子关联的标签列表")
+    virtual_tags: List[str] = Field(
+        default_factory=list, description="帖子匹配的虚拟映射标签名列表"
+    )
     collected_flag: bool = Field(default=False, description="当前用户是否收藏了此帖")
 
     @field_serializer("thread_id", "guild_id", "channel_id")

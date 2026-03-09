@@ -244,9 +244,17 @@ async def execute_search(
                     user_id, CollectionType.THREAD, thread_ids
                 )
 
+        # 预计算 channel_id → 匹配的虚拟标签名（用于帖子卡片标签展示）
+        channel_to_virtual: dict[int, list[str]] = {}
+        if has_mapping and effective_channel_ids:
+            origin_ch = request.channel_ids[0] if request.channel_ids else None
+            for m in channel_mappings_config.get(origin_ch or 0, []):
+                for src_id in m.get("source_channel_ids", []):
+                    channel_to_virtual.setdefault(src_id, []).append(m["tag_name"])
+
         results = []
         for thread in threads:
-            # 手动创建 ThreadDetail 对象，确保字段正确映射
+            matched_virtual = channel_to_virtual.get(thread.channel_id, [])
             thread_detail = ThreadDetail(
                 thread_id=thread.thread_id,
                 guild_id=thread.guild_id,
@@ -263,6 +271,7 @@ async def execute_search(
                 first_message_excerpt=thread.first_message_excerpt,
                 thumbnail_urls=thread.thumbnail_urls or [],
                 tags=[tag.name for tag in thread.tags],
+                virtual_tags=matched_virtual,
                 collected_flag=thread.thread_id in collected_thread_ids,
             )
             results.append(thread_detail)

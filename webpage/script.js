@@ -526,7 +526,7 @@ const app = {
 			this.redirectToLogin();
 			return;
 		}
-		this.executeSearch();
+		this.tryResumeBrowse(this.state.channelId);
 		window.addEventListener('resize', () => { if (window.innerWidth >= 768) this.toggleSidebar(false); });
 		window.addEventListener('popstate', () => {
 			this.loadStateFromUrl();
@@ -630,7 +630,7 @@ const app = {
                     <!-- 2. Scrollable Content -->
                     <div class="content-scroll-area">
                         <div class="flex flex-wrap gap-1.5 mb-3">
-                             ${(post.tags || []).map(t => `<span class="text-[10px] bg-discord-sidebar text-discord-muted px-2 py-1 rounded border border-white/5">#${t}</span>`).join('')}
+                             ${(post.virtual_tags || []).map(t => `<span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-2 py-1 rounded border border-indigo-500/40">#${t}</span>`).join('')}${(post.tags || []).map(t => `<span class="text-[10px] bg-discord-sidebar text-discord-muted px-2 py-1 rounded border border-white/5">#${t}</span>`).join('')}
                         </div>
                         <h3 class="text-white font-bold text-lg mb-3 leading-snug">${post.title}</h3>
                         <div class="md-content text-sm text-gray-300 mb-6">
@@ -753,7 +753,7 @@ const app = {
                             <!-- Content -->
                             <div class="p-3 md:p-4 flex flex-col flex-1 min-h-0 bg-[#202225]">
                                 <div class="flex flex-wrap gap-1 mb-2 flex-shrink-0">
-                                    ${(post.tags || []).slice(0, 2).map(t => `<span class="text-[10px] bg-discord-sidebar text-discord-muted px-1.5 py-0.5 rounded border border-white/5">#${t}</span>`).join('')}
+                                    ${(post.virtual_tags || []).map(t => `<span class="text-[10px] bg-indigo-500/15 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-500/40">#${t}</span>`).join('')}${(post.tags || []).slice(0, 2).map(t => `<span class="text-[10px] bg-discord-sidebar text-discord-muted px-1.5 py-0.5 rounded border border-white/5">#${t}</span>`).join('')}
                                 </div>
 
                                 <h3 class="text-white font-bold text-sm md:text-base leading-tight mb-2 line-clamp-2 group-hover:text-discord-primary transition-colors">
@@ -894,7 +894,8 @@ const app = {
 		this.renderResults();
 		if (this.state.view === 'search') { this.renderTags(); if (reset) this.renderBanner(); }
 		if (window.innerWidth < 768) this.toggleSidebar(false);
-		if (reset) this.saveStateToUrl(); // 保存状态到 URL
+		if (reset) this.saveStateToUrl();
+		this.saveBrowseState();
 	},
 
 	loadMore() {
@@ -998,7 +999,7 @@ const app = {
 			} else {
 				cls = "bg-discord-element border border-transparent text-discord-muted hover:border-gray-500";
 			}
-			const prefix = isVirtual ? '📌 ' : '#';
+			const prefix = '#';
 			const safeTag = t.replace(/'/g, "\\'");
 			return `<button onclick="app.handleTagClick('${safeTag}')" class="tag-pill text-xs px-2 py-1 rounded flex items-center gap-1 ${cls}">${icon ? `<span class="material-symbols-outlined text-[12px]">${icon}</span>` : ''}${prefix}${t}</button>`;
 		}).join('');
@@ -1110,8 +1111,87 @@ const app = {
 			this.renderResults();
 			this.saveStateToUrl();
 		} else {
-			this.executeSearch();
+			this.tryResumeBrowse(this.state.channelId);
 		}
+	},
+
+	tryResumeBrowse(channelId) {
+		const saved = this.loadBrowseState(channelId);
+		if (!saved) {
+			this.executeSearch();
+			return;
+		}
+		this.showResumePrompt(saved, channelId);
+	},
+
+	showResumePrompt(savedState, channelId) {
+		const count = savedState.results.length;
+		const total = savedState.totalResults;
+		const ago = this.formatTimeAgo(savedState.savedAt);
+
+		const existing = document.getElementById('resume-prompt-overlay');
+		if (existing) existing.remove();
+
+		const overlay = document.createElement('div');
+		overlay.id = 'resume-prompt-overlay';
+		overlay.className = 'fixed inset-0 bg-black/60 flex items-center justify-center z-[9999] backdrop-blur-sm';
+		overlay.innerHTML = `
+			<div class="bg-discord-sidebar border border-white/10 rounded-xl p-6 max-w-sm w-[90%] shadow-2xl">
+				<h3 class="text-white font-bold text-base mb-2">继续浏览</h3>
+				<p class="text-discord-muted text-sm mb-4">
+					你在此分区上次浏览了 <span class="text-white font-medium">${count}</span> / ${total} 个结果（${ago}），是否从上次的位置继续？
+				</p>
+				<div class="flex gap-3">
+					<button id="resume-btn-yes" class="flex-1 bg-discord-primary hover:bg-discord-primary/80 text-white text-sm font-bold py-2 rounded-lg transition-colors">继续浏览</button>
+					<button id="resume-btn-no" class="flex-1 bg-discord-element hover:bg-discord-element/80 text-discord-muted text-sm font-bold py-2 rounded-lg transition-colors border border-white/10">重新开始</button>
+				</div>
+			</div>`;
+		document.body.appendChild(overlay);
+
+		document.getElementById('resume-btn-yes').onclick = () => {
+			overlay.remove();
+			this.restoreBrowseState(savedState);
+		};
+		document.getElementById('resume-btn-no').onclick = () => {
+			overlay.remove();
+			this.clearBrowseState(channelId);
+			this.executeSearch();
+		};
+		overlay.addEventListener('click', (e) => {
+			if (e.target === overlay) {
+				overlay.remove();
+				this.clearBrowseState(channelId);
+				this.executeSearch();
+			}
+		});
+	},
+
+	restoreBrowseState(saved) {
+		this.state.results = saved.results;
+		this.state.totalResults = saved.totalResults;
+		this.state.availableTags = saved.availableTags || [];
+		this.state.virtualTags = saved.virtualTags || [];
+		if (saved.banners) this.state.banners = saved.banners;
+		this.renderResults();
+		this.renderTags();
+		this.renderBanner();
+		this.saveStateToUrl();
+
+		requestAnimationFrame(() => {
+			const container = document.getElementById('results-container');
+			if (container) container.scrollTop = container.scrollHeight;
+		});
+	},
+
+	formatTimeAgo(timestamp) {
+		const diff = Date.now() - timestamp;
+		const minutes = Math.floor(diff / 60000);
+		if (minutes < 1) return '刚刚';
+		if (minutes < 60) return `${minutes} 分钟前`;
+		const hours = Math.floor(minutes / 60);
+		if (hours < 24) return `${hours} 小时前`;
+		const days = Math.floor(hours / 24);
+		return `${days} 天前`;
 	},
 
 	renderUserArea() {
@@ -1676,6 +1756,48 @@ const app = {
 			ids.add(normalized);
 		});
 		return Array.from(ids);
+	},
+
+	_browseStateKey(channelId) {
+		return `browse_state_${channelId || 'global'}`;
+	},
+
+	saveBrowseState() {
+		if (this.state.view !== 'search') return;
+		const results = this.state.results;
+		if (!results || !results.length) return;
+		const key = this._browseStateKey(this.state.channelId);
+		const payload = {
+			results: results,
+			totalResults: this.state.totalResults,
+			availableTags: this.state.availableTags,
+			virtualTags: this.state.virtualTags,
+			banners: this.state.banners,
+			savedAt: Date.now(),
+		};
+		try {
+			localStorage.setItem(key, JSON.stringify(payload));
+		} catch (_) { /* quota exceeded — silently ignore */ }
+	},
+
+	loadBrowseState(channelId) {
+		const key = this._browseStateKey(channelId);
+		try {
+			const raw = localStorage.getItem(key);
+			if (!raw) return null;
+			const data = JSON.parse(raw);
+			if (!data.results || !data.results.length) return null;
+			const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+			if (Date.now() - (data.savedAt || 0) > MAX_AGE_MS) {
+				localStorage.removeItem(key);
+				return null;
+			}
+			return data;
+		} catch (_) { return null; }
+	},
+
+	clearBrowseState(channelId) {
+		localStorage.removeItem(this._browseStateKey(channelId));
 	},
 
 	getMockData() {
