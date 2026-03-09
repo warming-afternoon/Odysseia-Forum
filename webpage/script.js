@@ -1237,9 +1237,12 @@ const app = {
 		this.renderBanner();
 		this.saveStateToUrl();
 
-		requestAnimationFrame(() => {
-			const container = document.getElementById('results-container');
+		const scrollToBottom = () => {
+			const container = document.getElementById('content-scroll');
 			if (container) container.scrollTop = container.scrollHeight;
+		};
+		requestAnimationFrame(() => {
+			requestAnimationFrame(scrollToBottom);
 		});
 	},
 
