@@ -295,21 +295,28 @@ class SearchService:
                 and_groups = [
                     group.strip() for group in keywords_str.split(",") if group.strip()
                 ]
+                loop = asyncio.get_running_loop()
                 for group in and_groups:
                     or_keywords = []
                     for kw in group.split("/"):
                         kw = kw.strip()
                         if not kw:
                             continue
-                        # 检查是否是精确匹配（用引号包围）
                         if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
-                            # 精确匹配：移除引号，不添加*前缀
                             exact_kw = kw[1:-1].strip()
                             if exact_kw:
                                 or_keywords.append(f'"{exact_kw}"')
                         else:
-                            # 普通关键词：添加*前缀匹配
-                            or_keywords.append(f"{kw}*")
+                            # 先分词，再对每个词元做前缀匹配
+                            raw_tokens = await loop.run_in_executor(
+                                None, partial(rjieba.cut, kw)
+                            )
+                            tokens = [t.strip() for t in raw_tokens if t.strip()]
+                            if tokens:
+                                expr = " ".join(f"{t}*" for t in tokens)
+                                or_keywords.append(
+                                    f"({expr})" if len(tokens) > 1 else expr
+                                )
 
                     if or_keywords:
                         filters.append(
@@ -322,18 +329,18 @@ class SearchService:
             if filters:
                 base_stmt = base_stmt.where(and_(*filters))
 
-            # --- 步骤 4: 计数 ---
-            count_stmt = select(func.count()).select_from(base_stmt.alias("sub"))
-            count_result = await self.session.execute(count_stmt)
-            total_count = count_result.scalar_one_or_none() or 0
+            # --- 步骤 4: 一次性执行 ID 查询（FTS MATCH 只跑一次）---
+            id_result = await self.session.execute(base_stmt)
+            matched_ids = list(id_result.scalars().all())
+            total_count = len(matched_ids)
 
             if total_count == 0:
                 return [], 0
 
-            # --- 步骤 5: 获取分页数据和排序 ---
+            # --- 步骤 5: 用具体 ID 列表获取分页数据（无嵌套子查询）---
             final_select_stmt = (
                 select(Thread)
-                .where(Thread.id.in_(base_stmt))  # type: ignore
+                .where(Thread.id.in_(matched_ids))  # type: ignore
                 .options(
                     selectinload(Thread.tags),  # type: ignore
                     joinedload(Thread.author),  # type: ignore
