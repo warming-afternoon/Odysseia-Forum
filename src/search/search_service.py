@@ -207,7 +207,11 @@ class SearchService:
                     ~Thread.tags.any(Tag.id.in_(resolved_exclude_tag_ids))  # type: ignore
                 )
 
-            # --- 步骤 2: 单独处理反选关键词 ---
+            # --- 步骤 2: 独立执行 FTS 查询，拿到匹配/排除的 ID 集合 ---
+            loop = asyncio.get_running_loop()
+
+            # 2a. 反选关键词 → 获取要排除的 thread ID
+            fts_exclude_ids: set[int] = set()
             if query.exclude_keywords:
                 exemption_markers = (
                     query.exclude_keyword_exemption_markers
@@ -221,7 +225,6 @@ class SearchService:
                 ]
 
                 all_exclude_parts = []
-                loop = asyncio.get_running_loop()
                 for keyword in exclude_keywords_list:
                     raw_tokens = await loop.run_in_executor(
                         None, partial(rjieba.cut, keyword)
@@ -230,72 +233,43 @@ class SearchService:
                     if not tokens:
                         continue
 
-                    # 构建匹配部分
                     match_parts = [f'"{tok}"' for tok in tokens[:-1]]
-                    match_parts.append(f'"{tokens[-1]}"*')  # 最后一个词元加前缀
+                    match_parts.append(f'"{tokens[-1]}"*')
                     match_expr = " AND ".join(match_parts)
 
-                    # 只有在豁免标记列表非空时才构建豁免逻辑
                     if exemption_markers:
-                        # 只用关键词的第一个分词来检查豁免
-                        # 以避免 NEAR 操作符和前缀（*）的兼容性问题
                         first_token = tokens[0]
                         exemption_clauses = [
-                            f'NEAR("{first_token}" "{marker}", 4)'  # 也可以适当减小距离
+                            f'NEAR("{first_token}" "{marker}", 4)'
                             for marker in exemption_markers
                         ]
                         exemption_match_str = f"({' OR '.join(exemption_clauses)})"
-
-                        # 构建带有 NOT 的 FTS 表达式
                         all_exclude_parts.append(
                             f"({match_expr}) NOT {exemption_match_str}"
                         )
                     else:
-                        # 如果没有豁免标记，直接排除关键词
                         all_exclude_parts.append(f"({match_expr})")
 
                 if all_exclude_parts:
                     final_exclude_expr = " OR ".join(all_exclude_parts)
-                    # 创建一个子查询，专门用于找出要排除的 thread ID
-                    exclude_ids_subquery = select(thread_fts_table.c.rowid).where(
-                        thread_fts_table.c.thread_fts.op("MATCH")(final_exclude_expr)
+                    exc_result = await self.session.execute(
+                        select(thread_fts_table.c.rowid).where(
+                            thread_fts_table.c.thread_fts.op("MATCH")(
+                                final_exclude_expr
+                            )
+                        )
                     )
-                    # 将排除逻辑添加到主过滤器中
-                    filters.append(Thread.id.not_in(exclude_ids_subquery))  # type: ignore
+                    fts_exclude_ids = set(exc_result.scalars().all())
 
-            # --- 步骤 3: 组合正选关键词和其他过滤器 ---
-            base_stmt = select(Thread.id).distinct()
-
-            if query.user_id_for_collection_search:
-                # 如果是收藏搜索，则必须 JOIN user_collection 表（帖子类型）
-                from shared.enum.collection_type import CollectionType
-
-                base_stmt = base_stmt.join(
-                    UserCollection,
-                    and_(
-                        Thread.thread_id == UserCollection.target_id,
-                        UserCollection.target_type == CollectionType.THREAD,
-                    ),  # type: ignore
-                )
-                # 并将用户ID作为首要过滤条件
-                filters.append(
-                    UserCollection.user_id == query.user_id_for_collection_search
-                )
-
-            needs_fts_join = query.keywords  # 只在有正选关键词时才需要JOIN
-            if needs_fts_join:
-                base_stmt = base_stmt.join(
-                    thread_fts_table,
-                    Thread.id == thread_fts_table.c.rowid,  # type: ignore
-                )
-
-            # -- 正选关键词 --
+            # 2b. 正选关键词 → 获取匹配的 thread ID（多组取交集）
+            fts_include_ids: set[int] | None = None
             if query.keywords:
                 keywords_str = query.keywords.replace("，", ",").replace("／", "/")
                 and_groups = [
-                    group.strip() for group in keywords_str.split(",") if group.strip()
+                    group.strip()
+                    for group in keywords_str.split(",")
+                    if group.strip()
                 ]
-                loop = asyncio.get_running_loop()
                 for group in and_groups:
                     or_keywords = []
                     for kw in group.split("/"):
@@ -307,7 +281,6 @@ class SearchService:
                             if exact_kw:
                                 or_keywords.append(f'"{exact_kw}"')
                         else:
-                            # 先分词，再对每个词元做前缀匹配
                             raw_tokens = await loop.run_in_executor(
                                 None, partial(rjieba.cut, kw)
                             )
@@ -319,11 +292,46 @@ class SearchService:
                                 )
 
                     if or_keywords:
-                        filters.append(
-                            thread_fts_table.c.thread_fts.op("MATCH")(
-                                " OR ".join(or_keywords)
+                        match_str = " OR ".join(or_keywords)
+                        grp_result = await self.session.execute(
+                            select(thread_fts_table.c.rowid).where(
+                                thread_fts_table.c.thread_fts.op("MATCH")(match_str)
                             )
                         )
+                        group_ids = set(grp_result.scalars().all())
+                        if fts_include_ids is None:
+                            fts_include_ids = group_ids
+                        else:
+                            fts_include_ids &= group_ids
+
+                if fts_include_ids is not None and not fts_include_ids:
+                    return [], 0
+
+            # 2c. 合并 FTS 结果到过滤器（纯 ID 集合，不再 JOIN thread_fts）
+            if fts_include_ids is not None:
+                final_fts_ids = fts_include_ids - fts_exclude_ids
+                if not final_fts_ids:
+                    return [], 0
+                filters.append(Thread.id.in_(final_fts_ids))  # type: ignore
+            elif fts_exclude_ids:
+                filters.append(Thread.id.not_in(fts_exclude_ids))  # type: ignore
+
+            # --- 步骤 3: 组合其他过滤器（不再 JOIN thread_fts）---
+            base_stmt = select(Thread.id).distinct()
+
+            if query.user_id_for_collection_search:
+                from shared.enum.collection_type import CollectionType
+
+                base_stmt = base_stmt.join(
+                    UserCollection,
+                    and_(
+                        Thread.thread_id == UserCollection.target_id,
+                        UserCollection.target_type == CollectionType.THREAD,
+                    ),  # type: ignore
+                )
+                filters.append(
+                    UserCollection.user_id == query.user_id_for_collection_search
+                )
 
             # 应用所有过滤器
             if filters:
