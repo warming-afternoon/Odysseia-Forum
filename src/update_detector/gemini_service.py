@@ -65,11 +65,12 @@ class GeminiService:
 
         try:
             chunks: list[str] = []
-            async for chunk in self._client.aio.models.generate_content_stream(
+            stream = await self._client.aio.models.generate_content_stream(
                 model=self._model,
                 contents=user_content,
                 config=config,
-            ):
+            )
+            async for chunk in stream:
                 if chunk.text:
                     chunks.append(chunk.text)
             result_text = "".join(chunks).strip().upper()
