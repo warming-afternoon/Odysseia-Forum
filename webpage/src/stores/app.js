@@ -271,6 +271,9 @@ export const useAppStore = defineStore('app', () => {
 
     const order = sortOrder.value === 'asc' ? 'asc' : 'desc'
     filtered.sort((a, b) => {
+      const ua = a.has_update ? 1 : 0
+      const ub = b.has_update ? 1 : 0
+      if (ua !== ub) return ub - ua
       const va = getFollowSortValue(a, sortMethod.value)
       const vb = getFollowSortValue(b, sortMethod.value)
       return order === 'asc' ? va - vb : vb - va
