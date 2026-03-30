@@ -11,7 +11,7 @@
       >NEW</span>
 
       <!-- Image area -->
-      <div v-if="hasImages" class="card-image-container overflow-hidden">
+      <div v-if="hasImages && !store.dataSaver" class="card-image-container overflow-hidden">
         <MultiImageGrid :images="post.thumbnail_urls" :thread-id="String(post.thread_id)" :channel-id="String(post.channel_id || '')" />
       </div>
 
@@ -39,7 +39,7 @@
         <!-- Excerpt -->
         <div
           class="md-content text-xs text-discord-muted mb-2 flex-1"
-          :class="hasImages ? 'line-clamp-3' : 'line-clamp-8'"
+          :class="(hasImages && !store.dataSaver) ? 'line-clamp-3' : 'line-clamp-8'"
           v-html="parsedExcerpt"
         />
 

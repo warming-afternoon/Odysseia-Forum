@@ -21,7 +21,7 @@
             </button>
 
             <!-- Image -->
-            <div class="detail-carousel-container w-full relative flex-shrink-0 border-b border-white/10">
+            <div v-if="!store.dataSaver" class="detail-carousel-container w-full relative flex-shrink-0 border-b border-white/10">
               <ImageCarousel
                 :images="store.detailPost.thumbnail_urls"
                 :contain="true"

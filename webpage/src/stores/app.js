@@ -61,6 +61,13 @@ export const useAppStore = defineStore('app', () => {
   // Search abort
   let searchAbortController = null
 
+  // Data saver mode
+  const dataSaver = ref(localStorage.getItem('data_saver') === '1')
+  function toggleDataSaver() {
+    dataSaver.value = !dataSaver.value
+    localStorage.setItem('data_saver', dataSaver.value ? '1' : '0')
+  }
+
   // Image recovery
   const failedImages = ref(new Map())
   let imageRefreshTimer = null
@@ -559,9 +566,10 @@ export const useAppStore = defineStore('app', () => {
     toastMessage, toastVisible,
     resumeData, resumeVisible,
     scrollToBottomFlag,
+    dataSaver,
     failedImages,
 
-    showToast, openDetail, closeDetail, toggleSidebar,
+    showToast, openDetail, closeDetail, toggleSidebar, toggleDataSaver,
     executeSearch, loadMore, applyFollowFilters,
     refreshUnreadCount, markFollowsViewedAction, removeFollowAction,
     resetFollowState, switchView, selectChannel,

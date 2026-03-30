@@ -64,6 +64,19 @@
             {{ store.sortOrder === 'asc' ? 'arrow_upward' : 'arrow_downward' }}
           </span>
         </button>
+
+        <div class="w-px h-5 bg-white/10 flex-shrink-0" />
+
+        <button
+          class="p-2 rounded-lg transition-colors flex-shrink-0"
+          :class="store.dataSaver ? 'bg-discord-primary/20 text-discord-primary' : 'text-discord-muted hover:text-white hover:bg-white/10'"
+          :title="store.dataSaver ? '省流模式：已开启' : '省流模式：已关闭'"
+          @click="store.toggleDataSaver()"
+        >
+          <span class="material-symbols-outlined text-[18px]">
+            {{ store.dataSaver ? 'image_not_supported' : 'image' }}
+          </span>
+        </button>
       </div>
     </div>
   </header>
