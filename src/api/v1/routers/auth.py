@@ -183,9 +183,36 @@ async def callback(code: Optional[str] = None):
             return RedirectResponse(url=error_url, status_code=302)
 
 
+def _get_dev_redirect_uri() -> str:
+    """将配置中的 redirect_uri 从 /callback 替换为 /callback-dev"""
+    base = _AUTH_CONFIG["redirect_uri"]
+    if base.endswith("/callback"):
+        return base + "-dev"
+    return base.rstrip("/") + "-dev"
+
+
+@router.get("/login-dev", summary="Discord OAuth2 登录入口 (开发用)")
+async def login_dev():
+    """重定向到 Discord OAuth2 授权页面，回调指向 callback-dev"""
+    if not _AUTH_CONFIG:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="认证服务未初始化"
+        )
+
+    params = {
+        "client_id": _AUTH_CONFIG["client_id"],
+        "redirect_uri": _get_dev_redirect_uri(),
+        "response_type": "code",
+        "scope": "identify",
+    }
+
+    auth_url = f"https://discord.com/api/oauth2/authorize?{urlencode(params)}"
+    return RedirectResponse(url=auth_url, status_code=302)
+
+
 @router.get("/callback-dev", summary="Discord OAuth2 回调 (开发用)")
 async def callback_dev(code: Optional[str] = None):
-    """处理 Discord OAuth2 回调，直接返回 token JSON 而非重定向"""
+    """处理 Discord OAuth2 回调，直接返回 token HTML 页面而非重定向"""
     if not _AUTH_CONFIG:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="认证服务未初始化"
@@ -202,7 +229,7 @@ async def callback_dev(code: Optional[str] = None):
             "client_secret": _AUTH_CONFIG["client_secret"],
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": _AUTH_CONFIG["redirect_uri"],
+            "redirect_uri": _get_dev_redirect_uri(),
         }
 
         try:
