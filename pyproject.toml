@@ -21,6 +21,7 @@ dependencies = [
     "uvicorn[standard]",
     "uvloop; platform_system != 'Windows'",
     "httpx",
+    "google-genai",
 ]
 
 [project.optional-dependencies]

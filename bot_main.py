@@ -32,6 +32,7 @@ from config.cog import Configuration
 from banner.cog import BannerManagement
 from config.config_service import ConfigService
 from collection.cog import CollectionCog
+from update_detector.cog import UpdateDetector
 from shared.api_scheduler import APIScheduler
 from api.v1.routers import (
     preferences as preferences_api,
@@ -204,6 +205,12 @@ class MyBot(commands.Bot):
             CollectionCog(
                 bot=self,
                 session_factory=AsyncSessionFactory,
+            ),
+            UpdateDetector(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                config=self.config,
+                cache_service=self.cache_service,
             ),
         ]
         await asyncio.gather(
