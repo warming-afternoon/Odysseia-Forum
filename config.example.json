@@ -91,6 +91,9 @@
     "gemini_base_url": "",
     "_comment_gemini_base_url": "Gemini API 地址，留空使用官方默认地址。可填写代理地址，例如 https://your-proxy.com/v1beta",
 
+    "gemini_model": "gemini-2.0-flash",
+    "_comment_gemini_model": "Gemini 模型名称，可自行修改为代理支持的模型名",
+
     "prompt_message": "检测到您可能发布了作品的新版本，是否将其同步到索引页？",
     "_comment_prompt_message": "发送给用户的提醒消息内容，可自定义",
 

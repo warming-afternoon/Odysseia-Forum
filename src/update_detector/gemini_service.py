@@ -57,17 +57,22 @@ class GeminiService:
         if attachment_filenames:
             user_content += f"\n\n附件文件名：{', '.join(attachment_filenames)}"
 
+        config = types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0.1,
+            max_output_tokens=10,
+        )
+
         try:
-            response = await self._client.aio.models.generate_content(
+            chunks: list[str] = []
+            async for chunk in self._client.aio.models.generate_content_stream(
                 model=self._model,
                 contents=user_content,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_PROMPT,
-                    temperature=0.1,
-                    max_output_tokens=10,
-                ),
-            )
-            result_text = (response.text or "").strip().upper()
+                config=config,
+            ):
+                if chunk.text:
+                    chunks.append(chunk.text)
+            result_text = "".join(chunks).strip().upper()
             return result_text == "YES"
         except Exception:
             logger.error("Gemini API 调用失败", exc_info=True)
