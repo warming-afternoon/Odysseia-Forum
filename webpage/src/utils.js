@@ -32,7 +32,12 @@ export function parseMarkdown(text, expanded = false) {
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\[(.*?)\]\((.*?)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
-    .replace(/\n/g, '<br>')
+  // Auto-link bare URLs that aren't already inside an href=""
+  html = html.replace(
+    /(?<!href="|href=&quot;)(https?:\/\/[^\s<)"]+)/g,
+    '<a href="$1" target="_blank" rel="noopener">$1</a>'
+  )
+  html = html.replace(/\n/g, '<br>')
   if (expanded) {
     html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>').replace(/^## (.*$)/gim, '<h2>$1</h2>')
   }

@@ -300,7 +300,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 .card-inner:hover {
@@ -310,7 +310,6 @@
 }
 
 .card-image-container {
-  width: 100%;
   aspect-ratio: 16 / 9;
   background-color: #18191c;
   flex-shrink: 0;
@@ -318,6 +317,37 @@
 }
 @media (min-width: 768px) {
   .card-image-container { max-height: unset; }
+}
+
+/* Unified content area for both image & no-image cards */
+.card-content-area {
+  aspect-ratio: 5 / 4;
+  background-color: #2b2d31;
+}
+
+/* Desktop hover: show excerpt overlay, hide tags, expand no-image text */
+@media (hover: hover) and (pointer: fine) {
+  .card-wrapper:hover .card-excerpt-overlay {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+  }
+  .card-wrapper:hover .card-tags-strip {
+    opacity: 0 !important;
+  }
+  .card-wrapper:hover .card-noimg-excerpt.line-clamp-10 {
+    -webkit-line-clamp: unset;
+    display: block;
+    overflow-y: auto;
+  }
+}
+
+/* Mobile tap: show excerpt overlay, hide tags */
+.card-wrapper.is-revealed .card-excerpt-overlay {
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+.card-wrapper.is-revealed .card-tags-strip {
+  opacity: 0 !important;
 }
 
 /* Card enter transition */
@@ -596,7 +626,13 @@
 /* ============================================
    Markdown
    ============================================ */
-.md-content { font-size: 0.9rem; line-height: 1.6; color: #dcddde; }
+.md-content {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #dcddde;
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
 .md-content h1,
 .md-content h2,
 .md-content h3 { font-weight: 700; color: white; margin: 0.5em 0 0.3em; }
@@ -611,8 +647,15 @@
   color: #eee;
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
-.md-content a { color: #00b0f4; text-decoration: none; }
-.md-content a:hover { text-decoration: underline; }
+.md-content a {
+  color: #00b0f4;
+  text-decoration: none;
+  pointer-events: auto;
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+}
+.md-content a:hover { text-decoration: underline; color: #3dc1f7; }
 
 /* ============================================
    Tags
@@ -681,6 +724,32 @@
 .btn-discord:active { transform: translateY(0) scale(0.98); }
 
 /* ============================================
+   Advanced filter inputs
+   ============================================ */
+.filter-input {
+  width: 100%;
+  padding: 8px 12px;
+  background: #202225;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  color: white;
+  font-size: 13px;
+  transition: all 0.2s ease;
+}
+.filter-input:focus {
+  outline: none;
+  border-color: #5865F2;
+  box-shadow: 0 0 0 2px rgba(88, 101, 242, 0.15);
+}
+.filter-input::placeholder {
+  color: #72767d;
+}
+.filter-input::-webkit-calendar-picker-indicator {
+  filter: invert(0.7);
+  cursor: pointer;
+}
+
+/* ============================================
    Line clamp utilities
    ============================================ */
 .line-clamp-3 {
@@ -689,9 +758,9 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.line-clamp-8 {
+.line-clamp-10 {
   display: -webkit-box;
-  -webkit-line-clamp: 8;
+  -webkit-line-clamp: 10;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }

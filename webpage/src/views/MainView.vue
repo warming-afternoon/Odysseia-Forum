@@ -32,6 +32,9 @@
 
     <!-- Resume toast -->
     <ResumeToast />
+
+    <!-- Advanced filter modal -->
+    <AdvancedFilterModal />
   </div>
 </template>
 
@@ -48,6 +51,7 @@ import ResultGrid from '../components/ResultGrid.vue'
 import DetailOverlay from '../components/DetailOverlay.vue'
 import BannerApplicationModal from '../components/BannerApplicationModal.vue'
 import ResumeToast from '../components/ResumeToast.vue'
+import AdvancedFilterModal from '../components/AdvancedFilterModal.vue'
 
 const store = useAppStore()
 const auth = useAuthStore()

@@ -31,7 +31,7 @@
             </div>
 
             <!-- Scrollable content -->
-            <div class="flex-1 overflow-y-auto p-4 md:p-5 custom-scrollbar">
+            <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-5 custom-scrollbar">
               <!-- Tags -->
               <div class="flex flex-wrap gap-1.5 mb-3">
                 <span

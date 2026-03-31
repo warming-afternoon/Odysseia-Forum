@@ -30,22 +30,20 @@
 
       <!-- Filter row -->
       <div class="flex items-center gap-2 overflow-x-auto pb-0.5 hide-scrollbar text-xs md:text-sm">
-        <div class="flex items-center gap-2 bg-discord-element/60 px-3 py-2 rounded-lg flex-shrink-0 border border-white/5">
-          <span class="text-discord-muted material-symbols-outlined text-[16px]">calendar_today</span>
-          <input
-            v-model="store.dateStart"
-            class="bg-transparent text-white focus:outline-none w-20 md:w-auto"
-            type="date"
-            @change="store.executeSearch()"
-          >
-          <span class="text-discord-muted">-</span>
-          <input
-            v-model="store.dateEnd"
-            class="bg-transparent text-white focus:outline-none w-20 md:w-auto"
-            type="date"
-            @change="store.executeSearch()"
-          >
-        </div>
+        <button
+          class="flex items-center gap-1.5 px-3 py-2 rounded-lg flex-shrink-0 border transition-colors"
+          :class="store.hasAdvancedFilters
+            ? 'bg-discord-primary/15 border-discord-primary/40 text-discord-primary'
+            : 'bg-discord-element/60 border-white/5 text-discord-muted hover:text-white hover:border-white/15'"
+          @click="store.advancedFilterVisible = true"
+        >
+          <span class="material-symbols-outlined text-[16px]">tune</span>
+          <span>高级筛选</span>
+          <span
+            v-if="store.hasAdvancedFilters"
+            class="w-1.5 h-1.5 rounded-full bg-discord-primary flex-shrink-0"
+          />
+        </button>
         <div class="sort-select-wrapper">
           <span class="text-discord-muted material-symbols-outlined text-[16px]">sort</span>
           <select v-model="store.sortMethod" class="sort-select" @change="store.executeSearch()">

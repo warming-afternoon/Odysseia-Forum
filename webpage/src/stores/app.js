@@ -18,8 +18,15 @@ export const useAppStore = defineStore('app', () => {
   const query = ref('')
   const dateStart = ref('')
   const dateEnd = ref('')
+  const activeStart = ref('')
+  const activeEnd = ref('')
+  const reactionMin = ref('')
+  const reactionMax = ref('')
   const sortMethod = ref('last_active')
   const sortOrder = ref('desc')
+
+  // Advanced filter modal
+  const advancedFilterVisible = ref(false)
 
   // Tags
   const tagMode = ref('include')
@@ -105,6 +112,28 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  function buildReactionRange() {
+    const min = reactionMin.value ? String(reactionMin.value).trim() : ''
+    const max = reactionMax.value ? String(reactionMax.value).trim() : ''
+    if (!min && !max) return '[0, 10000000)'
+    const lo = min || '0'
+    const hi = max || '10000000'
+    return `[${lo}, ${hi}]`
+  }
+
+  const hasAdvancedFilters = computed(() =>
+    !!(dateStart.value || dateEnd.value || activeStart.value || activeEnd.value || reactionMin.value || reactionMax.value)
+  )
+
+  function clearAdvancedFilters() {
+    dateStart.value = ''
+    dateEnd.value = ''
+    activeStart.value = ''
+    activeEnd.value = ''
+    reactionMin.value = ''
+    reactionMax.value = ''
+  }
+
   function collectLoadedThreadIds() {
     if (!results.value?.length) return []
     const ids = new Set()
@@ -145,6 +174,9 @@ export const useAppStore = defineStore('app', () => {
       keywords: query.value || null,
       created_after: dateStart.value || null,
       created_before: dateEnd.value || null,
+      active_after: activeStart.value || null,
+      active_before: activeEnd.value || null,
+      reaction_count_range: buildReactionRange(),
       sort_method: sortMethod.value,
       sort_order: sortOrder.value,
       limit: 20,
@@ -240,6 +272,10 @@ export const useAppStore = defineStore('app', () => {
     const selChannel = channelId.value ? String(channelId.value) : null
     const dStart = dateStart.value ? new Date(dateStart.value) : null
     const dEnd = dateEnd.value ? new Date(dateEnd.value) : null
+    const aStart = activeStart.value ? new Date(activeStart.value) : null
+    const aEnd = activeEnd.value ? new Date(activeEnd.value) : null
+    const rMin = reactionMin.value ? Number(reactionMin.value) : null
+    const rMax = reactionMax.value ? Number(reactionMax.value) : null
 
     const filtered = threads.filter((t) => {
       const tags = t.tags || []
@@ -254,6 +290,14 @@ export const useAppStore = defineStore('app', () => {
       const createdAt = t.created_at ? new Date(t.created_at) : null
       if (dStart && (!createdAt || createdAt < dStart)) return false
       if (dEnd && (!createdAt || createdAt > dEnd)) return false
+
+      const activeAt = t.last_active_at ? new Date(t.last_active_at) : null
+      if (aStart && (!activeAt || activeAt < aStart)) return false
+      if (aEnd && (!activeAt || activeAt > aEnd)) return false
+
+      const rc = t.reaction_count ?? 0
+      if (rMin !== null && rc < rMin) return false
+      if (rMax !== null && rc > rMax) return false
 
       if (authorQuery) {
         const author = t.author || {}
@@ -416,6 +460,10 @@ export const useAppStore = defineStore('app', () => {
     if (query.value) params.set('q', query.value)
     if (dateStart.value) params.set('from', dateStart.value)
     if (dateEnd.value) params.set('to', dateEnd.value)
+    if (activeStart.value) params.set('active_from', activeStart.value)
+    if (activeEnd.value) params.set('active_to', activeEnd.value)
+    if (reactionMin.value) params.set('rmin', reactionMin.value)
+    if (reactionMax.value) params.set('rmax', reactionMax.value)
     if (sortMethod.value && sortMethod.value !== 'comprehensive') params.set('sort', sortMethod.value)
     if (sortOrder.value !== 'desc') params.set('order', sortOrder.value)
     if (includedTags.value.size > 0) params.set('tags', Array.from(includedTags.value).join(','))
@@ -435,6 +483,10 @@ export const useAppStore = defineStore('app', () => {
     if (params.get('q')) query.value = params.get('q')
     if (params.get('from')) dateStart.value = params.get('from')
     if (params.get('to')) dateEnd.value = params.get('to')
+    if (params.get('active_from')) activeStart.value = params.get('active_from')
+    if (params.get('active_to')) activeEnd.value = params.get('active_to')
+    if (params.get('rmin')) reactionMin.value = params.get('rmin')
+    if (params.get('rmax')) reactionMax.value = params.get('rmax')
     if (params.get('sort')) sortMethod.value = params.get('sort')
     if (params.get('order') === 'asc') sortOrder.value = 'asc'
     const tags = params.get('tags')
@@ -467,6 +519,10 @@ export const useAppStore = defineStore('app', () => {
       sortOrder: sortOrder.value,
       dateStart: dateStart.value,
       dateEnd: dateEnd.value,
+      activeStart: activeStart.value,
+      activeEnd: activeEnd.value,
+      reactionMin: reactionMin.value,
+      reactionMax: reactionMax.value,
       savedAt: Date.now(),
     }
     try { localStorage.setItem(key, JSON.stringify(payload)) } catch { /* */ }
@@ -508,6 +564,10 @@ export const useAppStore = defineStore('app', () => {
     sortMethod.value = saved.sortMethod || 'comprehensive'
     dateStart.value = saved.dateStart || ''
     dateEnd.value = saved.dateEnd || ''
+    activeStart.value = saved.activeStart || ''
+    activeEnd.value = saved.activeEnd || ''
+    reactionMin.value = saved.reactionMin || ''
+    reactionMax.value = saved.reactionMax || ''
     isLoading.value = false
     saveStateToUrl()
     scrollToBottomFlag.value = true
@@ -559,7 +619,9 @@ export const useAppStore = defineStore('app', () => {
 
   return {
     view, channelId, sidebarOpen,
-    query, dateStart, dateEnd, sortMethod, sortOrder,
+    query, dateStart, dateEnd, activeStart, activeEnd,
+    reactionMin, reactionMax, sortMethod, sortOrder,
+    advancedFilterVisible, hasAdvancedFilters,
     tagMode, tagLogic, includedTags, excludedTags,
     availableTags, virtualTags, allTags, virtualTagNames,
     results, totalResults, isLoading, banners, canLoadMore,
@@ -577,7 +639,8 @@ export const useAppStore = defineStore('app', () => {
     refreshUnreadCount, markFollowsViewedAction, removeFollowAction,
     resetFollowState, switchView, selectChannel,
     handleTagClick, setTagModeAction, setTagLogicAction, toggleSortOrder,
-    applyAuthorSearch, saveStateToUrl, loadStateFromUrl,
+    applyAuthorSearch, clearAdvancedFilters,
+    saveStateToUrl, loadStateFromUrl,
     saveBrowseState, tryResumeBrowse, acceptResume, rejectResume, dismissResume,
     restoreBrowseState,
   }
