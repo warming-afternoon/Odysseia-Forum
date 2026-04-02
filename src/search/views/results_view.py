@@ -23,7 +23,7 @@ class SearchResultsView(discord.ui.View):
         results_per_page: int,
         preview_image_mode: str,
     ):
-        super().__init__(timeout=900)
+        super().__init__(timeout=14400)
         self.cog = cog
         self.interaction = interaction
         self.search_qo = search_qo

@@ -33,7 +33,7 @@ class GenericSearchView(discord.ui.View):
         search_state: SearchStateDTO,
         strategy: SearchStrategy,
     ):
-        super().__init__(timeout=890)
+        super().__init__(timeout=14400) # 4 小时
         self.cog = cog
         self.original_interaction = interaction
         self.last_interaction = interaction

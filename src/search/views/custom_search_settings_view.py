@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
 class CustomSearchSettingsView(discord.ui.View):
     def __init__(self, parent_view: "GenericSearchView"):
-        super().__init__(timeout=880)
+        super().__init__(timeout=14400) # 4 小时
         self.parent = parent_view
         self.state: SearchStateDTO = parent_view.search_state
         self.original_interaction: discord.Interaction = parent_view.last_interaction
