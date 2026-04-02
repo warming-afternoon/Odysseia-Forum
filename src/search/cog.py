@@ -365,6 +365,11 @@ class Search(commands.Cog):
         """右键点击消息，搜索该消息作者的作品"""
         await self._quick_author_search(interaction, author=message.author)
 
+    @app_commands.command(name="查看收藏", description="查看和搜索您已收藏的帖子")
+    async def view_collections_command(self, interaction: discord.Interaction):
+        """查看收藏"""
+        await self.start_collection_search(interaction)
+
     @commands.Cog.listener()
     async def on_open_collection_search(self, interaction: discord.Interaction):
         """处理收藏搜索事件"""
