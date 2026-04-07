@@ -2,6 +2,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlmodel import select
 
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.schemas.banner import BannerItem
@@ -14,6 +15,7 @@ from config.config_service import ConfigService
 from core.cache_service import CacheService
 from search.cog import Search
 from search.qo.thread_search import ThreadSearchQuery
+from models import Thread
 from search.search_service import SearchService
 from shared.enum.collection_type import CollectionType
 from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigType
@@ -315,12 +317,22 @@ async def execute_search(
             banners = await banner_service.get_active_banners(
                 channel_id=target_channel_id
             )
+            guild_by_thread: dict[int, int] = {}
+            if banners:
+                banner_tids = [b.thread_id for b in banners]
+                guild_rows = await session.execute(
+                    select(Thread.thread_id, Thread.guild_id).where(
+                        Thread.thread_id.in_(banner_tids)  # type: ignore[arg-type]
+                    )
+                )
+                guild_by_thread = {tid: gid for tid, gid in guild_rows.all()}
             banner_carousel = [
                 BannerItem(
                     thread_id=banner.thread_id,
                     title=banner.title,
                     cover_image_url=banner.cover_image_url,
                     channel_id=banner.channel_id if banner.channel_id else 0,
+                    guild_id=guild_by_thread.get(banner.thread_id, 0),
                 )
                 for banner in banners
             ]
@@ -352,4 +364,57 @@ async def execute_search(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="执行搜索时发生内部错误",
+        )
+
+
+@router.get(
+    "/thread/{thread_id}",
+    response_model=ThreadDetail,
+    summary="按 Discord 帖子 ID 获取详情",
+)
+async def get_thread_detail(
+    thread_id: int, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """用于 Banner 点击等场景；避免依赖当前页搜索结果是否已包含该帖。"""
+    if not search_cog_instance or not async_session_factory:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search 服务尚未初始化",
+        )
+
+    user_id = int(current_user["id"]) if current_user and "id" in current_user else None
+
+    async with async_session_factory() as session:
+        repo = SearchService(session, search_cog_instance.tag_service)
+        thread = await repo.get_thread_by_discord_id(thread_id)
+        if not thread:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="帖子不存在或不可查看"
+            )
+
+        collected_thread_ids: set[int] = set()
+        if user_id:
+            collection_service = CollectionService(session)
+            collected_thread_ids = await collection_service.get_collected_target_ids(
+                user_id, CollectionType.THREAD, [thread.thread_id]
+            )
+
+        return ThreadDetail(
+            thread_id=thread.thread_id,
+            guild_id=thread.guild_id,
+            channel_id=thread.channel_id,
+            title=thread.title,
+            author=AuthorDetail.model_validate(thread.author)
+            if thread.author
+            else None,
+            created_at=thread.created_at,
+            last_active_at=thread.last_active_at,
+            reaction_count=thread.reaction_count,
+            reply_count=thread.reply_count,
+            display_count=thread.display_count,
+            first_message_excerpt=thread.first_message_excerpt,
+            thumbnail_urls=thread.thumbnail_urls or [],
+            tags=[tag.name for tag in thread.tags],
+            virtual_tags=[],
+            collected_flag=thread.thread_id in collected_thread_ids,
         )

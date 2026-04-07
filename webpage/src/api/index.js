@@ -47,6 +47,11 @@ export async function searchPosts(params, signal) {
   return fetchAPI('/search', 'POST', params, signal)
 }
 
+export async function getThreadDetail(threadId) {
+  const id = encodeURIComponent(String(threadId))
+  return fetchAPI(`/search/thread/${id}`, 'GET')
+}
+
 export async function getFollows(limit = 10000, offset = 0) {
   return fetchAPI(`/follows?limit=${limit}&offset=${offset}`, 'GET')
 }

@@ -440,6 +440,22 @@ class SearchService:
         result = await self.session.execute(statement)
         return result.scalars().all()
 
+    async def get_thread_by_discord_id(self, discord_thread_id: int) -> Thread | None:
+        """按 Discord thread_id 取单帖（含标签与作者），仅返回仍参与搜索的帖子。"""
+        statement = (
+            select(Thread)
+            .where(
+                Thread.thread_id == discord_thread_id,  # type: ignore[arg-type]
+                Thread.not_found_count == 0,
+            )
+            .options(
+                selectinload(Thread.tags),  # type: ignore
+                joinedload(Thread.author),  # type: ignore
+            )
+        )
+        result = await self.session.execute(statement)
+        return result.scalars().first()
+
     async def get_tags_for_collections(self, user_id: int) -> Sequence[Tag]:
         """获取指定用户收藏的所有帖子的唯一标签列表"""
 

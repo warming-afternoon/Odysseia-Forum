@@ -9,6 +9,8 @@
             :key="idx"
             v-show="idx === currentIndex"
             class="banner-slide"
+            :class="{ 'cursor-pointer': !!banner.thread_id }"
+            @click="onBannerVisualClick"
           >
             <div
               class="banner-blur-bg"
@@ -23,7 +25,11 @@
       </div>
 
       <!-- Info overlay -->
-      <div class="banner-overlay absolute bottom-0 left-0 w-full bg-gradient-to-t from-discord-dark via-discord-dark/80 to-transparent p-4 pt-12 flex flex-col justify-end z-[5]">
+      <div
+        class="banner-overlay absolute bottom-0 left-0 w-full bg-gradient-to-t from-discord-dark via-discord-dark/80 to-transparent p-4 pt-12 flex flex-col justify-end z-[5]"
+        :class="{ 'cursor-pointer': !!currentBanner?.thread_id }"
+        @click="onBannerVisualClick"
+      >
         <div class="flex items-end justify-between gap-4">
           <div class="flex-1 min-w-0">
             <h2 class="text-lg md:text-2xl font-bold text-white mb-1 drop-shadow-lg line-clamp-1">
@@ -35,13 +41,13 @@
           </div>
           <div v-if="currentBanner?.thread_id" class="flex-shrink-0 flex items-center gap-2">
             <button
-              @click="openApp"
+              @click.stop="openApp"
               class="bg-discord-primary hover:bg-discord-hover text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 shadow transition-all hover:shadow-discord-primary/30"
             >
               <span class="material-symbols-outlined text-sm">open_in_new</span> APP
             </button>
             <button
-              @click="openWeb"
+              @click.stop="openWeb"
               class="bg-discord-sidebar hover:bg-gray-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 border border-white/10 transition-colors"
             >
               <span class="material-symbols-outlined text-sm">public</span> WEB
@@ -94,6 +100,7 @@
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useAppStore } from '../stores/app'
 import { GUILD_ID } from '../config'
+import { getThreadDetail } from '../api'
 
 defineEmits(['apply'])
 
@@ -108,6 +115,29 @@ const displayBanners = computed(() => {
 })
 
 const currentBanner = computed(() => displayBanners.value[currentIndex.value])
+
+function guildIdForBanner(b) {
+  const g = b?.guild_id
+  if (g != null && String(g).trim() !== '' && String(g) !== '0') return String(g)
+  return String(GUILD_ID || '@me')
+}
+
+async function onBannerVisualClick() {
+  const b = currentBanner.value
+  if (!b?.thread_id) return
+  const tid = String(b.thread_id)
+  const fromList = store.results.find((p) => String(p.thread_id) === tid)
+  if (fromList) {
+    store.openDetail(fromList)
+    return
+  }
+  const detail = await getThreadDetail(tid)
+  if (detail) {
+    store.openDetail(detail)
+    return
+  }
+  store.showToast('无法加载帖子详情，请使用 APP / WEB 打开')
+}
 
 function goTo(i) {
   currentIndex.value = i
@@ -147,12 +177,18 @@ function toggleCollapse() {
 
 function openApp() {
   const b = currentBanner.value
-  if (b?.thread_id) window.location.href = `discord://discord.com/channels/${GUILD_ID}/${b.thread_id}`
+  if (b?.thread_id) {
+    const gid = guildIdForBanner(b)
+    window.location.href = `discord://discord.com/channels/${gid}/${b.thread_id}`
+  }
 }
 
 function openWeb() {
   const b = currentBanner.value
-  if (b?.thread_id) window.open(`https://discord.com/channels/${GUILD_ID}/${b.thread_id}`, '_blank')
+  if (b?.thread_id) {
+    const gid = guildIdForBanner(b)
+    window.open(`https://discord.com/channels/${gid}/${b.thread_id}`, '_blank')
+  }
 }
 
 onMounted(() => { if (!isCollapsed.value) startAutoplay() })
