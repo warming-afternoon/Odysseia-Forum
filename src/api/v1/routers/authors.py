@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.v1.dependencies.security import require_auth
 from dto.author import AuthorProfileResponse, AuthorStats
-from core.author_service import AuthorRepository
+from core.author_repository import AuthorRepository
 from shared.database import AsyncSessionFactory
 
 logger = logging.getLogger(__name__)

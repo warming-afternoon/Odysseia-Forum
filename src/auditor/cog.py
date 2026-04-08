@@ -6,7 +6,7 @@ from typing import List
 from discord.ext import commands, tasks
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from auditor.repository import AuditorRepository
+from auditor.auditor_service import AuditorService
 from core.sync_service import SyncService
 from shared.api_scheduler import APIScheduler
 
@@ -54,7 +54,7 @@ class Auditor(commands.Cog):
         """
         logger.debug("正在从数据库重新加载审计队列...")
         async with self.session_factory() as session:
-            repo = AuditorRepository(session)
+            repo = AuditorService(session)
             self.audit_queue = await repo.get_all_thread_ids()
             random.shuffle(self.audit_queue)
         logger.debug(f"审计队列加载完成，共 {len(self.audit_queue)} 个帖子需要审计。")
@@ -105,7 +105,7 @@ class Auditor(commands.Cog):
         try:
             logger.info("开始执行幽灵数据清理任务...")
             async with self.session_factory() as session:
-                repo = AuditorRepository(session)
+                repo = AuditorService(session)
                 # 清理连续5次都找不到的帖子
                 deleted_count = await repo.delete_stale_threads(threshold=5)
 

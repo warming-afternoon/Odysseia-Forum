@@ -4,7 +4,7 @@ from typing import Dict, List
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.tag_service import TagService
+from core.tag_repository import TagRepository
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class TagCacheService:
         """
         logger.debug("Building tag cache...")
         async with self.session_factory() as session:
-            tag_service = TagService(session)
+            tag_service = TagRepository(session)
             all_tags = await tag_service.get_all_tags()
             all_unique_tags_from_indexed_threads = (
                 await tag_service.get_all_unique_tags_from_indexed_threads()

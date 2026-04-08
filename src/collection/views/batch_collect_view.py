@@ -4,8 +4,8 @@ import discord
 
 from collection.views.base_management_view import BaseManagementView
 from collection.views.thread_select import ThreadSelect
-from core.collection_service import CollectionService
-from core.thread_service import ThreadService
+from core.collection_repository import CollectionRepository
+from core.thread_repository import ThreadRepository
 from shared.enum.collection_type import CollectionType
 
 if TYPE_CHECKING:
@@ -49,13 +49,13 @@ class BatchCollectView(BaseManagementView):
             return
 
         async with self.cog.get_session() as session:
-            collection_service = CollectionService(session)
+            collection_service = CollectionRepository(session)
             result = await collection_service.add_collections(
                 interaction.user.id, CollectionType.THREAD, thread_ids
             )
 
             if result.added_count > 0:
-                thread_service = ThreadService(session)
+                thread_service = ThreadRepository(session)
                 await thread_service.update_collection_counts(result.added_ids, 1)
 
         await interaction.response.send_message(
@@ -88,13 +88,13 @@ class BatchCollectView(BaseManagementView):
 
         thread_ids = [int(tid) for tid in self.selected_threads]
         async with self.cog.get_session() as session:
-            collection_service = CollectionService(session)
+            collection_service = CollectionRepository(session)
             result = await collection_service.add_collections(
                 interaction.user.id, CollectionType.THREAD, thread_ids
             )
 
             if result.added_count > 0:
-                thread_service = ThreadService(session)
+                thread_service = ThreadRepository(session)
                 await thread_service.update_collection_counts(result.added_ids, 1)
 
         await interaction.response.send_message(

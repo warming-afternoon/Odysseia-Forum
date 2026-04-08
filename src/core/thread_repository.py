@@ -7,22 +7,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
-from core.tag_service import TagService
-from models import TagVote, Thread, ThreadTagLink
+from models import Tag, TagVote, Thread, ThreadTagLink
 from ThreadManager.update_data_dto import UpdateData
 
 logger = logging.getLogger(__name__)
 
 
-class ThreadService:
+class ThreadRepository:
     """封装与 Thread 表相关的数据库操作。"""
 
     def __init__(self, session: AsyncSession):
         self.session = session
-        self.tag_service = TagService(session)
 
     async def add_or_update_thread_with_tags(
-        self, thread_data: dict, tags_data: dict[int, str]
+        self, thread_data: dict, tags: list[Tag]
     ):
         """
         添加或更新一个帖子及其标签。
@@ -36,9 +34,6 @@ class ThreadService:
         result = await self.session.execute(statement)
         db_thread = result.scalars().first()
 
-        # 获取或创建所有相关标签
-        tags = await self.tag_service.get_or_create_tags(tags_data)
-
         if db_thread:
             # 更新帖子
             for key, value in thread_data.items():
@@ -46,7 +41,7 @@ class ThreadService:
 
             # 非破坏性地更新标签，以保留 ThreadTagLink 中的投票数据
             current_tag_ids = {tag.id for tag in db_thread.tags}
-            new_tag_ids = set(tags_data.keys())
+            new_tag_ids = {tag.id for tag in tags if tag.id is not None}
 
             tags_to_add_ids = new_tag_ids - current_tag_ids
             tags_to_remove_ids = current_tag_ids - new_tag_ids

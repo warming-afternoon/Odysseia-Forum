@@ -465,11 +465,11 @@ async def check_auth(request: Request):
     unread_count = 0
     try:
         from shared.database import AsyncSessionFactory
-        from ThreadManager.services.follow_service import FollowService
+        from core.follow_repository import ThreadFollowRepository
 
         user_id = int(payload["id"])
         async with AsyncSessionFactory() as session:
-            follow_service = FollowService(session)
+            follow_service = ThreadFollowRepository(session)
             unread_count = await follow_service.get_unread_count(user_id=user_id)
     except Exception as e:
         logger.error(f"获取未读数量失败: {e}")

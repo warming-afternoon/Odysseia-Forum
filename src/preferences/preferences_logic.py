@@ -9,10 +9,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.cache_service import CacheService
 from core.tag_cache_service import TagCacheService
-from preferences.preferences_repository import PreferencesRepository
+from core.preferences_repository import PreferencesRepository
 from preferences.views.channel_preferences_view import ChannelPreferencesView
 from preferences.views.tag_preferences_view import TagPreferencesView
-from search.dto.user_search_preferences import UserSearchPreferencesDTO
+from dto.preferences.user_search_preferences import UserSearchPreferencesDTO
 from shared.safe_defer import safe_defer
 from shared.utils import process_string_to_set
 
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
     from bot_main import MyBot
 
 
-class PreferencesService:
+class PreferencesLogic:
     """处理用户搜索偏好设置"""
 
     def __init__(
@@ -46,7 +46,7 @@ class PreferencesService:
     ) -> Optional[UserSearchPreferencesDTO]:
         """获取并返回用户在指定服务器的搜索偏好 DTO"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, self.tag_service)
+            repo = PreferencesRepository(session)
             return await repo.get_user_preferences(user_id, guild_id)
 
     async def save_user_preferences(
@@ -54,7 +54,7 @@ class PreferencesService:
     ) -> UserSearchPreferencesDTO:
         """创建或更新用户在指定服务器的搜索偏好设置"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, self.tag_service)
+            repo = PreferencesRepository(session)
             return await repo.save_user_preferences(user_id, prefs_data, guild_id)
 
     async def save_user_keywords(
@@ -77,7 +77,7 @@ class PreferencesService:
         final_exclude_str = ", ".join(sorted(list(final_exclude_set)))
 
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, self.tag_service)
+            repo = PreferencesRepository(session)
             return await repo.save_user_preferences(
                 user_id,
                 {
@@ -108,7 +108,7 @@ class PreferencesService:
                 return
 
             async with self.session_factory() as session:
-                repo = PreferencesRepository(session, self.tag_service)
+                repo = PreferencesRepository(session)
                 prefs = await repo.get_user_preferences(user_id, guild_id)
 
                 if not prefs:
@@ -172,7 +172,7 @@ class PreferencesService:
         try:
             guild_id = interaction.guild_id or 0
             async with self.session_factory() as session:
-                repo = PreferencesRepository(session, self.tag_service)
+                repo = PreferencesRepository(session)
                 prefs_dto = await repo.get_user_preferences(interaction.user.id, guild_id)
                 if not prefs_dto:
                     prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
@@ -199,7 +199,7 @@ class PreferencesService:
     ):
         """保存用户的默认搜索频道列表"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, self.tag_service)
+            repo = PreferencesRepository(session)
             await repo.save_user_preferences(
                 user_id,
                 {"preferred_channels": channel_ids},
@@ -214,7 +214,7 @@ class PreferencesService:
         直接存储字符串
         """
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, self.tag_service)
+            repo = PreferencesRepository(session)
             await repo.save_user_preferences(user_id, time_data, guild_id)
 
     async def search_preferences_tags(
@@ -225,7 +225,7 @@ class PreferencesService:
         try:
             guild_id = interaction.guild_id or 0
             async with self.session_factory() as session:
-                repo = PreferencesRepository(session, self.tag_service)
+                repo = PreferencesRepository(session)
 
                 # 获取所有可用标签
                 all_tags = self.tag_service.get_unique_tag_names()
@@ -262,7 +262,7 @@ class PreferencesService:
         try:
             guild_id = interaction.guild_id or 0
             async with self.session_factory() as session:
-                repo = PreferencesRepository(session, self.tag_service)
+                repo = PreferencesRepository(session)
                 await repo.save_user_preferences(
                     interaction.user.id,
                     {
@@ -278,7 +278,7 @@ class PreferencesService:
     async def toggle_preview_mode(self, user_id: int, guild_id: int = 0) -> None:
         """切换用户的预览图显示模式（大图/缩略图）。"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, self.tag_service)
+            repo = PreferencesRepository(session)
             prefs = await repo.get_user_preferences(user_id, guild_id)
 
             current_mode = "thumbnail"
@@ -294,7 +294,7 @@ class PreferencesService:
     async def clear_user_preferences(self, user_id: int, guild_id: int = 0) -> None:
         """清空指定用户在指定服务器的所有搜索偏好设置"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, self.tag_service)
+            repo = PreferencesRepository(session)
             await repo.save_user_preferences(
                 user_id,
                 {
@@ -321,7 +321,7 @@ class PreferencesService:
     ) -> None:
         """保存用户的排序算法偏好"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, self.tag_service)
+            repo = PreferencesRepository(session)
             await repo.save_user_preferences(
                 user_id,
                 {"sort_method": sort_method},

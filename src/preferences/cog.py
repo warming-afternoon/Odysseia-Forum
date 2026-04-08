@@ -6,7 +6,9 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from preferences.preferences_service import PreferencesService
+from core.cache_service import CacheService
+from core.tag_cache_service import TagCacheService
+from preferences.preferences_logic import PreferencesLogic
 from preferences.views.preferences_view import PreferencesView
 from shared.safe_defer import safe_defer
 
@@ -24,12 +26,18 @@ class Preferences(commands.Cog):
         bot: "MyBot",
         session_factory: async_sessionmaker,
         config: dict,
-        preferences_service: PreferencesService,
+        tag_service: TagCacheService,
+        cache_service: CacheService,
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
-        self.preferences_service = preferences_service
+        self.preferences_service = PreferencesLogic(
+            bot=bot,
+            session_factory=session_factory,
+            tag_service=tag_service,
+            cache_service=cache_service,
+        )
         logger.info("Preferences 模块已加载")
 
     async def cog_load(self):

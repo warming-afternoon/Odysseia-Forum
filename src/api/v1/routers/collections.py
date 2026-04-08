@@ -7,8 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.v1.dependencies.security import get_current_user
 from booklist.booklist_service import BooklistService
-from core.collection_service import CollectionService
-from core.thread_service import ThreadService
+from core.collection_repository import CollectionRepository
+from core.thread_repository import ThreadRepository
 from shared.database import AsyncSessionFactory
 from shared.enum.collection_type import CollectionType
 
@@ -33,14 +33,14 @@ async def batch_add_collections(
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            collection_service = CollectionService(session)
+            collection_service = CollectionRepository(session)
             result = await collection_service.add_collections(
                 user_id, target_type, target_ids
             )
 
             # 如果收藏的是帖子，则更新其收藏计数
             if target_type == CollectionType.THREAD.value and result.added_count > 0:
-                thread_service = ThreadService(session)
+                thread_service = ThreadRepository(session)
                 await thread_service.update_collection_counts(result.added_ids, 1)
 
             # 如果收藏的是书单，则更新其收藏计数
@@ -80,14 +80,14 @@ async def batch_remove_collections(
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            collection_service = CollectionService(session)
+            collection_service = CollectionRepository(session)
             result = await collection_service.remove_collections(
                 user_id, target_type, target_ids
             )
 
             # 如果移除的是帖子收藏，则更新其收藏计数
             if target_type == CollectionType.THREAD.value and result.removed_count > 0:
-                thread_service = ThreadService(session)
+                thread_service = ThreadRepository(session)
                 await thread_service.update_collection_counts(result.removed_ids, -1)
 
             # 如果移除的是书单收藏，则更新其收藏计数

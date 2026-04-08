@@ -4,9 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from models import Thread
 
 
-class AuditorRepository:
+class AuditorService:
     """
-    审计器的数据仓库，负责与数据库进行交互。
+    审计器的处理逻辑，负责与数据库进行交互。
     """
 
     def __init__(self, session: AsyncSession):

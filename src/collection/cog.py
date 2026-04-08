@@ -8,8 +8,8 @@ from discord.ext import commands
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from collection.listeners import CollectionListenerCog
-from core.collection_service import CollectionService
-from core.thread_service import ThreadService
+from core.collection_repository import CollectionRepository
+from core.thread_repository import ThreadRepository
 from shared.enum.collection_type import CollectionType
 from shared.safe_defer import safe_defer
 
@@ -28,16 +28,16 @@ class CollectionCog(commands.Cog, name="CollectionCog"):
         self.session_factory = session_factory
 
     @asynccontextmanager
-    async def get_collection_service(self) -> AsyncIterator[CollectionService]:
+    async def get_collection_service(self) -> AsyncIterator[CollectionRepository]:
         """提供一个 CollectionService 的实例，并管理 session 的生命周期"""
         async with self.session_factory() as session:
-            yield CollectionService(session)
+            yield CollectionRepository(session)
 
     @asynccontextmanager
-    async def get_thread_service(self) -> AsyncIterator[ThreadService]:
+    async def get_thread_service(self) -> AsyncIterator[ThreadRepository]:
         """提供一个 ThreadService 的实例，并管理 session 的生命周期"""
         async with self.session_factory() as session:
-            yield ThreadService(session)
+            yield ThreadRepository(session)
 
     @asynccontextmanager
     async def get_session(self) -> AsyncIterator[AsyncSession]:
@@ -80,12 +80,12 @@ class CollectionCog(commands.Cog, name="CollectionCog"):
         user_id = interaction.user.id
 
         async with self.get_session() as session:
-            collection_service = CollectionService(session)
+            collection_service = CollectionRepository(session)
             success = await collection_service.add_collection(
                 user_id=user_id, target_type=CollectionType.THREAD, target_id=thread_id
             )
             if success:
-                thread_service = ThreadService(session)
+                thread_service = ThreadRepository(session)
                 await thread_service.update_collection_counts([thread_id], 1)
 
         if success:
@@ -113,12 +113,12 @@ class CollectionCog(commands.Cog, name="CollectionCog"):
         user_id = interaction.user.id
 
         async with self.get_session() as session:
-            collection_service = CollectionService(session)
+            collection_service = CollectionRepository(session)
             success = await collection_service.remove_collection(
                 user_id=user_id, target_type=CollectionType.THREAD, target_id=thread_id
             )
             if success:
-                thread_service = ThreadService(session)
+                thread_service = ThreadRepository(session)
                 await thread_service.update_collection_counts([thread_id], -1)
 
         if success:

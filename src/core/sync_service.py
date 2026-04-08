@@ -2,13 +2,14 @@ import asyncio
 import datetime
 import logging
 import re
-from typing import TYPE_CHECKING, Coroutine, List, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import discord
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.author_service import AuthorRepository
-from core.thread_service import ThreadService
+from core.author_repository import AuthorRepository
+from core.tag_repository import TagRepository
+from core.thread_repository import ThreadRepository
 from shared.discord_utils import DiscordUtils
 
 if TYPE_CHECKING:
@@ -300,7 +301,7 @@ class SyncService:
                         f"sync_thread: 获取到的 channel {thread_id} 不是一个帖子，将标记为未找到。"
                     )
                     async with self.session_factory() as session:
-                        repo = ThreadService(session=session)
+                        repo = ThreadRepository(session=session)
                         await repo.increment_not_found_count(thread_id=thread_id)
                     return
                 thread = fetched_channel
@@ -309,7 +310,7 @@ class SyncService:
                     f"sync_thread: 无法找到帖子 {thread_id}，可能已被删除。将增加其 not_found_count。"
                 )
                 async with self.session_factory() as session:
-                    repo = ThreadService(session=session)
+                    repo = ThreadRepository(session=session)
                     await repo.increment_not_found_count(thread_id=thread_id)
                 return
             except Exception as e:
@@ -331,7 +332,7 @@ class SyncService:
                     f"sync_thread (fetch_if_incomplete): 无法找到帖子 {thread.id}，可能已被删除。将增加其 not_found_count。"
                 )
                 async with self.session_factory() as session:
-                    repo = ThreadService(session=session)
+                    repo = ThreadRepository(session=session)
                     await repo.increment_not_found_count(thread_id=thread.id)
                 return
 
@@ -348,12 +349,13 @@ class SyncService:
         # 准备标签数据并存入数据库
         tags_data = {t.id: t.name for t in thread.applied_tags or []}
 
-        # 先保存帖子数据
+        # 保存帖子数据
         async with self.session_factory() as session:
-            repo = ThreadService(session=session)
-            await repo.add_or_update_thread_with_tags(
-                thread_data=thread_data, tags_data=tags_data
-            )
+            tag_repo = TagRepository(session=session)
+            tags = await tag_repo.get_or_create_tags(tags_data)
+
+            repo = ThreadRepository(session=session)
+            await repo.add_or_update_thread_with_tags(thread_data=thread_data, tags=tags)
 
         # 检查是否是首次被关注（检查关注表而不是帖子表）
         is_first_follow = False
@@ -389,10 +391,10 @@ class SyncService:
                 member_ids.append(member.id)
 
             if member_ids:
-                from ThreadManager.services.follow_service import FollowService
+                from core.follow_repository import ThreadFollowRepository
 
                 async with self.session_factory() as session:
-                    follow_service = FollowService(session)
+                    follow_service = ThreadFollowRepository(session)
                     added_count = await follow_service.batch_add_follows(
                         thread_id=thread.id, user_ids=member_ids
                     )

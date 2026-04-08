@@ -11,7 +11,7 @@ from models import Thread, ThreadFollow
 logger = logging.getLogger(__name__)
 
 
-class FollowService:
+class ThreadFollowRepository:
     """关注列表服务"""
 
     def __init__(self, session: AsyncSession):
@@ -35,7 +35,8 @@ class FollowService:
             # 检查是否已关注
             statement = select(ThreadFollow).where(
                 and_(
-                    ThreadFollow.user_id == user_id, ThreadFollow.thread_id == thread_id
+                    ThreadFollow.user_id == user_id, # type: ignore
+                    ThreadFollow.thread_id == thread_id # type: ignore
                 )
             )
             result = await self.session.execute(statement)
@@ -134,7 +135,8 @@ class FollowService:
         try:
             statement = delete(ThreadFollow).where(
                 and_(
-                    ThreadFollow.user_id == user_id, ThreadFollow.thread_id == thread_id
+                    ThreadFollow.user_id == user_id, # type: ignore
+                    ThreadFollow.thread_id == thread_id # type: ignore
                 )
             )
             result = await self.session.execute(statement)
@@ -172,8 +174,8 @@ class FollowService:
                 # 更新单个帖子
                 statement = select(ThreadFollow).where(
                     and_(
-                        ThreadFollow.user_id == user_id,
-                        ThreadFollow.thread_id == thread_id,
+                        ThreadFollow.user_id == user_id, # type: ignore
+                        ThreadFollow.thread_id == thread_id, # type: ignore
                     )
                 )
                 result = await self.session.execute(statement)
@@ -190,7 +192,7 @@ class FollowService:
                     return False
             else:
                 # 更新所有关注
-                statement = select(ThreadFollow).where(ThreadFollow.user_id == user_id)
+                statement = select(ThreadFollow).where(ThreadFollow.user_id == user_id) # type: ignore
                 result = await self.session.execute(statement)
                 follows = result.scalars().all()
 

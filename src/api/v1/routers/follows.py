@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.v1.dependencies.security import get_current_user
 from shared.database import AsyncSessionFactory
-from ThreadManager.services.follow_service import FollowService
+from core.follow_repository import ThreadFollowRepository
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ async def get_follows(
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            follow_service = FollowService(session)
+            follow_service = ThreadFollowRepository(session)
             threads, total = await follow_service.get_user_follows(
                 user_id=user_id, limit=limit, offset=offset
             )
@@ -65,7 +65,7 @@ async def mark_all_viewed(current_user: Dict[str, Any] = Depends(get_current_use
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            follow_service = FollowService(session)
+            follow_service = ThreadFollowRepository(session)
             success = await follow_service.update_last_viewed(
                 user_id=user_id,
                 thread_id=None,  # None表示更新所有关注
@@ -96,7 +96,7 @@ async def get_unread_count(current_user: Dict[str, Any] = Depends(get_current_us
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            follow_service = FollowService(session)
+            follow_service = ThreadFollowRepository(session)
             count = await follow_service.get_unread_count(user_id=user_id)
 
         return {"unread_count": count}
@@ -121,7 +121,7 @@ async def add_follow(
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            follow_service = FollowService(session)
+            follow_service = ThreadFollowRepository(session)
             success = await follow_service.add_follow(
                 user_id=user_id,
                 thread_id=thread_id,
@@ -171,7 +171,7 @@ async def remove_follow(
                     detail="不能取消关注自己的帖子",
                 )
 
-            follow_service = FollowService(session)
+            follow_service = ThreadFollowRepository(session)
             success = await follow_service.remove_follow(
                 user_id=user_id, thread_id=thread_id
             )

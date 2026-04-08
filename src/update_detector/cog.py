@@ -7,7 +7,7 @@ from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.cache_service import CacheService
-from core.thread_service import ThreadService
+from core.thread_repository import ThreadRepository
 from shared.safe_defer import safe_defer
 from update_detector.gemini_service import GeminiService
 from update_detector.update_preference_service import UpdatePreferenceService
@@ -176,7 +176,7 @@ class UpdateDetector(commands.Cog):
     async def do_sync_update(self, thread_id: int, message_link: str) -> bool:
         """执行同步更新操作"""
         async with self.session_factory() as session:
-            repo = ThreadService(session)
+            repo = ThreadRepository(session)
             return await repo.update_thread_update_info(
                 thread_id=thread_id, latest_update_link=message_link
             )

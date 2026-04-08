@@ -11,8 +11,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from config.config_service import ConfigService
 from core.cache_service import CacheService
 from core.impression_cache_service import ImpressionCacheService
+from core.preferences_repository import PreferencesRepository
 from core.tag_cache_service import TagCacheService
-from preferences.preferences_service import PreferencesService
 from search.dto.search_state import SearchStateDTO
 from search.qo.thread_search import ThreadSearchQuery
 from search.search_service import SearchService
@@ -44,7 +44,6 @@ class Search(commands.Cog):
         config: dict,
         tag_service: TagCacheService,
         cache_service: CacheService,
-        preferences_service: PreferencesService,
         impression_cache_service: ImpressionCacheService,
         config_service: ConfigService,
     ):
@@ -53,7 +52,6 @@ class Search(commands.Cog):
         self.config = config
         self.tag_service = tag_service
         self.cache_service = cache_service
-        self.preferences_service = preferences_service
         self.impression_cache_service = impression_cache_service
         self.config_service = config_service
         self.global_search_view = GlobalSearchView(self)
@@ -220,9 +218,9 @@ class Search(commands.Cog):
         """
         从用户偏好创建一个 SearchStateDTO，并应用指定的覆盖值。
         """
-        user_prefs = await self.preferences_service.get_user_preferences(
-            user_id, guild_id
-        )
+        async with self.session_factory() as session:
+            repo = PreferencesRepository(session)
+            user_prefs = await repo.get_user_preferences(user_id, guild_id)
 
         # 从用户偏好加载基础数据
         if user_prefs:

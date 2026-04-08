@@ -3,10 +3,10 @@ from typing import TYPE_CHECKING, Optional
 
 import discord
 
-from preferences.preferences_repository import PreferencesRepository
+from core.preferences_repository import PreferencesRepository
 from preferences.views.components.results_per_page_modal import ResultsPerPageModal
 from search.constants import SortMethod
-from search.dto.user_search_preferences import UserSearchPreferencesDTO
+from dto.preferences import UserSearchPreferencesDTO
 from search.views.components.keyword_modal import KeywordModal
 from search.views.components.sort_method_select import SortMethodSelect
 from shared.enum.default_preferences import DefaultPreferences
@@ -14,7 +14,7 @@ from shared.safe_defer import safe_defer
 from shared.views.components.time_range_modal import TimeRangeModal
 
 if TYPE_CHECKING:
-    from preferences.preferences_service import PreferencesService
+    from preferences.preferences_logic import PreferencesLogic
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ class PreferencesView(discord.ui.View):
 
     def __init__(
         self,
-        service: "PreferencesService",
+        service: "PreferencesLogic",
         interaction: discord.Interaction,
     ):
         super().__init__(timeout=890)  # 15分钟超时
@@ -36,7 +36,7 @@ class PreferencesView(discord.ui.View):
         """获取最新的用户偏好设置"""
         guild_id = self.original_interaction.guild_id or 0
         async with self.service.session_factory() as session:
-            repo = PreferencesRepository(session, self.service.tag_service)
+            repo = PreferencesRepository(session)
             prefs_dto = await repo.get_user_preferences(
                 self.original_interaction.user.id, guild_id
             )
