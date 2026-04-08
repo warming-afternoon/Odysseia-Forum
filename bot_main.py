@@ -26,7 +26,6 @@ from core.impression_cache_service import ImpressionCacheService
 from indexer.cog import Indexer
 from search.cog import Search
 from preferences.cog import Preferences
-from preferences.preferences_service import PreferencesService
 from auditor.cog import Auditor
 from config.cog import Configuration
 from banner.cog import BannerManagement
@@ -145,15 +144,7 @@ class MyBot(commands.Bot):
             self.cache_service.build_or_refresh_cache(),
         )
 
-        # 1.5. 初始化共享服务
-        preferences_service = PreferencesService(
-            bot=self,
-            session_factory=AsyncSessionFactory,
-            tag_service=self.tag_cache_service,
-            cache_service=self.cache_service,
-        )
-
-        # 2. 加载 Cogs 并注入服务
+        # 2. 加载 Cogs
         cogs_to_load = [
             ThreadManager(
                 bot=self,
@@ -175,7 +166,6 @@ class MyBot(commands.Bot):
                 config=self.config,
                 tag_service=self.tag_cache_service,
                 cache_service=self.cache_service,
-                preferences_service=preferences_service,
                 impression_cache_service=self.impression_cache_service,
                 config_service=self.config_service,
             ),
@@ -183,7 +173,8 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 config=self.config,
-                preferences_service=preferences_service,
+                tag_service=self.tag_cache_service,
+                cache_service=self.cache_service,
             ),
             Auditor(
                 bot=self,
@@ -267,16 +258,13 @@ async def main():
         await original_setup_hook()
 
         # 从已加载的 Cogs 中获取服务实例
-        preferences_cog = bot.get_cog("Preferences")
         search_cog = bot.get_cog("Search")
         collection_cog = bot.get_cog("CollectionCog")
 
-        if preferences_cog:
-            preferences_api.preferences_cog_instance = preferences_cog
+        preferences_api.async_session_factory = AsyncSessionFactory
         if search_cog:
             search_api.search_cog_instance = search_cog
         if collection_cog:
-            search_api.collection_cog_instance = collection_cog
             booklists_api.collection_cog_instance = collection_cog
         search_api.async_session_factory = AsyncSessionFactory
         meta_api.cache_service_instance = bot.cache_service

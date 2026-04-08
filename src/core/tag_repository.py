@@ -11,7 +11,7 @@ from models import Tag, Thread
 logger = logging.getLogger(__name__)
 
 
-class TagService:
+class TagRepository:
     """封装与 Tag 表相关的数据库操作。"""
 
     def __init__(self, session: AsyncSession):

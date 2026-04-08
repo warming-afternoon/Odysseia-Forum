@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 T = TypeVar("T")
 
 
-class CollectionService:
+class CollectionRepository:
     """封装与用户收藏相关的数据库操作"""
 
     def __init__(self, session: AsyncSession):

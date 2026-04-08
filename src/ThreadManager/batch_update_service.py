@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.sync_service import SyncService
-from core.thread_service import ThreadService
+from core.thread_repository import ThreadRepository
 from ThreadManager.update_data_dto import UpdateData
 
 logger = logging.getLogger(__name__)
@@ -82,7 +82,7 @@ class BatchUpdateService:
         logger.debug(f"准备将 {intended_count} 个帖子的更新写入数据库。")
         try:
             async with self.session_factory() as session:
-                repo = ThreadService(session)
+                repo = ThreadRepository(session)
                 updated_count = await repo.batch_update_thread_activity(
                     updates_to_process
                 )
@@ -99,7 +99,7 @@ class BatchUpdateService:
 
                 # 查询比对
                 async with self.session_factory() as session:
-                    repo = ThreadService(session)
+                    repo = ThreadRepository(session)
                     all_ids_in_batch = list(updates_to_process.keys())
                     existing_ids = await repo.get_existing_thread_ids(all_ids_in_batch)
 

@@ -1,5 +1,6 @@
 from typing import Optional
 
+from sqlalchemy.ext.asyncio import async_sessionmaker
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.v1.dependencies.security import require_auth
@@ -7,11 +8,10 @@ from api.v1.schemas.preferences import (
     UserPreferencesResponse,
     UserPreferencesUpdateRequest,
 )
-from preferences.cog import Preferences
-from preferences.preferences_service import PreferencesService
+from core.preferences_repository import PreferencesRepository
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
-preferences_cog_instance: Preferences | None = None
+async_session_factory: async_sessionmaker | None = None
 
 router = APIRouter(
     prefix="/preferences", tags=["用户偏好"], dependencies=[Depends(require_auth)]
@@ -30,14 +30,15 @@ async def get_user_preferences(
     """
     根据 Discord 用户 ID 和服务器 ID，获取该用户的完整搜索偏好设置。
     """
-    if not preferences_cog_instance:
+    if not async_session_factory:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Preferences 服务尚未初始化",
         )
 
-    service: PreferencesService = preferences_cog_instance.preferences_service
-    prefs_dto = await service.get_user_preferences(user_id, guild_id or 0)
+    async with async_session_factory() as session:
+        repo = PreferencesRepository(session)
+        prefs_dto = await repo.get_user_preferences(user_id, guild_id or 0)
 
     if not prefs_dto:
         raise HTTPException(
@@ -61,13 +62,12 @@ async def update_user_preferences(
     """
     根据 Discord 用户 ID 和服务器 ID，创建或更新该用户的搜索偏好设置。
     """
-    if not preferences_cog_instance:
+    if not async_session_factory:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Preferences 服务尚未初始化",
         )
 
-    service: PreferencesService = preferences_cog_instance.preferences_service
     update_data = request.model_dump(exclude_unset=True)
 
     if not update_data:
@@ -75,7 +75,9 @@ async def update_user_preferences(
             status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不能为空"
         )
 
-    updated_prefs = await service.save_user_preferences(
-        user_id, update_data, guild_id or 0
-    )
-    return updated_prefs
+    async with async_session_factory() as session:
+        repo = PreferencesRepository(session)
+        updated_prefs = await repo.save_user_preferences(
+            user_id, update_data, guild_id or 0
+        )
+        return updated_prefs

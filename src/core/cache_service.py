@@ -4,7 +4,7 @@ from collections import defaultdict
 import discord
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.thread_service import ThreadService
+from core.thread_repository import ThreadRepository
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +31,7 @@ class CacheService:
         """
         logger.debug("正在刷新 CacheService...")
         async with self.session_factory() as session:
-            thread_service = ThreadService(session)
+            thread_service = ThreadRepository(session)
             indexed_channel_ids = await thread_service.get_all_indexed_channel_ids()
             self.indexed_channel_ids = set(indexed_channel_ids)
 
