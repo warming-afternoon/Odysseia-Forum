@@ -6,6 +6,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 from api.v1.routers import (
     auth,
+    authors,
     banner,
     booklists,
     collections,
@@ -72,6 +73,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 包含路由
 app.include_router(auth.router, prefix="/v1")
+app.include_router(authors.router, prefix="/v1")
 app.include_router(preferences.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(follows.router, prefix="/v1")
@@ -98,6 +100,7 @@ async def root():
         "endpoints": {
             "health": "/v1/health",
             "auth": "/v1/auth",
+            "authors": "/v1/authors",
             "preferences": "/v1/preferences",
             "search": "/v1/search",
             "follows": "/v1/follows",

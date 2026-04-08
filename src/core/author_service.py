@@ -1,10 +1,12 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
+from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Author
+from models.thread import Thread
 
 logger = logging.getLogger(__name__)
 
@@ -38,3 +40,29 @@ class AuthorRepository:
                 f"更新作者 {author_data.get('id')} 信息到数据库时失败: {e}", exc_info=True
             )
             raise  # 重新抛出异常
+
+    async def get_author(self, author_id: int) -> Optional[Author]:
+        """根据作者ID获取作者实体信息。"""
+        statement = select(Author).where(Author.id == author_id)  # type: ignore
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def get_author_stats(self, author_id: int) -> dict:
+        """获取指定作者的发帖数、总反应数和总回复数统计。"""
+        # 仅统计未被标记为软删除的帖子 (not_found_count == 0)
+        statement = select(
+            func.count(Thread.id).label("thread_count"),  # type: ignore
+            func.coalesce(func.sum(Thread.reaction_count), 0).label("reaction_count"),
+            func.coalesce(func.sum(Thread.reply_count), 0).label("reply_count"),
+        ).where(Thread.author_id == author_id, Thread.not_found_count == 0)  # type: ignore
+
+        result = await self.session.execute(statement)
+        row = result.first()
+
+        if row:
+            return {
+                "thread_count": row.thread_count,
+                "reaction_count": row.reaction_count,
+                "reply_count": row.reply_count,
+            }
+        return {"thread_count": 0, "reaction_count": 0, "reply_count": 0}
