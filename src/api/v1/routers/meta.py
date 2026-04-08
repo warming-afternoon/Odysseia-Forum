@@ -4,7 +4,7 @@ import discord
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from api.v1.dependencies.security import get_current_user
-from api.v1.schemas.meta import Channel, TagDetail
+from dto.meta import Channel, TagDetail
 from core.cache_service import CacheService
 
 cache_service_instance: Optional[CacheService] = None

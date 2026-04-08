@@ -2,7 +2,7 @@ from typing import List
 
 from pydantic import BaseModel, Field
 
-from api.v1.schemas.meta.tag_detail import TagDetail
+from dto.meta import TagDetail
 
 
 class Channel(BaseModel):
