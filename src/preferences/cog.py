@@ -26,8 +26,6 @@ class Preferences(commands.Cog):
         bot: "MyBot",
         session_factory: async_sessionmaker,
         config: dict,
-        tag_service: TagCacheService,
-        cache_service: CacheService,
     ):
         self.bot = bot
         self.session_factory = session_factory
@@ -35,8 +33,8 @@ class Preferences(commands.Cog):
         self.preferences_service = PreferencesLogic(
             bot=bot,
             session_factory=session_factory,
-            tag_service=tag_service,
-            cache_service=cache_service,
+            tag_service=bot.tag_cache_service,
+            cache_service=bot.cache_service,
         )
         logger.info("Preferences 模块已加载")
 
