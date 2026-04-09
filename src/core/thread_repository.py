@@ -2,11 +2,12 @@ import logging
 from datetime import datetime
 from typing import List, Sequence, cast
 
-from sqlalchemy import ColumnElement, case, update
+from sqlalchemy import ColumnElement, case, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from dto.meta import ChannelThreadCount
 from models import Tag, TagVote, Thread, ThreadTagLink
 from ThreadManager.update_data_dto import UpdateData
 
@@ -350,3 +351,31 @@ class ThreadRepository:
         statement = select(Thread.channel_id).distinct()
         result = await self.session.execute(statement)
         return result.scalars().all()
+
+    async def get_thread_count_by_channels(
+        self, channel_ids: List[int]
+    ) -> List[ChannelThreadCount]:
+        """批量获取指定频道列表中的有效帖子总数"""
+        if not channel_ids:
+            return []
+
+        # 使用 cast 将 SQLModel 字段转换为 ColumnElement，以便在聚合查询中使用
+        channel_id_column = cast(ColumnElement, Thread.channel_id)
+        id_column = cast(ColumnElement, Thread.id)
+        not_found_count_column = cast(ColumnElement, Thread.not_found_count)
+
+        # 构建聚合查询：统计每个频道中 not_found_count 为 0 的有效帖子数
+        statement = (
+            select(channel_id_column, func.count(id_column))
+            .where(channel_id_column.in_(channel_ids))
+            .where(not_found_count_column == 0)
+            .group_by(channel_id_column)
+        )
+        result = await self.session.execute(statement)
+        rows = result.all()
+
+        # 将查询结果转换为 DTO 列表
+        return [
+            ChannelThreadCount(channel_id=int(row[0]), thread_count=int(row[1]))
+            for row in rows
+        ]
