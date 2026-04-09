@@ -58,15 +58,12 @@ class Configuration(commands.Cog):
         self,
         bot: "MyBot",
         session_factory: async_sessionmaker,
-        api_scheduler,
-        tag_service: TagCacheService,
-        config_service: ConfigService,
     ):
         self.bot = bot
         self.session_factory = session_factory
-        self.api_scheduler = api_scheduler
-        self.tag_service = tag_service
-        self.config_service = config_service
+        self.api_scheduler = bot.api_scheduler
+        self.tag_service = bot.tag_cache_service
+        self.config_service = bot.config_service
         self.mutex_handler = MutexTagsHandler(
             bot, self.session_factory, self.api_scheduler, self.tag_service
         )

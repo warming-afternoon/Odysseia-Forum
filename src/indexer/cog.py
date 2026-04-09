@@ -28,14 +28,12 @@ class Indexer(commands.Cog):
         bot: "MyBot",
         session_factory: async_sessionmaker,
         config: dict,
-        tag_service: TagCacheService,
-        sync_service: SyncService,
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
-        self.tag_service = tag_service
-        self.sync_service = sync_service
+        self.tag_service = bot.tag_cache_service
+        self.sync_service = bot.sync_service
         logger.info("Indexer 模块已加载")
 
     @app_commands.command(

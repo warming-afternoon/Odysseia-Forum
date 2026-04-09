@@ -27,12 +27,11 @@ class UpdateDetector(commands.Cog):
         bot: "MyBot",
         session_factory: async_sessionmaker,
         config: dict,
-        cache_service: CacheService,
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
-        self.cache_service = cache_service
+        self.cache_service = bot.cache_service
 
         ud_config = config.get("update_detector", {})
         self.enabled = ud_config.get("enabled", False)

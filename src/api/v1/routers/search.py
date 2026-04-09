@@ -8,22 +8,24 @@ from api.v1.schemas.banner import BannerItem
 from api.v1.schemas.search import SearchRequest, SearchResponse, ThreadDetail
 from api.v1.schemas.search.author import AuthorDetail
 from banner.banner_service import BannerService
-from core.collection_repository import CollectionRepository
 from config.config_service import ConfigService
 from core.cache_service import CacheService
-from search.cog import Search
+from core.collection_repository import CollectionRepository
+from core.follow_repository import ThreadFollowRepository
+from core.impression_cache_service import ImpressionCacheService
+from core.tag_cache_service import TagCacheService
 from search.qo.thread_search import ThreadSearchQuery
 from search.search_service import SearchService
 from shared.enum.collection_type import CollectionType
 from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigType
 from shared.keyword_parser import KeywordParser
-from core.follow_repository import ThreadFollowRepository
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
-search_cog_instance: Search | None = None
 async_session_factory: async_sessionmaker | None = None
 config_service_instance: ConfigService | None = None
 cache_service_instance: CacheService | None = None
+tag_cache_service_instance: TagCacheService | None = None
+impression_cache_service_instance: ImpressionCacheService | None = None
 # 频道映射配置: { target_channel_id: [ { "tag_name": str, "source_channel_ids": [int] } ] }
 channel_mappings_config: Dict[int, List[Dict]] = {}
 
@@ -44,9 +46,10 @@ async def execute_search(
     """
     # 检查服务是否初始化完成
     if (
-        not search_cog_instance
-        or not async_session_factory
+        not async_session_factory
         or not config_service_instance
+        or not tag_cache_service_instance
+        or not impression_cache_service_instance
     ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -333,7 +336,7 @@ async def _perform_search_and_update_counts(
     Returns:
         tuple: (帖子列表, 总数)
     """
-    repo = SearchService(session, search_cog_instance.tag_service)  # type: ignore
+    repo = SearchService(session, tag_cache_service_instance)  # type: ignore[arg-type]
     threads, total_threads = await repo.search_threads_with_count(
         query_object,
         limit=limit,
@@ -353,7 +356,7 @@ async def _perform_search_and_update_counts(
 
     if threads and count_view:
         thread_ids_to_update = [t.id for t in threads if t.id is not None]
-        await search_cog_instance.impression_cache_service.increment(  # type: ignore
+        await impression_cache_service_instance.increment(  # type: ignore[union-attr]
             thread_ids_to_update
         )
 

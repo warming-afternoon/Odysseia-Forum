@@ -151,44 +151,29 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 config=self.config,
-                cache_service=self.cache_service,
-                sync_service=self.sync_service,
             ),
             Indexer(
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 config=self.config,
-                tag_service=self.tag_cache_service,
-                sync_service=self.sync_service,
             ),
             Search(
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 config=self.config,
-                tag_service=self.tag_cache_service,
-                cache_service=self.cache_service,
-                impression_cache_service=self.impression_cache_service,
-                config_service=self.config_service,
             ),
             Preferences(
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 config=self.config,
-                tag_service=self.tag_cache_service,
-                cache_service=self.cache_service,
             ),
             Auditor(
                 bot=self,
                 session_factory=AsyncSessionFactory,
-                api_scheduler=self.api_scheduler,
-                sync_service=self.sync_service,
             ),
             Configuration(
                 bot=self,
                 session_factory=AsyncSessionFactory,
-                api_scheduler=self.api_scheduler,
-                tag_service=self.tag_cache_service,
-                config_service=self.config_service,
             ),
             BannerManagement(
                 bot=self,
@@ -202,7 +187,6 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 config=self.config,
-                cache_service=self.cache_service,
             ),
         ]
         await asyncio.gather(
@@ -212,6 +196,9 @@ class MyBot(commands.Bot):
 
         # 3. 注册全局事件监听器
         self.add_listener(self.on_index_updated_global, "on_index_updated")
+
+        # 4. 注入 API 路由依赖
+        self._inject_api_dependencies()
 
         # --- 同步应用程序命令 ---
         try:
@@ -226,6 +213,75 @@ class MyBot(commands.Bot):
         await self.api_scheduler.stop()
         await close_db()
         await super().close()
+
+    # -------------------------
+    # 辅助方法
+    # -------------------------
+
+    def _inject_api_dependencies(self):
+        """向 API 路由模块注入运行期依赖"""
+        
+        # 注入服务实例到 API 路由
+        preferences_api.async_session_factory = AsyncSessionFactory
+
+        meta_api.cache_service_instance = self.cache_service
+
+        search_api.async_session_factory = AsyncSessionFactory
+        search_api.cache_service_instance = self.cache_service
+        search_api.config_service_instance = self.config_service
+        search_api.tag_cache_service_instance = self.tag_cache_service
+        search_api.impression_cache_service_instance = self.impression_cache_service
+
+        tags_api.async_session_factory = AsyncSessionFactory
+
+        banner_api.async_session_factory = AsyncSessionFactory
+        banner_api.banner_config = self.config.get("banner", {})
+        banner_api.bot_instance = self
+
+        # 注入频道映射配置
+        channel_mappings_config = self._build_channel_mappings_config()
+        search_api.channel_mappings_config = channel_mappings_config
+        meta_api.channel_mappings_config = channel_mappings_config
+        tags_api.channel_mappings_config = channel_mappings_config
+
+        auth_section = self.config.get("auth", {}) if isinstance(self.config, dict) else {}
+        fetch_images_api.configure_fetch_images_router(
+            session_factory=AsyncSessionFactory,
+            bot_token=auth_section.get("bot_token"),
+            guild_id=auth_section.get("guild_id"),
+        )
+
+        logger.info("API 路由服务注入完成")
+
+    def _build_channel_mappings_config(self) -> dict[int, list[dict]]:
+        """将配置中的频道映射转换为 API 路由可直接使用的结构"""
+        raw_mappings = self.config.get("channel_mappings", {})
+        parsed_mappings = {}
+        for key, val in raw_mappings.items():
+            if key.startswith("_"):
+                continue
+
+            if not isinstance(val, list):
+                continue
+
+            try:
+                ch_id = int(key)
+            except (ValueError, TypeError):
+                continue
+
+            parsed_mappings[ch_id] = [
+                {
+                    "tag_name": mapping["tag_name"],
+                    "source_channel_ids": [
+                        int(channel_id)
+                        for channel_id in mapping.get("source_channel_ids", [])
+                    ],
+                }
+                for mapping in val
+                if isinstance(mapping, dict) and "tag_name" in mapping
+            ]
+        return parsed_mappings
+
 
 
 async def main():
@@ -252,69 +308,6 @@ async def main():
         else:
             logger.info("机器人已登录，但无法获取机器人信息。")
 
-    original_setup_hook = bot.setup_hook
-
-    # 在 setup_hook 完成后注入服务实例到 API 路由
-    async def enhanced_setup_hook():
-        await original_setup_hook()
-
-        # 从已加载的 Cogs 中获取服务实例
-        search_cog = bot.get_cog("Search")
-        collection_cog = bot.get_cog("CollectionCog")
-
-        preferences_api.async_session_factory = AsyncSessionFactory
-        if search_cog:
-            search_api.search_cog_instance = search_cog
-        if collection_cog:
-            booklists_api.collection_cog_instance = collection_cog
-        search_api.async_session_factory = AsyncSessionFactory
-        meta_api.cache_service_instance = bot.cache_service
-        search_api.cache_service_instance = bot.cache_service
-        search_api.config_service_instance = bot.config_service
-
-        # 注入频道映射配置
-        raw_mappings = bot.config.get("channel_mappings", {})
-        parsed_mappings = {}
-        for key, val in raw_mappings.items():
-            if key.startswith("_"):
-                continue
-            try:
-                ch_id = int(key)
-                if isinstance(val, list):
-                    parsed_mappings[ch_id] = [
-                        {
-                            "tag_name": m["tag_name"],
-                            "source_channel_ids": [
-                                int(c) for c in m.get("source_channel_ids", [])
-                            ],
-                        }
-                        for m in val
-                        if isinstance(m, dict) and "tag_name" in m
-                    ]
-            except (ValueError, TypeError):
-                continue
-        search_api.channel_mappings_config = parsed_mappings
-        meta_api.channel_mappings_config = parsed_mappings
-        tags_api.channel_mappings_config = parsed_mappings
-        tags_api.async_session_factory = AsyncSessionFactory
-
-        auth_section = (
-            bot.config.get("auth", {}) if isinstance(bot.config, dict) else {}
-        )
-        fetch_images_api.configure_fetch_images_router(
-            session_factory=AsyncSessionFactory,
-            bot_token=auth_section.get("bot_token"),
-            guild_id=auth_section.get("guild_id"),
-        )
-
-        # 注入 banner 路由服务
-        banner_api.async_session_factory = AsyncSessionFactory
-        banner_api.banner_config = bot.config.get("banner", {})
-        banner_api.bot_instance = bot
-
-        logger.info("API 路由服务注入完成")
-
-    bot.setup_hook = enhanced_setup_hook
 
     # 初始化 API 安全配置和认证配置
     initialize_api_security()
