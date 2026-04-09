@@ -56,11 +56,11 @@ class TagCacheService:
             f"全局合并标签预计算完成，共 {len(self.global_merged_tags)} 个唯一标签"
         )
 
-    def get_name_by_id(self, tag_id: int) -> str | None:
+    def get_tag_name_by_id(self, tag_id: int) -> str | None:
         """从缓存中通过ID获取标签名称。"""
         return self._id_to_name.get(tag_id)
 
-    def get_ids_by_name(self, tag_name: str) -> List[int]:
+    def get_ids_by_tag_name(self, tag_name: str) -> List[int]:
         """从缓存中通过名称获取所有对应的标签ID。"""
         return self._name_to_ids.get(tag_name, [])
 

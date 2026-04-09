@@ -3,8 +3,11 @@ from collections import defaultdict
 
 import discord
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlmodel import select
 
 from core.thread_repository import ThreadRepository
+from models import BotConfig
+from shared.enum.search_config_type import SearchConfigType
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +25,7 @@ class CacheService:
         self.indexed_channels: dict[int, discord.ForumChannel] = {}
         # guild_id -> {channel_id -> ForumChannel}
         self.guild_channels: dict[int, dict[int, discord.ForumChannel]] = {}
+        self.bot_configs: dict[SearchConfigType, BotConfig] = {}
         logger.debug("CacheService 已初始化")
 
     async def build_or_refresh_cache(self):
@@ -30,6 +34,16 @@ class CacheService:
         这个方法应该在机器人启动时和索引更新后被调用。
         """
         logger.debug("正在刷新 CacheService...")
+        await self._refresh_indexed_channels_cache()
+        await self._refresh_bot_config_cache()
+        logger.info(
+            f"CacheService 刷新完毕。缓存了 {len(self.indexed_channel_ids)} 个频道ID，"
+            f"{len(self.indexed_channels)} 个频道对象，涉及 {len(self.guild_channels)} 个服务器；"
+            f"同步缓存了 {len(self.bot_configs)} 个 BotConfig 配置项。"
+        )
+
+    async def _refresh_indexed_channels_cache(self):
+        """刷新已索引频道缓存。"""
         async with self.session_factory() as session:
             thread_service = ThreadRepository(session)
             indexed_channel_ids = await thread_service.get_all_indexed_channel_ids()
@@ -53,6 +67,34 @@ class CacheService:
             f"CacheService 刷新完毕。缓存了 {len(self.indexed_channel_ids)} 个频道ID，"
             f"{len(self.indexed_channels)} 个频道对象，涉及 {len(self.guild_channels)} 个服务器。"
         )
+
+    async def _refresh_bot_config_cache(self):
+        """刷新 BotConfig 缓存。"""
+        async with self.session_factory() as session:
+            result = await session.execute(select(BotConfig))
+            all_configs = result.scalars().all()
+
+        self.bot_configs = {
+            SearchConfigType(config.type): config
+            for config in all_configs
+            if config.type in SearchConfigType._value2member_map_
+        }
+
+    async def get_bot_config(self, config_type: SearchConfigType) -> BotConfig | None:
+        """从缓存获取配置；如未命中则自动刷新后重试。"""
+        config = self.bot_configs.get(config_type)
+        if config is not None:
+            return config
+
+        logger.info(f"配置缓存未命中: {config_type.name}. 正在尝试刷新 CacheService 配置缓存...")
+        await self._refresh_bot_config_cache()
+        config = self.bot_configs.get(config_type)
+        if config is None:
+            logger.error(
+                f"刷新缓存后仍然找不到配置: {config_type.name}. "
+                f"请检查数据库中是否存在此配置项，或运行一次初始化。"
+            )
+        return config
 
     async def _get_channel_safely(
         self, channel_id: int

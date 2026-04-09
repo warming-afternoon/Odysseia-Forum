@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,47 +12,13 @@ from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigTyp
 logger = logging.getLogger(__name__)
 
 
-class ConfigService:
+class ConfigRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
-        # 缓存字典
-        self._cache: Dict[SearchConfigType, BotConfig] = {}
-
-    async def build_or_refresh_cache(self):
-        """
-        从数据库加载所有配置项来构建或刷新缓存。
-        """
-        # logger.info("刷新 BotConfig 缓存...")
-        result = await self.session.execute(select(BotConfig))
-        all_configs = result.scalars().all()
-
-        # 使用 SearchConfigType 枚举作为键，方便类型提示和访问
-        self._cache = {SearchConfigType(config.type): config for config in all_configs}
-        # logger.info(f"BotConfig 缓存刷新完毕，共加载 {len(self._cache)} 个配置项。")
-
-    async def get_config_from_cache(
-        self, config_type: SearchConfigType
-    ) -> Optional[BotConfig]:
-        """
-        从缓存中异步获取配置项。
-        如果缓存中不存在，则尝试刷新整个缓存并重新获取。
-        """
-        config = self._cache.get(config_type)
-        if config is None:
-            logger.info(f"配置缓存未命中: {config_type.name}. 正在尝试刷新缓存...")
-            await self.build_or_refresh_cache()
-            config = self._cache.get(config_type)  # 刷新后重试
-            if config is None:
-                logger.error(
-                    f"刷新缓存后仍然找不到配置: {config_type.name}. "
-                    f"请检查数据库中是否存在此配置项，或运行一次初始化。"
-                )
-        return config
 
     async def get_all_mutex_groups_with_rules(self) -> List[MutexTagGroup]:
         """
         获取所有互斥标签组及其关联的规则。
-        使用 selectinload 避免 N+1 查询问题。
         """
         result = await self.session.execute(
             select(MutexTagGroup).options(selectinload(MutexTagGroup.rules))  # type: ignore
@@ -154,13 +120,12 @@ class ConfigService:
         )
         return list(result.scalars().all())
 
-    async def initialize_search_configs(self):
+    async def initialize_search_configs(self, main_guild_id: int):
         """
-        幂等地初始化或验证核心搜索配置项是否存在于数据库中
+        幂等地初始化或验证核心搜索配置项是否存在于数据库中。
         """
 
-        # 初始化总展示次数 (N)
-        stmt_n = (
+        config_statements = [
             insert(BotConfig)
             .values(
                 type=SearchConfigType.TOTAL_DISPLAY_COUNT,
@@ -168,12 +133,7 @@ class ConfigService:
                 value_int=0,
                 tips="UCB1算法中的全局总展示次数 (N)",
             )
-            .on_conflict_do_nothing(index_elements=["type"])
-        )
-        await self.session.execute(stmt_n)
-
-        # 初始化探索因子 (C)
-        stmt_c = (
+            .on_conflict_do_nothing(index_elements=["type"]),
             insert(BotConfig)
             .values(
                 type=SearchConfigType.UCB1_EXPLORATION_FACTOR,
@@ -181,12 +141,7 @@ class ConfigService:
                 value_float=SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value,
                 tips="UCB1算法的探索因子C，值越大越倾向于探索新内容",
             )
-            .on_conflict_do_nothing(index_elements=["type"])
-        )
-        await self.session.execute(stmt_c)
-
-        # 初始化实力分权重 (W)
-        stmt_w = (
+            .on_conflict_do_nothing(index_elements=["type"]),
             insert(BotConfig)
             .values(
                 type=SearchConfigType.STRENGTH_WEIGHT,
@@ -194,22 +149,27 @@ class ConfigService:
                 value_float=SearchConfigDefaults.STRENGTH_WEIGHT.value,
                 tips="UCB1算法中实力分(x/n)的权重W",
             )
-            .on_conflict_do_nothing(index_elements=["type"])
-        )
-        await self.session.execute(stmt_w)
-
-        # 初始化互斥标签冲突通知配置
-        stmt_mutex_notify = (
+            .on_conflict_do_nothing(index_elements=["type"]),
             insert(BotConfig)
             .values(
                 type=SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT,
                 type_str=SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT.name,
-                value_int=1,  # 默认开启 (0=关闭, 1=开启)
+                value_int=1,
                 tips="当检测到帖子应用了互斥TAG时，是否通知管理组 (0=关, 1=开)",
             )
-            .on_conflict_do_nothing(index_elements=["type"])
-        )
-        await self.session.execute(stmt_mutex_notify)
+            .on_conflict_do_nothing(index_elements=["type"]),
+            insert(BotConfig)
+            .values(
+                type=SearchConfigType.MAIN_GUILD_ID,
+                type_str=SearchConfigType.MAIN_GUILD_ID.name,
+                value_int=main_guild_id,
+                tips="主服务器 ID，用于多服务器搜索时确认主布局",
+            )
+            .on_conflict_do_nothing(index_elements=["type"]),
+        ]
+
+        for stmt in config_statements:
+            await self.session.execute(stmt)
 
         await self.session.commit()
         logger.info("核心搜索配置已初始化或验证。")

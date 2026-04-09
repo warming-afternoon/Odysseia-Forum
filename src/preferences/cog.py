@@ -6,8 +6,6 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.cache_service import CacheService
-from core.tag_cache_service import TagCacheService
 from preferences.preferences_logic import PreferencesLogic
 from preferences.views.preferences_view import PreferencesView
 from shared.safe_defer import safe_defer

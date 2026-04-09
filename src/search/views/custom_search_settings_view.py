@@ -4,8 +4,8 @@ from typing import TYPE_CHECKING, Optional
 import discord
 
 from search.dto.search_state import SearchStateDTO
-from search.views.components.number_range_modal import NumberRangeModal
-from search.views.components.sort_method_select import SortMethodSelect
+from search.components.number_range_modal import NumberRangeModal
+from search.components.sort_method_select import SortMethodSelect
 from shared.enum.default_preferences import DefaultPreferences
 from shared.safe_defer import safe_defer
 from shared.views.components.time_range_modal import TimeRangeModal

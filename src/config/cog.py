@@ -6,7 +6,7 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from config.config_service import ConfigService
+from core.config_repository import ConfigRepository
 from config.general_config_handler import GeneralConfigHandler
 from config.mutex_tags_handler import MutexTagsHandler
 from core.tag_cache_service import TagCacheService
@@ -63,12 +63,11 @@ class Configuration(commands.Cog):
         self.session_factory = session_factory
         self.api_scheduler = bot.api_scheduler
         self.tag_service = bot.tag_cache_service
-        self.config_service = bot.config_service
         self.mutex_handler = MutexTagsHandler(
             bot, self.session_factory, self.api_scheduler, self.tag_service
         )
         self.general_config_handler = GeneralConfigHandler(
-            bot, self.session_factory, self.config_service
+            bot, self.session_factory
         )
         logger.info("Config 模块已加载")
 
@@ -78,8 +77,8 @@ class Configuration(commands.Cog):
         监听全局的配置更新事件，并刷新缓存。
         """
         logger.debug("Configuration Cog 接收到 'config_updated' 事件，正在刷新缓存...")
-        if self.config_service:
-            await self.config_service.build_or_refresh_cache()
+        if self.bot.cache_service:
+            await self.bot.cache_service.build_or_refresh_cache()
 
     config_group = app_commands.Group(name="配置", description="管理机器人各项配置")
 
@@ -134,8 +133,6 @@ class Configuration(commands.Cog):
                 await self.tag_service.build_cache()
             if self.bot.cache_service:
                 await self.bot.cache_service.build_or_refresh_cache()
-            if self.config_service:
-                await self.config_service.build_or_refresh_cache()
 
             await interaction.followup.send("🎉 所有缓存刷新完毕！", ephemeral=True)
 

@@ -7,7 +7,7 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from config.config_service import ConfigService
+from core.config_repository import ConfigRepository
 from core.cache_service import CacheService
 from shared.enum.search_config_type import SearchConfigType
 from shared.safe_defer import safe_defer
@@ -236,7 +236,7 @@ class ThreadManager(commands.Cog):
         post_tag_names = set(post_tag_name_to_obj.keys())
 
         async with self.session_factory() as session:
-            repo = ConfigService(session)
+            repo = ConfigRepository(session)
             groups = await repo.get_all_mutex_groups_with_rules()
             notify_config = await repo.get_search_config(
                 SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT

@@ -8,14 +8,12 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from config.config_service import ConfigService
-from core.cache_service import CacheService
-from core.impression_cache_service import ImpressionCacheService
 from core.preferences_repository import PreferencesRepository
-from core.tag_cache_service import TagCacheService
 from search.dto.search_state import SearchStateDTO
+from search.dto.separated_tags import SeparatedTagsDTO
 from search.qo.thread_search import ThreadSearchQuery
 from search.search_service import SearchService
+from search.channel_mapping_utils import ChannelMappingUtils
 from search.strategies import AuthorSearchStrategy, CollectionSearchStrategy
 from search.views import (
     ChannelSelectionView,
@@ -30,7 +28,6 @@ from shared.safe_defer import safe_defer
 if TYPE_CHECKING:
     from bot_main import MyBot
 
-# 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
 
@@ -49,10 +46,16 @@ class Search(commands.Cog):
         self.tag_service = bot.tag_cache_service
         self.cache_service = bot.cache_service
         self.impression_cache_service = bot.impression_cache_service
-        self.config_service = bot.config_service
         self.global_search_view = GlobalSearchView(self)
         self.persistent_channel_search_view = PersistentChannelSearchView(self)
         self._has_cached_tags = False  # 用于确保 on_ready 只执行一次缓存
+
+        # 初始化频道映射工具
+        self.channel_mappings_config = self._build_channel_mappings_config()
+        self.channel_mappings_utils = ChannelMappingUtils(
+            self.channel_mappings_config
+        )
+
         logger.info("Search 模块已加载")
 
     async def cog_load(self):
@@ -67,21 +70,61 @@ class Search(commands.Cog):
         )
         self.bot.tree.add_command(search_user_context_menu)
 
-    def get_merged_tag_names(self, channel_ids: list[int]) -> list[str]:
-        """
-        获取多个频道的合并tag名列表 (去重)
-        """
-        # 空列表表示搜索全部频道，直接使用预计算的全局标签缓存
-        if not channel_ids:
-            return self.tag_service.get_global_merged_tags()
+    def _build_channel_mappings_config(self) -> dict[int, list[dict]]:
+        """解析构建内部供映射服务使用的配置字典"""
+        raw_mappings = self.config.get("channel_mappings", {})
+        parsed_mappings = {}
+        for key, val in raw_mappings.items():
+            if key.startswith("_") or not isinstance(val, list):
+                continue
+            try:
+                ch_id = int(key)
+            except (ValueError, TypeError):
+                continue
+            parsed_mappings[ch_id] = [
+                {
+                    "tag_name": mapping["tag_name"],
+                    "source_channel_ids": [
+                        int(cid) for cid in mapping.get("source_channel_ids", [])
+                    ],
+                }
+                for mapping in val
+                if isinstance(mapping, dict) and "tag_name" in mapping
+            ]
+        return parsed_mappings
 
-        # 从指定频道获取标签并合并
-        all_tags_names_set = set()
-        for channel_id in channel_ids:
-            channel = self.cache_service.indexed_channels.get(channel_id)
-            if channel:
-                all_tags_names_set.update(tag.name for tag in channel.available_tags)
-        return sorted(list(all_tags_names_set))
+    def get_merged_tags_separated(
+        self, channel_ids: list[int]
+    ) -> SeparatedTagsDTO:
+        """获取分离的虚拟标签和所有可用标签，确保虚拟标签排在最前"""
+        real_tags_set = set()
+        virtual_tags_set = set()
+
+        if not channel_ids:
+            # 全局搜索：获取所有频道的虚拟标签和真实标签
+            for mappings in self.channel_mappings_utils.channel_mappings.values():
+                for mapping in mappings:
+                    virtual_tags_set.add(mapping["tag_name"])
+            real_tags_set = set(self.tag_service.get_global_merged_tags())
+        else:
+            # 特定频道搜索：获取指定频道的虚拟标签和真实标签
+            for channel_id in channel_ids:
+                channel = self.cache_service.indexed_channels.get(channel_id)
+                if channel:
+                    real_tags_set.update(tag.name for tag in channel.available_tags)
+
+                mappings = self.channel_mappings_utils.channel_mappings.get(channel_id, [])
+                for mapping in mappings:
+                    virtual_tags_set.add(mapping["tag_name"])
+
+        # 分别排序，然后确保虚拟标签在前
+        sorted_virtual = sorted(list(virtual_tags_set))
+
+        # 真实标签中排除虚拟标签，避免重复展示
+        sorted_real = sorted(list(real_tags_set - virtual_tags_set))
+
+        all_tags = sorted_virtual + sorted_real
+        return SeparatedTagsDTO(virtual_tags=sorted_virtual, all_tags=all_tags)
 
     @staticmethod
     def _compile_highlight_regex(keywords_str: str) -> re.Pattern | None:
@@ -247,43 +290,49 @@ class Search(commands.Cog):
         return SearchStateDTO(**final_data)
 
     async def _start_global_search(self, interaction: discord.Interaction):
-        """
-        启动全局搜索流程的通用逻辑。
-        该函数会被 "/全局搜索" 命令和全局搜索按钮点击回调调用。
-        """
+        """启动全局搜索流程的通用逻辑，强制应用主服务器配置"""
         try:
             await safe_defer(interaction, ephemeral=True)
-            guild_id = interaction.guild_id
-            # 只获取当前服务器的可搜索频道
-            channels = self.cache_service.get_indexed_channels(guild_id)
+
+            # 使用主服务器 ID 获取频道
+            main_guild_config = await self.cache_service.get_bot_config(
+                SearchConfigType.MAIN_GUILD_ID
+            )
+            target_guild_id = (
+                main_guild_config.value_int
+                if main_guild_config and main_guild_config.value_int
+                else interaction.guild_id
+            )
+
+            channels = self.cache_service.get_indexed_channels(target_guild_id)
 
             if not channels:
                 await interaction.followup.send(
-                    "❌ 未找到任何可供搜索的已索引论坛频道。\n请确保管理员已正确索引频道",
+                    "❌ 未找到任何可供搜索的已索引论坛频道。\n"
+                    "请确保管理员已正确索引频道",
                     ephemeral=True,
                 )
                 return
 
-            all_channel_ids = self.cache_service.get_indexed_channel_ids_list(guild_id)
+            all_channel_ids = self.cache_service.get_indexed_channel_ids_list(
+                target_guild_id
+            )
 
             initial_state = await self._create_initial_state_from_prefs(
                 interaction.user.id,
                 overrides={"all_available_tags": [], "page": 1},
-                guild_id=guild_id or 0,
+                guild_id=target_guild_id or 0,
             )
 
             view = ChannelSelectionView(
                 self, interaction, channels, all_channel_ids, initial_state
             )
-
             embed = view.build_embed()
-
             await interaction.followup.send(
                 content="", view=view, embed=embed, ephemeral=True
             )
         except Exception:
             logger.error("在启动全局搜索中发生严重错误", exc_info=True)
-            # 确保即使有异常，也能给用户一个反馈
             if not interaction.response.is_done():
                 await safe_defer(interaction, ephemeral=True)
             await interaction.followup.send(
@@ -309,9 +358,19 @@ class Search(commands.Cog):
         """快速作者搜索的内部逻辑"""
         try:
             await safe_defer(interaction, ephemeral=True)
-            guild_id = interaction.guild_id
-            # 只获取当前服务器已索引的频道ID
-            all_channel_ids = self.cache_service.get_indexed_channel_ids_list(guild_id)
+
+            main_guild_config = await self.cache_service.get_bot_config(
+                SearchConfigType.MAIN_GUILD_ID
+            )
+            target_guild_id = (
+                main_guild_config.value_int
+                if main_guild_config and main_guild_config.value_int
+                else interaction.guild_id
+            )
+
+            all_channel_ids = self.cache_service.get_indexed_channel_ids_list(
+                target_guild_id
+            )
             if not all_channel_ids:
                 await interaction.followup.send(
                     "❌ 未找到任何可供搜索的已索引论坛频道。", ephemeral=True
@@ -327,21 +386,17 @@ class Search(commands.Cog):
                 "page": 1,
             }
             search_state = await self._create_initial_state_from_prefs(
-                interaction.user.id, overrides, guild_id=guild_id or 0
+                interaction.user.id,
+                overrides,
+                guild_id=target_guild_id or 0,
             )
 
-            # 创建作者搜索策略
             strategy = AuthorSearchStrategy(author_id=author.id)
-
-            # 创建通用搜索视图
             view = GenericSearchView(self, interaction, search_state, strategy=strategy)
-
-            # 启动视图
             await view.start()
 
         except Exception as e:
             logger.error(f"启动搜索作者时出错: {e}", exc_info=True)
-            # 确保即使有异常，也能给用户一个反馈
             if not interaction.response.is_done():
                 await safe_defer(interaction, ephemeral=True)
             await interaction.followup.send(f"❌ 启动搜索作者失败: {e}", ephemeral=True)
@@ -374,23 +429,28 @@ class Search(commands.Cog):
         try:
             await safe_defer(interaction, ephemeral=True)
 
-            strategy = CollectionSearchStrategy(user_id=interaction.user.id)
+            main_guild_config = await self.cache_service.get_bot_config(
+                SearchConfigType.MAIN_GUILD_ID
+            )
+            target_guild_id = (
+                main_guild_config.value_int
+                if main_guild_config and main_guild_config.value_int
+                else interaction.guild_id
+            )
 
+            strategy = CollectionSearchStrategy(user_id=interaction.user.id)
             initial_state = await self._create_initial_state_from_prefs(
                 interaction.user.id,
                 overrides={"page": 1},
-                guild_id=interaction.guild_id or 0,
+                guild_id=target_guild_id or 0,
             )
 
-            # 创建 GenericSearchView 实例，并注入策略
             view = GenericSearchView(
                 cog=self,
                 interaction=interaction,
                 search_state=initial_state,
                 strategy=strategy,
             )
-
-            # 启动视图，总是发送新的私密消息，避免修改公开面板
             await view.start(send_new_ephemeral=True)
 
         except Exception as e:
@@ -417,16 +477,36 @@ class Search(commands.Cog):
         per_page: int,
         preview_mode: str,
     ) -> dict:
-        """通用搜索和显示函数"""
+        """解析虚拟标签、执行数据库搜索并构建结果 Embed 列表"""
         try:
+            # 提取所有已被索引的频道ID，用于计算
+            all_indexed_channels = self.cache_service.get_indexed_channel_ids_list()
+
+            # 运用频道映射工具类解析并提取真实数据库需检索的标签和频道
+            resolution = self.channel_mappings_utils.resolve(
+                channel_ids=search_qo.channel_ids,
+                include_tags=search_qo.include_tags,
+                exclude_tags=search_qo.exclude_tags,
+                tag_logic=search_qo.tag_logic,
+                all_indexed_channels=all_indexed_channels
+            )
+            original_channel_ids = search_qo.channel_ids
+
+            search_qo.channel_ids = resolution.effective_channel_ids
+            search_qo.include_tags = resolution.effective_include_tags
+            search_qo.exclude_tags = resolution.effective_exclude_tags
+
+            # 为了支持子服检索，将限制的 guild_id 置空
+            search_qo.guild_id = None
+
             # 获取 UCB1 配置
-            total_disp_conf = await self.config_service.get_config_from_cache(
+            total_disp_conf = await self.cache_service.get_bot_config(
                 SearchConfigType.TOTAL_DISPLAY_COUNT
             )
-            ucb_factor_conf = await self.config_service.get_config_from_cache(
+            ucb_factor_conf = await self.cache_service.get_bot_config(
                 SearchConfigType.UCB1_EXPLORATION_FACTOR
             )
-            strength_conf = await self.config_service.get_config_from_cache(
+            strength_conf = await self.cache_service.get_bot_config(
                 SearchConfigType.STRENGTH_WEIGHT
             )
 
@@ -449,11 +529,9 @@ class Search(commands.Cog):
             async with self.session_factory() as session:
                 repo = SearchService(session, self.tag_service)
                 offset = (page - 1) * per_page
-                limit = per_page
-
                 threads, total_threads = await repo.search_threads_with_count(
                     search_qo,
-                    limit=limit,
+                    limit=per_page,
                     offset=offset,
                     total_display_count=total_display_count,
                     exploration_factor=exploration_factor,
@@ -471,31 +549,41 @@ class Search(commands.Cog):
 
             if threads and count_view:
                 thread_ids_to_update = [t.id for t in threads if t.id is not None]
-                # 调用服务，将这些帖子的新增展示量存入内存缓存
                 await self.impression_cache_service.increment(thread_ids_to_update)
 
             if not threads:
                 return {"has_results": False, "total": total_threads}
 
+            # 为帖子详情 embed 提取用于渲染的虚拟标签关联
+            origins = (
+                original_channel_ids
+                if original_channel_ids
+                else list(self.channel_mappings_utils.channel_mappings.keys())
+            )
+            channel_to_virtual = (
+                self.channel_mappings_utils.get_channel_virtual_tags_map(origins)
+            )
+
             embeds = []
             if not interaction.guild:
-                logger.warning("搜索时，无法获取 guild 对象，无法构建结果 embeds")
-            else:
-                # 预编译正则表达式
-                highlight_pattern = self._compile_highlight_regex(
-                    search_qo.keywords or ""
+                logger.warning(
+                    "搜索时，无法获取 guild 对象，可能导致 fallback URL 异常"
                 )
 
-                embed_tasks = [
-                    ThreadEmbedBuilder.build(
-                        thread,
-                        interaction.guild,
-                        preview_mode,
-                        highlight_pattern=highlight_pattern,
-                    )
-                    for thread in threads
-                ]
-                embeds = await asyncio.gather(*embed_tasks)
+            highlight_pattern = self._compile_highlight_regex(search_qo.keywords or "")
+            embed_tasks = []
+            for thread in threads:
+                matched_virtual_tags = channel_to_virtual.get(thread.channel_id, [])
+                task = ThreadEmbedBuilder.build(
+                    thread=thread,
+                    guild=interaction.guild,
+                    preview_mode=preview_mode,
+                    highlight_pattern=highlight_pattern,
+                    virtual_tags=matched_virtual_tags,
+                )
+                embed_tasks.append(task)
+
+            embeds = await asyncio.gather(*embed_tasks)
 
             return {
                 "has_results": True,

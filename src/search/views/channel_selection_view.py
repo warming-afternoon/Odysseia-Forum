@@ -205,8 +205,8 @@ class ChannelSelectionView(discord.ui.View):
             final_selected_ids = []
 
         # 重新获取合并后的标签（基于最终选择的频道）
-        merged_tag_names = self.cog.get_merged_tag_names(final_selected_ids)
-        merged_tag_names_set = set(merged_tag_names)
+        separated_tags = self.cog.get_merged_tags_separated(final_selected_ids)
+        merged_tag_names_set = set(separated_tags.all_tags)
 
         # 过滤已有偏好中的标签，确保它们在当前选定的频道中依然有效
         self.search_state.include_tags = self.search_state.include_tags.intersection(
@@ -218,9 +218,8 @@ class ChannelSelectionView(discord.ui.View):
 
         # 更新状态
         self.search_state.channel_ids = final_selected_ids
-        self.search_state.all_available_tags = merged_tag_names
-
-        
+        self.search_state.all_available_tags = separated_tags.all_tags
+        self.search_state.virtual_tags = separated_tags.virtual_tags
 
         generic_view = GenericSearchView(
             self.cog, interaction, self.search_state, strategy=DefaultSearchStrategy()

@@ -9,7 +9,6 @@ from api.v1.schemas.banner import BannerItem
 from api.v1.schemas.search import SearchRequest, SearchResponse, ThreadDetail
 from api.v1.schemas.search.author import AuthorDetail
 from banner.banner_service import BannerService
-from config.config_service import ConfigService
 from core.cache_service import CacheService
 from core.collection_repository import CollectionRepository
 from core.follow_repository import ThreadFollowRepository
@@ -24,7 +23,6 @@ from shared.keyword_parser import KeywordParser
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
 async_session_factory: async_sessionmaker | None = None
-config_service_instance: ConfigService | None = None
 cache_service_instance: CacheService | None = None
 tag_cache_service_instance: TagCacheService | None = None
 impression_cache_service_instance: ImpressionCacheService | None = None
@@ -49,7 +47,7 @@ async def execute_search(
     # 检查服务是否初始化完成
     if (
         not async_session_factory
-        or not config_service_instance
+        or not cache_service_instance
         or not tag_cache_service_instance
         or not impression_cache_service_instance
     ):
@@ -292,13 +290,13 @@ async def _get_search_config() -> Dict[str, Any]:
     Returns:
         Dict: 包含 total_display_count, exploration_factor, strength_weight
     """
-    total_disp_conf = await config_service_instance.get_config_from_cache(  # type: ignore
+    total_disp_conf = await cache_service_instance.get_bot_config(  # type: ignore[union-attr]
         SearchConfigType.TOTAL_DISPLAY_COUNT
     )
-    ucb_factor_conf = await config_service_instance.get_config_from_cache(  # type: ignore
+    ucb_factor_conf = await cache_service_instance.get_bot_config(  # type: ignore[union-attr]
         SearchConfigType.UCB1_EXPLORATION_FACTOR
     )
-    strength_conf = await config_service_instance.get_config_from_cache(  # type: ignore
+    strength_conf = await cache_service_instance.get_bot_config(  # type: ignore[union-attr]
         SearchConfigType.STRENGTH_WEIGHT
     )
 

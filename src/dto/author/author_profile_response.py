@@ -2,7 +2,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_serializer
 
-from dto.author import AuthorStats
+from dto.author.author_stats import AuthorStats
 
 
 class AuthorProfileResponse(BaseModel):
