@@ -293,6 +293,7 @@ async def main():
             except (ValueError, TypeError):
                 continue
         search_api.channel_mappings_config = parsed_mappings
+        meta_api.channel_mappings_config = parsed_mappings
 
         auth_section = (
             bot.config.get("auth", {}) if isinstance(bot.config, dict) else {}

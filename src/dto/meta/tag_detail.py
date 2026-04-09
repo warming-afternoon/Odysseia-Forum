@@ -2,7 +2,10 @@ from pydantic import BaseModel, Field
 
 
 class TagDetail(BaseModel):
-    """用于 API 响应的标签详细信息"""
+    """标签的基础信息模型"""
 
     id: int = Field(description="标签的 Discord ID")
-    name: str = Field(description="标签的名称")
+    """标签的 Discord ID"""
+
+    name: str = Field(description="标签名称")
+    """标签名称"""
