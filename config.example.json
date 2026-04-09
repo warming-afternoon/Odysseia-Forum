@@ -19,6 +19,9 @@
   ],
   "_comment_bot_admin": "上面的 bot_admin_user_ids 列表中的用户将拥有BOT管理员权限",
 
+  "main_guild_id": null,
+  "_comment_main_guild_id": "主服务器 ID，可为空；留空时将回退到默认值 1134557553011998840（类脑服务器）",
+
   "management_role_id": 1337450755791261766,
   "_comment_management_role": "管理组身份组ID。用于在特定事件（如互斥标签冲突）发生时接收通知。",
 

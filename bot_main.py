@@ -29,10 +29,11 @@ from preferences.cog import Preferences
 from auditor.cog import Auditor
 from config.cog import Configuration
 from banner.cog import BannerManagement
-from config.config_service import ConfigService
+from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
 from shared.api_scheduler import APIScheduler
+from shared.enum.search_config_type import SearchConfigDefaults
 from api.v1.routers import (
     preferences as preferences_api,
     search as search_api,
@@ -63,7 +64,6 @@ class MyBot(commands.Bot):
         self.cache_service: CacheService
         self.sync_service: SyncService
         self.impression_cache_service: ImpressionCacheService
-        self.config_service: ConfigService
 
         # 从配置初始化API调度器
         concurrency = self.config.get("performance", {}).get(
@@ -89,8 +89,6 @@ class MyBot(commands.Bot):
 
         if tasks:
             await asyncio.gather(*tasks)
-        if self.config_service:
-            await self.config_service.build_or_refresh_cache()
         logger.info("核心缓存刷新完毕")
 
     def reload_config(self):
@@ -121,11 +119,12 @@ class MyBot(commands.Bot):
         self.api_scheduler.start()
         await init_db()
 
-        # 确保搜索配置存在并初始化缓存
+        main_guild_id = self._get_main_guild_id_from_config()
+
+        # 确保搜索配置存在
         async with AsyncSessionFactory() as session:
-            self.config_service = ConfigService(session)
-            await self.config_service.initialize_search_configs()
-            await self.config_service.build_or_refresh_cache()
+            config_repository = ConfigRepository(session)
+            await config_repository.initialize_search_configs(main_guild_id)
 
         # 1. 初始化核心服务
         self.tag_cache_service = TagCacheService(AsyncSessionFactory)
@@ -228,7 +227,6 @@ class MyBot(commands.Bot):
 
         search_api.async_session_factory = AsyncSessionFactory
         search_api.cache_service_instance = self.cache_service
-        search_api.config_service_instance = self.config_service
         search_api.tag_cache_service_instance = self.tag_cache_service
         search_api.impression_cache_service_instance = self.impression_cache_service
 
@@ -281,6 +279,20 @@ class MyBot(commands.Bot):
                 if isinstance(mapping, dict) and "tag_name" in mapping
             ]
         return parsed_mappings
+
+    def _get_main_guild_id_from_config(self) -> int:
+        """从配置文件读取主服务器 ID；为空时回退到默认值。"""
+        raw_main_guild_id = self.config.get("main_guild_id")
+        if raw_main_guild_id in (None, ""):
+            return int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+
+        try:
+            return int(raw_main_guild_id)
+        except (TypeError, ValueError):
+            logger.warning(
+                "config.json 中的 main_guild_id 无法解析，已回退到默认主服务器 ID。"
+            )
+            return int(SearchConfigDefaults.MAIN_GUILD_ID.value)
 
 
 
