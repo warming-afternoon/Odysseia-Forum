@@ -34,14 +34,12 @@ class ThreadManager(commands.Cog):
         bot: "MyBot",
         session_factory: async_sessionmaker,
         config: dict,
-        cache_service: CacheService,
-        sync_service: "SyncService",
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
-        self.cache_service = cache_service
-        self.sync_service = sync_service
+        self.cache_service = bot.cache_service
+        self.sync_service = bot.sync_service
 
         # 从配置中读取更新间隔，如果未配置则默认为30秒
         update_interval = self.config.get("performance", {}).get(

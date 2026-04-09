@@ -42,18 +42,14 @@ class Search(commands.Cog):
         bot: "MyBot",
         session_factory: async_sessionmaker,
         config: dict,
-        tag_service: TagCacheService,
-        cache_service: CacheService,
-        impression_cache_service: ImpressionCacheService,
-        config_service: ConfigService,
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
-        self.tag_service = tag_service
-        self.cache_service = cache_service
-        self.impression_cache_service = impression_cache_service
-        self.config_service = config_service
+        self.tag_service = bot.tag_cache_service
+        self.cache_service = bot.cache_service
+        self.impression_cache_service = bot.impression_cache_service
+        self.config_service = bot.config_service
         self.global_search_view = GlobalSearchView(self)
         self.persistent_channel_search_view = PersistentChannelSearchView(self)
         self._has_cached_tags = False  # 用于确保 on_ready 只执行一次缓存

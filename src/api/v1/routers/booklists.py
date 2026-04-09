@@ -19,13 +19,11 @@ from api.v1.schemas.booklist import (
 )
 from booklist.booklist_item_service import BooklistItemService
 from booklist.booklist_service import BooklistService
-from collection.cog import CollectionCog
+from core.collection_repository import CollectionRepository
 from shared.database import AsyncSessionFactory
 from shared.enum.collection_type import CollectionType
 
 logger = logging.getLogger(__name__)
-
-collection_cog_instance: CollectionCog | None = None
 
 router = APIRouter(prefix="/booklist", tags=["书单"])
 
@@ -216,11 +214,10 @@ async def list_my_booklists(
         # 检查收藏状态
         collected_booklist_ids = set()
         user_id = int(current_user["id"])
-        if user_id and booklists and collection_cog_instance:
+        if user_id and booklists:
             booklist_ids = [b.id for b in booklists if b.id is not None]
-            async with (
-                collection_cog_instance.get_collection_service() as collection_service
-            ):
+            async with AsyncSessionFactory() as session:
+                collection_service = CollectionRepository(session)
                 collected_booklist_ids = (
                     await collection_service.get_collected_target_ids(
                         user_id, CollectionType.BOOKLIST, booklist_ids
@@ -550,16 +547,12 @@ async def get_booklist_items(
             # 检查收藏状态
             collected_thread_ids = set()
             user_id = int(current_user["id"])
-            if user_id and items and collection_cog_instance:
+            if user_id and items:
                 thread_ids = [item.thread_id for item in items]
-                async with (
-                    collection_cog_instance.get_collection_service() as collection_service
-                ):
-                    collected_thread_ids = (
-                        await collection_service.get_collected_target_ids(
-                            user_id, CollectionType.THREAD, thread_ids
-                        )
-                    )
+                collection_service = CollectionRepository(session)
+                collected_thread_ids = await collection_service.get_collected_target_ids(
+                    user_id, CollectionType.THREAD, thread_ids
+                )
 
             # 更新收藏状态
             for item in items:

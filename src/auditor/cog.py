@@ -1,14 +1,18 @@
 import logging
 import random
 from asyncio import sleep
-from typing import List
+from typing import TYPE_CHECKING, List
 
 from discord.ext import commands, tasks
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from auditor.auditor_service import AuditorService
+
 from core.sync_service import SyncService
 from shared.api_scheduler import APIScheduler
+
+if TYPE_CHECKING:
+    from bot_main import MyBot
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +28,13 @@ class Auditor(commands.Cog):
 
     def __init__(
         self,
-        bot: commands.Bot,
+        bot: "MyBot",
         session_factory: async_sessionmaker,
-        api_scheduler: APIScheduler,
-        sync_service: SyncService,
     ):
         self.bot = bot
         self.session_factory = session_factory
-        self.api_scheduler = api_scheduler
-        self.sync_service = sync_service
+        self.api_scheduler = bot.api_scheduler
+        self.sync_service = bot.sync_service
         self.audit_queue: List[int] = []
         logger.info("Auditor 模块已加载")
 
