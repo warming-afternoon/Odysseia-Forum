@@ -40,6 +40,7 @@ from api.v1.routers import (
     fetch_images as fetch_images_api,
     banner as banner_api,
     booklists as booklists_api,
+    tags as tags_api,
 )
 from api.main import app as fastapi_app
 from api.v1.dependencies.security import initialize_api_security
@@ -294,6 +295,8 @@ async def main():
                 continue
         search_api.channel_mappings_config = parsed_mappings
         meta_api.channel_mappings_config = parsed_mappings
+        tags_api.channel_mappings_config = parsed_mappings
+        tags_api.async_session_factory = AsyncSessionFactory
 
         auth_section = (
             bot.config.get("auth", {}) if isinstance(bot.config, dict) else {}
