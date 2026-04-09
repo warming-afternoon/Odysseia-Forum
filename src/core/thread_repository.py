@@ -1,6 +1,6 @@
 import logging
 from datetime import datetime
-from typing import List, Sequence, cast
+from typing import List, Optional, Sequence, cast
 
 from sqlalchemy import ColumnElement, case, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -379,3 +379,24 @@ class ThreadRepository:
             ChannelThreadCount(channel_id=int(row[0]), thread_count=int(row[1]))
             for row in rows
         ]
+
+    async def get_total_thread_count_for_scope(
+        self, guild_id: Optional[int], channel_ids: Optional[List[int]]
+    ) -> int:
+        """获取指定范围内的有效帖子去重总数"""
+        thread_id_column = cast(ColumnElement, Thread.id)
+        not_found_count_column = cast(ColumnElement, Thread.not_found_count)
+        guild_id_column = cast(ColumnElement, Thread.guild_id)
+        channel_id_column = cast(ColumnElement, Thread.channel_id)
+
+        statement = select(func.count(thread_id_column.distinct())).where(
+            not_found_count_column == 0
+        )
+
+        if guild_id is not None:
+            statement = statement.where(guild_id_column == guild_id)
+        if channel_ids:
+            statement = statement.where(channel_id_column.in_(channel_ids))
+
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none() or 0

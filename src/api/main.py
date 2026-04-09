@@ -14,6 +14,7 @@ from api.v1.routers import (
     follows,
     preferences,
     search,
+    tags,
 )
 
 # 读取配置
@@ -81,6 +82,7 @@ app.include_router(fetch_images.router, prefix="/v1")
 app.include_router(banner.router, prefix="/v1")
 app.include_router(collections.router, prefix="/v1")
 app.include_router(booklists.router, prefix="/v1")
+app.include_router(tags.router, prefix="/v1")
 
 
 # 包含 v1 的健康检查端点
@@ -108,5 +110,6 @@ async def root():
             "banner": "/v1/banner",
             "collections": "/v1/collections",
             "booklists": "/v1/booklists",
+            "tags": "/v1/tags",
         },
     }
