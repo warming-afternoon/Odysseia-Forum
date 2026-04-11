@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, List, Set
 import discord
 
 from dto.preferences import UserSearchPreferencesDTO
-from search.views.components.tag_page_button import TagPageButton
+from search.components.tag_page_button import TagPageButton
 from shared.safe_defer import safe_defer
 from shared.views.tag_select import TagSelect
 

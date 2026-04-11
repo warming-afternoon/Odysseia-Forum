@@ -7,8 +7,8 @@ from core.preferences_repository import PreferencesRepository
 from preferences.views.components.results_per_page_modal import ResultsPerPageModal
 from search.constants import SortMethod
 from dto.preferences import UserSearchPreferencesDTO
-from search.views.components.keyword_modal import KeywordModal
-from search.views.components.sort_method_select import SortMethodSelect
+from search.components.keyword_modal import KeywordModal
+from search.components.sort_method_select import SortMethodSelect
 from shared.enum.default_preferences import DefaultPreferences
 from shared.safe_defer import safe_defer
 from shared.views.components.time_range_modal import TimeRangeModal

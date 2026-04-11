@@ -19,7 +19,7 @@ from models import Tag, Thread, ThreadTagLink
 logger = logging.getLogger(__name__)
 
 
-class TagService:
+class TagStatisticsService:
     """处理标签聚合与统计等复杂跨表业务逻辑的服务。"""
 
     def __init__(self, session: AsyncSession, channel_mappings: Dict[int, List[Dict]]):

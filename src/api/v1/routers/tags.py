@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.schemas.tags import TagStatsRequest, TagStatsResponse
-from core.tag_service import TagService
+from tag.tag_statistics_service import TagStatisticsService
 from shared.database import AsyncSessionFactory
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ async def stats_tags(
 
     try:
         async with async_session_factory() as session:
-            tag_service = TagService(
+            tag_service = TagStatisticsService(
                 session=session,
                 channel_mappings=channel_mappings_config,
             )

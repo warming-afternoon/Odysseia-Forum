@@ -102,12 +102,12 @@ class SearchService:
             resolved_include_tag_ids = [
                 id
                 for name in query.include_tags
-                for id in self.tag_cache_service.get_ids_by_name(name)
+                for id in self.tag_cache_service.get_ids_by_tag_name(name)
             ]
             resolved_exclude_tag_ids = [
                 id
                 for name in query.exclude_tags
-                for id in self.tag_cache_service.get_ids_by_name(name)
+                for id in self.tag_cache_service.get_ids_by_tag_name(name)
             ]
 
             # --- 步骤 1: 构建基础过滤器列表 (除了反选关键词) ---
@@ -195,7 +195,7 @@ class SearchService:
                 if query.tag_logic == "and":
                     # TODO : 考虑精简
                     for tag_name in query.include_tags:
-                        ids_for_name = self.tag_cache_service.get_ids_by_name(tag_name)
+                        ids_for_name = self.tag_cache_service.get_ids_by_tag_name(tag_name)
                         if ids_for_name:
                             filters.append(Thread.tags.any(Tag.id.in_(ids_for_name)))  # type: ignore
                 else:

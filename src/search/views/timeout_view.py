@@ -2,7 +2,7 @@ from typing import TYPE_CHECKING, Type
 
 import discord
 
-from search.views.components.continue_button import ContinueButton
+from search.components.continue_button import ContinueButton
 
 if TYPE_CHECKING:
     from search.cog import Search

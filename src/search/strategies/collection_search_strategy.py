@@ -6,11 +6,11 @@ import discord
 from search.constants import SortMethod
 from search.search_service import SearchService
 from search.strategies.search_strategy import SearchStrategy
-from search.views.components.keyword_modal import KeywordButton
-from search.views.components.sort_method_select import SortMethodSelect
-from search.views.components.sort_order_button import SortOrderButton
-from search.views.components.tag_logic_button import TagLogicButton
-from search.views.components.tag_page_button import TagPageButton
+from search.components.keyword_modal import KeywordButton
+from search.components.sort_method_select import SortMethodSelect
+from search.components.sort_order_button import SortOrderButton
+from search.components.tag_logic_button import TagLogicButton
+from search.components.tag_page_button import TagPageButton
 from shared.views.tag_select import TagSelect
 
 if TYPE_CHECKING:

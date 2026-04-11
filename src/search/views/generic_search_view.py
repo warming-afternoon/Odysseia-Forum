@@ -15,7 +15,7 @@ from search.views.combined_search_view import CombinedSearchView
 from search.views.custom_search_settings_view import CustomSearchSettingsView
 from search.views.results_view import SearchResultsView
 from search.views.timeout_view import TimeoutView
-from search.views.components.keyword_modal import KeywordModal
+from search.components.keyword_modal import KeywordModal
 from shared.enum.default_preferences import DefaultPreferences
 from shared.safe_defer import safe_defer
 
