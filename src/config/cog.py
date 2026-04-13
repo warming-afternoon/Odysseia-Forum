@@ -6,10 +6,8 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.config_repository import ConfigRepository
 from config.general_config_handler import GeneralConfigHandler
 from config.mutex_tags_handler import MutexTagsHandler
-from core.tag_cache_service import TagCacheService
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:

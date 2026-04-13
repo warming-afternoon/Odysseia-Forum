@@ -15,25 +15,32 @@ class BooklistItem(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    """主键ID"""
 
     booklist_id: int = Field(index=True, description="所属书单ID")
-    thread_id: int = Field(index=True, description="关联的帖子ID")
+    """所属书单ID"""
 
-    # （可选的）排序数据，用于控制展示顺序
+    thread_id: int = Field(index=True, description="关联的帖子ID")
+    """关联的帖子ID"""
+
     display_order: int = Field(default=0, index=True)
+    """（可选的）排序数据，用于控制展示顺序"""
 
     # 推荐语/备注 (用户在这个书单里对这个帖子的特殊评价)
     comment: Optional[str] = Field(default=None, description="书单主对该帖子的备注")
+    """书单主对该帖子的备注"""
 
-    # Discord 展示消息ID
     display_message_id: Optional[int] = Field(default=None, description="展示消息的ID")
+    """展示消息的 Discord ID"""
 
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc), description="加入书单的时间"
     )
+    """加入书单的时间"""
 
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc),
         sa_column_kwargs={"onupdate": lambda: datetime.now(timezone.utc)},
         description="最后更新时间",
     )
+    """最后更新时间"""

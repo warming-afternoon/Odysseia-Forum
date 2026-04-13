@@ -7,8 +7,6 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.sync_service import SyncService
-from core.tag_cache_service import TagCacheService
 from indexer.views import IndexerDashboard
 from shared.safe_defer import safe_defer
 from ThreadManager.cog import ThreadManager

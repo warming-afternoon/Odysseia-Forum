@@ -7,7 +7,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.schemas.tags import TagStatsRequest, TagStatsResponse
 from tag.tag_statistics_service import TagStatisticsService
-from shared.database import AsyncSessionFactory
 
 logger = logging.getLogger(__name__)
 

@@ -8,8 +8,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from auditor.auditor_service import AuditorService
 
-from core.sync_service import SyncService
-from shared.api_scheduler import APIScheduler
 
 if TYPE_CHECKING:
     from bot_main import MyBot

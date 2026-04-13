@@ -8,13 +8,11 @@ from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.config_repository import ConfigRepository
-from core.cache_service import CacheService
 from shared.enum.search_config_type import SearchConfigType
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:
     from bot_main import MyBot
-    from core.sync_service import SyncService
 import logging
 
 from core.tag_repository import TagRepository

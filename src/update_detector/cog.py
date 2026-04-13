@@ -6,7 +6,6 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.cache_service import CacheService
 from core.thread_repository import ThreadRepository
 from shared.safe_defer import safe_defer
 from update_detector.gemini_service import GeminiService
