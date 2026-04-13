@@ -63,7 +63,7 @@ class MetaService:
         # 组装返回数据
         results: List[ChannelDetail] = []
         for channel in target_channels:
-            tags = [TagDetail(id=tag.id, name=tag.name) for tag in channel.available_tags]
+            tags = [TagDetail(tag_id=tag.id, name=tag.name) for tag in channel.available_tags]
             mappings = self.channel_mappings.get(channel.id, [])
             
             virtual_tags: List[VirtualTagDetail] = []
@@ -97,7 +97,7 @@ class MetaService:
                 if not src_ch:  # 只有该频道已被系统索引且获取到缓存时才计入
                     continue
                 
-                src_tags = [TagDetail(id=t.id, name=t.name) for t in src_ch.available_tags]
+                src_tags = [TagDetail(tag_id=t.id, name=t.name) for t in src_ch.available_tags]
                 mapped_source_channels.append(
                     MappedSourceChannelDetail(
                         guild_id=src_ch.guild.id,
@@ -111,7 +111,7 @@ class MetaService:
             results.append(
                 ChannelDetail(
                     guild_id=channel.guild.id,
-                    id=channel.id,
+                    channel_id=channel.id,
                     name=channel.name,
                     available_tags=tags,
                     virtual_tags=virtual_tags,

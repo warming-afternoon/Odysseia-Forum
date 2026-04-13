@@ -64,14 +64,14 @@ cd Odysseia-Forum
 
 ### 4. Docker Compose 运行 (与 3. 二选一)
 
--  构建并启动容器
+-  按最新代码构建并启动容器
     ```bash
     docker compose up -d --build
     ```
 
--  停止服务
+-  停止服务并删除镜像 (不删除资源)
     ```bash
-    docker compose down
+    docker compose down --rmi all
     ```
 
 -  查看日志

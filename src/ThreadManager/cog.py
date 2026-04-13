@@ -20,6 +20,7 @@ from core.thread_repository import ThreadRepository
 from ThreadManager.batch_update_service import BatchUpdateService
 from core.follow_repository import ThreadFollowRepository
 from ThreadManager.views.vote_view import TagVoteView
+from discovery.redis_trend_service import RedisTrendService
 
 logger = logging.getLogger(__name__)
 
@@ -478,6 +479,8 @@ class ThreadManager(commands.Cog):
             ):
                 # 只有对首楼消息的反应才更新统计
                 if payload.message_id == channel.id:
+                    # 记录点赞飙升趋势
+                    await RedisTrendService().record_increment("reaction", channel.id, 1)
                     await self.bot.api_scheduler.submit(
                         coro_factory=lambda: self._update_reaction_count(channel),
                         priority=5,

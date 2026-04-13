@@ -9,6 +9,7 @@ from sqlmodel import and_, delete, desc, func, select
 from collection.dto import BatchAddResult, BatchRemoveResult
 from models import Booklist, Thread, ThreadFollow, UserCollection
 from shared.enum.collection_type import CollectionType
+from discovery.redis_trend_service import RedisTrendService
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,12 @@ class CollectionRepository:
             stmt = insert(UserCollection).values(values)
             await self.session.execute(stmt)
             await self.session.commit()
+            
+        # 若添加的是帖子类型则将其增量推送至飙升趋势统计 (redis)
+        if target_type == CollectionType.THREAD.value and new_ids:
+            trend_service = RedisTrendService()
+            for tid in new_ids:
+                await trend_service.record_increment("collection", tid, 1)
 
         return BatchAddResult(
             added_ids=new_ids,

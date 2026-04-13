@@ -6,6 +6,9 @@
   
   "proxy": "",
   "_comment_proxy": "如果你需要通过代理连接Discord，请在proxy里填写你的代理地址(例如 http://127.0.0.1:8080)，否则请留空",
+  
+  "redis_url": "redis://odysseia-redis:6379/0",
+  "_comment_redis": "Redis 连接地址，用于广场趋势数据计算",
 
   "performance": {
     "api_scheduler_concurrency": 40,

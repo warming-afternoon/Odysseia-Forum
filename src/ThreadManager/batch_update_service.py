@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from core.sync_service import SyncService
 from core.thread_repository import ThreadRepository
 from ThreadManager.update_data_dto import UpdateData
+from discovery.redis_trend_service import RedisTrendService
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +90,12 @@ class BatchUpdateService:
                 await session.commit()
 
             logger.debug(f"批量更新成功写入数据库，影响了 {updated_count} 行。")
+
+            # 将讨论数的增量同步至趋势服务 (redis)
+            trend_service = RedisTrendService()
+            for tid, update_data in updates_to_process.items():
+                if update_data["increment"] > 0:
+                    await trend_service.record_increment("reply", tid, update_data["increment"])
 
             # 处理可能不存在于数据库里的数据
             if updated_count < intended_count:

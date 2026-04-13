@@ -13,7 +13,7 @@ class ChannelDetail(BaseModel):
     guild_id: int = Field(description="所属服务器的 Discord ID")
     """所属服务器的 Discord ID"""
 
-    channel_id: int = Field(alias="id", description="频道的 Discord ID")
+    channel_id: int = Field(description="频道的 Discord ID")
     """频道的 Discord ID"""
 
     channel_name: str = Field(alias="name", description="频道名称")

@@ -8,9 +8,31 @@ services:
     working_dir: /app
     environment:
       PYTHONPATH: /app/src
+      # 这里的 redis 地址使用容器名
+      REDIS_URL: redis://odysseia-redis:6379/0
     ports:
       - "10810:10810"
     volumes:
       - ./config.json:/app/config.json:ro
       - ./data:/app/data
+    # 确保 Redis 健康后再启动机器人
+    depends_on:
+      odysseia-redis:
+        condition: service_healthy
     command: ["uv", "run", "bot_main.py"]
+
+  odysseia-redis:
+    image: redis:alpine
+    container_name: odysseia-redis
+    restart: unless-stopped
+    ports:
+      - "11810:6379"
+    volumes:
+      - ./data/redis:/data
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    command: ["redis-server", "--appendonly", "yes"]

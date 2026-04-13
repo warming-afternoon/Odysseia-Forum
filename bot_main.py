@@ -18,6 +18,7 @@ import asyncio
 import uvicorn
 
 from shared.database import AsyncSessionFactory, init_db, close_db
+from shared.redis_client import RedisManager
 from ThreadManager.cog import ThreadManager
 from core.tag_cache_service import TagCacheService
 from core.cache_service import CacheService
@@ -40,8 +41,8 @@ from api.v1.routers import (
     meta as meta_api,
     fetch_images as fetch_images_api,
     banner as banner_api,
-    booklists as booklists_api,
     tags as tags_api,
+    discovery as discovery_api,
 )
 from api.main import app as fastapi_app
 from api.v1.dependencies.security import initialize_api_security
@@ -232,6 +233,8 @@ class MyBot(commands.Bot):
 
         tags_api.async_session_factory = AsyncSessionFactory
 
+        discovery_api.async_session_factory = AsyncSessionFactory
+
         banner_api.async_session_factory = AsyncSessionFactory
         banner_api.banner_config = self.config.get("banner", {})
         banner_api.bot_instance = self
@@ -310,6 +313,10 @@ async def main():
 
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
+        
+    # 读取配置项并初始化全局Redis连接池
+    redis_url = config.get("redis_url", "redis://odysseia-redis:6379/0")
+    await RedisManager.init_redis(redis_url)
 
     bot = MyBot(intents=intents, config=config)
 
@@ -343,6 +350,9 @@ async def main():
 
     async with bot:
         await asyncio.gather(bot.start(config["token"]), server.serve())
+        
+    # 服务关闭时切断与Redis的连接
+    await RedisManager.close_redis()
 
 
 if __name__ == "__main__":
