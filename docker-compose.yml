@@ -1,0 +1,16 @@
+services:
+  odysseia-forum:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: odysseia-forum
+    restart: unless-stopped
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app/src
+    ports:
+      - "10810:10810"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+    command: ["uv", "run", "bot_main.py"]

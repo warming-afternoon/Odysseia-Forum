@@ -28,6 +28,7 @@ Discord 论坛搜索机器人，支持智能索引、多维度搜索和用户偏
 ## 📋 系统要求
 
 - Python 3.11+
+- Docker / Docker Compose（可选）
 
 ## 🚀 快速开始
 
@@ -41,25 +42,8 @@ cd Odysseia-Forum
 ### 2. 配置文件
 根据 `config.example.json` 创建你自己的 `config.json` 文件，并填入你的Discord机器人Token。
 
-### 3. 一键启动 (linux 运行)
-我们提供了一个一键启动脚本 `start.sh`
 
-```bash
-# 首次运行前，请赋予脚本执行权限
-chmod +x ./start.sh
-
-# 执行脚本
-./start.sh
-```
-
-### 脚本高级用法
-- **仅设置环境**: `./start.sh setup`
-- **重启机器人**: `./start.sh restart`
-- **查看帮助**: `./start.sh --help`
-
-### 4. 手动运行 ( windows/linux 运行)
-
-如果你不想使用 `start.sh` 脚本，可以按照以下步骤手动运行机器人：
+### 3. 手动运行 (与 4. 二选一)
 
 1.  创建虚拟环境并安装项目 (若为首次运行)
     ```bash
@@ -78,6 +62,22 @@ chmod +x ./start.sh
     uv run bot_main.py
     ```
 
+### 4. Docker Compose 运行 (与 3. 二选一)
+
+-  构建并启动容器
+    ```bash
+    docker compose up -d --build
+    ```
+
+-  停止服务
+    ```bash
+    docker compose down
+    ```
+
+-  查看日志
+    ```bash
+    docker compose logs -f
+    ```
 
 ## 📖 使用指南
 
