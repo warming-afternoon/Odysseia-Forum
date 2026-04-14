@@ -34,19 +34,17 @@ class PreferencesView(discord.ui.View):
 
     async def fetch_preferences(self) -> "UserSearchPreferencesDTO":
         """获取最新的用户偏好设置"""
-        guild_id = self.original_interaction.guild_id or 0
-        async with self.service.session_factory() as session:
-            repo = PreferencesRepository(session)
-            prefs_dto = await repo.get_user_preferences(
-                self.original_interaction.user.id, guild_id
+        # 使用配置的主服务器 ID
+        prefs_dto = await self.service.get_user_preferences(
+            self.original_interaction.user.id
+        )
+        if not prefs_dto:
+            # 创建一个临时的空DTO对象
+            prefs_dto = UserSearchPreferencesDTO(
+                user_id=self.original_interaction.user.id
             )
-            if not prefs_dto:
-                # 创建一个临时的空DTO对象
-                prefs_dto = UserSearchPreferencesDTO(
-                    user_id=self.original_interaction.user.id
-                )
-            self.preferences = prefs_dto
-            return prefs_dto
+        self.preferences = prefs_dto
+        return prefs_dto
 
     def build_embed(self) -> discord.Embed:
         """构建显示当前偏好设置的Embed"""
@@ -440,9 +438,8 @@ class PreferencesView(discord.ui.View):
             if sort_method != "custom":
                 update_data["custom_base_sort"] = "comprehensive"
 
-            guild_id = interaction.guild_id or 0
             await self.service.save_user_preferences(
-                interaction.user.id, update_data, guild_id
+                interaction.user.id, update_data
             )
             await self.refresh(interaction)  # 刷新视图以显示或隐藏新行
         except Exception as e:
@@ -457,9 +454,8 @@ class PreferencesView(discord.ui.View):
         await safe_defer(interaction)
         try:
             # 注意这里 service 的方法是通用的，可以直接用
-            guild_id = interaction.guild_id or 0
             await self.service.save_user_preferences(
-                interaction.user.id, {"custom_base_sort": sort_method}, guild_id
+                interaction.user.id, {"custom_base_sort": sort_method}
             )
             await self.refresh(interaction)  # 刷新视图以更新embed中的文本
         except Exception as e:

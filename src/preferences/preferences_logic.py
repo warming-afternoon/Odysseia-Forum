@@ -15,6 +15,7 @@ from preferences.views.tag_preferences_view import TagPreferencesView
 from dto.preferences.user_search_preferences import UserSearchPreferencesDTO
 from shared.safe_defer import safe_defer
 from shared.utils import process_string_to_set
+from shared.enum.search_config_type import SearchConfigDefaults
 
 if TYPE_CHECKING:
     from preferences.views.preferences_view import PreferencesView
@@ -35,11 +36,20 @@ class PreferencesLogic:
         session_factory: async_sessionmaker,
         tag_service: TagCacheService,
         cache_service: CacheService,
+        config: dict,
     ):
         self.bot = bot
         self.session_factory = session_factory
         self.tag_service = tag_service
         self.cache_service = cache_service
+        self.config = config
+        # 从配置获取主服务器 ID，用于偏好设置
+        raw_id = config.get("main_guild_id")
+        self.main_guild_id = int(raw_id) if raw_id else int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+
+    def _resolve_guild_id(self, guild_id: int = 0) -> int:
+        """辅助方法：如果 guild_id 为 0 或 None，则回退到配置的主服务器 ID"""
+        return guild_id if guild_id and guild_id != 0 else self.main_guild_id
 
     async def get_user_preferences(
         self, user_id: int, guild_id: int = 0
@@ -47,7 +57,7 @@ class PreferencesLogic:
         """获取并返回用户在指定服务器的搜索偏好 DTO"""
         async with self.session_factory() as session:
             repo = PreferencesRepository(session)
-            return await repo.get_user_preferences(user_id, guild_id)
+            return await repo.get_user_preferences(user_id, self._resolve_guild_id(guild_id))
 
     async def save_user_preferences(
         self, user_id: int, prefs_data: dict, guild_id: int = 0
@@ -55,7 +65,7 @@ class PreferencesLogic:
         """创建或更新用户在指定服务器的搜索偏好设置"""
         async with self.session_factory() as session:
             repo = PreferencesRepository(session)
-            return await repo.save_user_preferences(user_id, prefs_data, guild_id)
+            return await repo.save_user_preferences(user_id, prefs_data, self._resolve_guild_id(guild_id))
 
     async def save_user_keywords(
         self,
@@ -85,7 +95,7 @@ class PreferencesLogic:
                     "exclude_keywords": final_exclude_str,
                     "exclude_keyword_exemption_markers": final_exemption_markers_list,
                 },
-                guild_id,
+                self._resolve_guild_id(guild_id),
             )
 
     async def search_preferences_author(
@@ -97,7 +107,7 @@ class PreferencesLogic:
         await safe_defer(interaction, ephemeral=True)
         try:
             user_id = interaction.user.id
-            guild_id = interaction.guild_id or 0
+            resolved_guild_id = self._resolve_guild_id()
             if action.value in ["include", "exclude", "unblock"] and not user:
                 await self.bot.api_scheduler.submit(
                     coro_factory=lambda: interaction.followup.send(
@@ -109,7 +119,7 @@ class PreferencesLogic:
 
             async with self.session_factory() as session:
                 repo = PreferencesRepository(session)
-                prefs = await repo.get_user_preferences(user_id, guild_id)
+                prefs = await repo.get_user_preferences(user_id, resolved_guild_id)
 
                 if not prefs:
                     prefs_data = {"include_authors": [], "exclude_authors": []}
@@ -148,7 +158,7 @@ class PreferencesLogic:
                         "include_authors": list(include_authors),
                         "exclude_authors": list(exclude_authors),
                     },
-                    guild_id,
+                    resolved_guild_id,
                 )
 
             await self.bot.api_scheduler.submit(
@@ -170,14 +180,14 @@ class PreferencesLogic:
         """处理 /搜索偏好 频道 命令，启动频道偏好设置视图。"""
         await safe_defer(interaction, ephemeral=True)
         try:
-            guild_id = interaction.guild_id or 0
+            resolved_guild_id = self._resolve_guild_id()
             async with self.session_factory() as session:
                 repo = PreferencesRepository(session)
-                prefs_dto = await repo.get_user_preferences(interaction.user.id, guild_id)
+                prefs_dto = await repo.get_user_preferences(interaction.user.id, resolved_guild_id)
                 if not prefs_dto:
                     prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
 
-            indexed_channels = self.cache_service.get_indexed_channels(guild_id)
+            indexed_channels = self.cache_service.get_indexed_channels(resolved_guild_id)
 
             view = ChannelPreferencesView(
                 self, interaction, parent_view, prefs_dto, indexed_channels
@@ -199,11 +209,12 @@ class PreferencesLogic:
     ):
         """保存用户的默认搜索频道列表"""
         async with self.session_factory() as session:
+            resolved_guild_id = self._resolve_guild_id(guild_id)
             repo = PreferencesRepository(session)
             await repo.save_user_preferences(
                 user_id,
                 {"preferred_channels": channel_ids},
-                guild_id,
+                resolved_guild_id,
             )
 
     async def save_time_preferences(
@@ -214,8 +225,9 @@ class PreferencesLogic:
         直接存储字符串
         """
         async with self.session_factory() as session:
+            resolved_guild_id = self._resolve_guild_id(guild_id)
             repo = PreferencesRepository(session)
-            await repo.save_user_preferences(user_id, time_data, guild_id)
+            await repo.save_user_preferences(user_id, time_data, resolved_guild_id)
 
     async def search_preferences_tags(
         self, interaction: discord.Interaction, parent_view: "PreferencesView"
@@ -223,7 +235,7 @@ class PreferencesLogic:
         """处理 /搜索偏好 标签 命令，启动标签偏好设置视图。"""
         await safe_defer(interaction, ephemeral=True)
         try:
-            guild_id = interaction.guild_id or 0
+            resolved_guild_id = self._resolve_guild_id()
             async with self.session_factory() as session:
                 repo = PreferencesRepository(session)
 
@@ -231,7 +243,7 @@ class PreferencesLogic:
                 all_tags = self.tag_service.get_unique_tag_names()
 
                 # 获取用户当前偏好
-                prefs_dto = await repo.get_user_preferences(interaction.user.id, guild_id)
+                prefs_dto = await repo.get_user_preferences(interaction.user.id, resolved_guild_id)
                 if not prefs_dto:
                     # 创建一个新的DTO，但暂时不保存到数据库
                     # 直到用户点击保存时，才会通过 save_tag_preferences 创建记录
@@ -260,7 +272,7 @@ class PreferencesLogic:
     ):
         """由 TagPreferencesView 回调，用于保存标签偏好。"""
         try:
-            guild_id = interaction.guild_id or 0
+            resolved_guild_id = self._resolve_guild_id()
             async with self.session_factory() as session:
                 repo = PreferencesRepository(session)
                 await repo.save_user_preferences(
@@ -269,7 +281,7 @@ class PreferencesLogic:
                         "include_tags": include_tags,
                         "exclude_tags": exclude_tags,
                     },
-                    guild_id,
+                    resolved_guild_id,
                 )
         except Exception as e:
             # 在视图中已经处理了对用户的响应，这里只记录日志
@@ -279,7 +291,8 @@ class PreferencesLogic:
         """切换用户的预览图显示模式（大图/缩略图）。"""
         async with self.session_factory() as session:
             repo = PreferencesRepository(session)
-            prefs = await repo.get_user_preferences(user_id, guild_id)
+            resolved_guild_id = self._resolve_guild_id()
+            prefs = await repo.get_user_preferences(user_id, resolved_guild_id)
 
             current_mode = "thumbnail"
             if prefs and prefs.preview_image_mode:
@@ -288,12 +301,13 @@ class PreferencesLogic:
             new_mode = "image" if current_mode == "thumbnail" else "thumbnail"
 
             await repo.save_user_preferences(
-                user_id, {"preview_image_mode": new_mode}, guild_id
+                user_id, {"preview_image_mode": new_mode}, resolved_guild_id
             )
 
     async def clear_user_preferences(self, user_id: int, guild_id: int = 0) -> None:
         """清空指定用户在指定服务器的所有搜索偏好设置"""
         async with self.session_factory() as session:
+            resolved_guild_id = self._resolve_guild_id(guild_id)
             repo = PreferencesRepository(session)
             await repo.save_user_preferences(
                 user_id,
@@ -313,7 +327,7 @@ class PreferencesLogic:
                     "preferred_channels": [],
                     "sort_method": "comprehensive",
                 },
-                guild_id,
+                resolved_guild_id,
             )
 
     async def save_sort_method(
@@ -321,9 +335,10 @@ class PreferencesLogic:
     ) -> None:
         """保存用户的排序算法偏好"""
         async with self.session_factory() as session:
+            resolved_guild_id = self._resolve_guild_id(guild_id)
             repo = PreferencesRepository(session)
             await repo.save_user_preferences(
                 user_id,
                 {"sort_method": sort_method},
-                guild_id,
+                resolved_guild_id,
             )

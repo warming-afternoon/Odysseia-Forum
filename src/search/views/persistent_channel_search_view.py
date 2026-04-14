@@ -78,7 +78,7 @@ class PersistentChannelSearchView(discord.ui.View):
         }
 
         initial_state = await self.cog._create_initial_state_from_prefs(
-            interaction.user.id, overrides, guild_id=interaction.guild_id or 0
+            interaction.user.id, overrides
         )
 
         generic_view = GenericSearchView(

@@ -221,8 +221,12 @@ class MyBot(commands.Bot):
     def _inject_api_dependencies(self):
         """向 API 路由模块注入运行期依赖"""
         
+        # 获取主服务器ID
+        main_guild_id = self._get_main_guild_id_from_config()
+        
         # 注入服务实例到 API 路由
         preferences_api.async_session_factory = AsyncSessionFactory
+        preferences_api.main_guild_id = main_guild_id
 
         meta_api.cache_service_instance = self.cache_service
 
@@ -234,6 +238,7 @@ class MyBot(commands.Bot):
         tags_api.async_session_factory = AsyncSessionFactory
 
         discovery_api.async_session_factory = AsyncSessionFactory
+        discovery_api.main_guild_id = main_guild_id
 
         banner_api.async_session_factory = AsyncSessionFactory
         banner_api.banner_config = self.config.get("banner", {})

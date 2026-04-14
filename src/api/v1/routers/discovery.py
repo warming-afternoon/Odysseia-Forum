@@ -15,6 +15,7 @@ from shared.enum.collection_type import CollectionType
 logger = logging.getLogger(__name__)
 
 async_session_factory: Optional[async_sessionmaker] = None
+main_guild_id: int = 0  # 注入的主服务器 ID
 
 router = APIRouter(prefix="/discovery", tags=["发现"], dependencies=[Depends(require_auth)])
 
@@ -58,7 +59,7 @@ async def get_discovery_rails(
     if apply_preferences and user_id:
         async with async_session_factory() as session:
             pref_repo = PreferencesRepository(session)
-            prefs = await pref_repo.get_user_preferences(user_id, 0)
+            prefs = await pref_repo.get_user_preferences(user_id, main_guild_id)
 
     try:
         async with async_session_factory() as session:

@@ -93,6 +93,20 @@ class Search(commands.Cog):
             ]
         return parsed_mappings
 
+    def _get_main_guild_id_from_config(self) -> int:
+        """从配置文件读取主服务器 ID；为空时回退到默认值。"""
+        raw_main_guild_id = self.config.get("main_guild_id")
+        if raw_main_guild_id in (None, ""):
+            return int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+
+        try:
+            return int(raw_main_guild_id)
+        except (TypeError, ValueError):
+            logger.warning(
+                "config.json 中的 main_guild_id 无法解析，已回退到默认主服务器 ID。"
+            )
+            return int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+
     def get_merged_tags_separated(
         self, channel_ids: list[int]
     ) -> SeparatedTagsDTO:
@@ -257,6 +271,10 @@ class Search(commands.Cog):
         """
         从用户偏好创建一个 SearchStateDTO，并应用指定的覆盖值。
         """
+        # 如果没传有效 guild_id，使用 config 里的 main_guild_id
+        if not guild_id or guild_id == 0:
+            guild_id = self._get_main_guild_id_from_config()
+
         async with self.session_factory() as session:
             repo = PreferencesRepository(session)
             user_prefs = await repo.get_user_preferences(user_id, guild_id)

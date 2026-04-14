@@ -33,6 +33,7 @@ class Preferences(commands.Cog):
             session_factory=session_factory,
             tag_service=bot.tag_cache_service,
             cache_service=bot.cache_service,
+            config=config,
         )
         logger.info("Preferences 模块已加载")
 
