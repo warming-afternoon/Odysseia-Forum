@@ -51,10 +51,10 @@ async def get_main_guild_id():
     """返回配置文件中定义的主服务器 ID (Main Guild ID)"""
     if not cache_service_instance:
         raise HTTPException(status_code=503, detail="Cache 服务尚未初始化")
-    
+
     # 从缓存中获取主服务器配置
     config = await cache_service_instance.get_bot_config(SearchConfigType.MAIN_GUILD_ID)
-    
+
     if not config or config.value_int is None:
         # 如果数据库中没找到，理论上不应该发生，因为 bot_main 会初始化它
         return {"main_guild_id": "0"}

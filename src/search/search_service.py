@@ -114,6 +114,8 @@ class SearchService:
             filters = []
             # 只搜索 not_found_count == 0 的帖子，避免显示被软删除的帖子
             filters.append(Thread.not_found_count == 0)
+            # 只搜索 show_flag == True 的帖子，避免显示被隐藏的帖子
+            filters.append(Thread.show_flag == True)
             # 当指定了 guild_id 且没有指定具体 channel_ids 时，按服务器过滤
             if query.guild_id and not query.channel_ids:
                 filters.append(Thread.guild_id == query.guild_id)

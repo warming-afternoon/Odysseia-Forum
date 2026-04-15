@@ -287,7 +287,7 @@ class ThreadRepository:
         return list(result.scalars().all())
 
     async def increment_not_found_count(self, thread_id: int) -> bool:
-        """当找不到帖子时，将其 not_found_count 计数加一。"""
+        """当找不到帖子时，将其 not_found_count 计数加一"""
         stmt = (
             update(Thread)
             .where(Thread.thread_id == thread_id)  # type: ignore
@@ -326,9 +326,7 @@ class ThreadRepository:
         return result.rowcount > 0
 
     async def update_collection_counts(self, thread_ids: List[int], delta: int) -> None:
-        """
-        批量更新帖子的被收藏次数
-        """
+        """批量更新帖子的被收藏次数"""
         if not thread_ids:
             return
 
@@ -400,3 +398,20 @@ class ThreadRepository:
 
         result = await self.session.execute(statement)
         return result.scalar_one_or_none() or 0
+
+    async def update_thread_visibility(self, thread_id: int, show_flag: bool) -> bool:
+        """更新帖子的搜索可见性状态"""
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)  # type: ignore
+            .values(show_flag=show_flag)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return result.rowcount > 0
+
+    async def get_thread_visibility(self, thread_id: int) -> Optional[bool]:
+        """获取帖子的可见性状态"""
+        stmt = select(Thread.show_flag).where(Thread.thread_id == thread_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
