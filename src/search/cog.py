@@ -22,7 +22,7 @@ from search.views import (
     PersistentChannelSearchView,
     ThreadEmbedBuilder,
 )
-from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigType
+from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigDefaultsInt, SearchConfigType
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:
@@ -97,7 +97,7 @@ class Search(commands.Cog):
         """从配置文件读取主服务器 ID；为空时回退到默认值。"""
         raw_main_guild_id = self.config.get("main_guild_id")
         if raw_main_guild_id in (None, ""):
-            return int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+            return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
         try:
             return int(raw_main_guild_id)
@@ -105,7 +105,7 @@ class Search(commands.Cog):
             logger.warning(
                 "config.json 中的 main_guild_id 无法解析，已回退到默认主服务器 ID。"
             )
-            return int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+            return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
     def get_merged_tags_separated(
         self, channel_ids: list[int]

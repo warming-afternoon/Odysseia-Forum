@@ -34,7 +34,7 @@ from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
 from shared.api_scheduler import APIScheduler
-from shared.enum.search_config_type import SearchConfigDefaults
+from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigDefaultsInt
 from api.v1.routers import (
     preferences as preferences_api,
     search as search_api,
@@ -292,7 +292,7 @@ class MyBot(commands.Bot):
         """从配置文件读取主服务器 ID；为空时回退到默认值。"""
         raw_main_guild_id = self.config.get("main_guild_id")
         if raw_main_guild_id in (None, ""):
-            return int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+            return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
         try:
             return int(raw_main_guild_id)
@@ -300,7 +300,7 @@ class MyBot(commands.Bot):
             logger.warning(
                 "config.json 中的 main_guild_id 无法解析，已回退到默认主服务器 ID。"
             )
-            return int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+            return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
 
 
@@ -343,7 +343,7 @@ async def main():
         app=fastapi_app,
         host=api_config.get("host", "0.0.0.0"),
         port=api_config.get("port", 10810),
-        log_level="info",
+        log_level="warning",
         ssl_keyfile=api_config.get("ssl_key_path", None)
         if api_config.get("enable_ssl", False)
         else None,

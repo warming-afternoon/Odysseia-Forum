@@ -23,6 +23,7 @@ dependencies = [
     "httpx",
     "google-genai",
     "redis>=5.0.0",
+    "orjson>=3.11.2",
 ]
 
 [project.optional-dependencies]

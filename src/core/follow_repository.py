@@ -58,7 +58,7 @@ class ThreadFollowRepository:
             self.session.add(follow)
             await self.session.commit()
 
-            logger.info(f"用户 {user_id} 已关注帖子 {thread_id}")
+            logger.debug(f"用户 {user_id} 已关注帖子 {thread_id}")
             return True
 
         except Exception as e:

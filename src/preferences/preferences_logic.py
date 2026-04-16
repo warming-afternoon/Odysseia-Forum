@@ -15,7 +15,7 @@ from preferences.views.tag_preferences_view import TagPreferencesView
 from dto.preferences.user_search_preferences import UserSearchPreferencesDTO
 from shared.safe_defer import safe_defer
 from shared.utils import process_string_to_set
-from shared.enum.search_config_type import SearchConfigDefaults
+from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigDefaultsInt
 
 if TYPE_CHECKING:
     from preferences.views.preferences_view import PreferencesView
@@ -45,7 +45,7 @@ class PreferencesLogic:
         self.config = config
         # 从配置获取主服务器 ID，用于偏好设置
         raw_id = config.get("main_guild_id")
-        self.main_guild_id = int(raw_id) if raw_id else int(SearchConfigDefaults.MAIN_GUILD_ID.value)
+        self.main_guild_id = int(raw_id) if raw_id else int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
     def _resolve_guild_id(self, guild_id: int = 0) -> int:
         """辅助方法：如果 guild_id 为 0 或 None，则回退到配置的主服务器 ID"""
