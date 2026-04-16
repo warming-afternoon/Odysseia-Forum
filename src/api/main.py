@@ -3,6 +3,7 @@ import json
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import ORJSONResponse
 
 from api.v1.routers import (
     auth,
@@ -62,6 +63,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url=docs_url,
     redoc_url=redoc_url,
+    default_response_class=ORJSONResponse,
 )
 
 # 配置 CORS

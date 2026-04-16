@@ -6,8 +6,9 @@ class SearchConfigDefaults(float, Enum):
 
     UCB1_EXPLORATION_FACTOR = 1.414  # sqrt(2)
     STRENGTH_WEIGHT = 5.0
+class SearchConfigDefaultsInt(IntEnum):
+    """搜索配置默认值"""
     MAIN_GUILD_ID = 1134557553011998840 # 类脑服务器
-
 
 class SearchConfigType(IntEnum):
     """搜索配置类型枚举"""
