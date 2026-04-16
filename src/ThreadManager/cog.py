@@ -119,9 +119,9 @@ class ThreadManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_thread_delete(self, thread: discord.Thread):
+        """当整个 Thread 被从 Discord 删除时触发"""
         if self.is_channel_indexed(thread.parent_id):
-            # 修改 show_flag
-            await self.logic.handle_thread_deletion(thread.id)
+            await self.logic.delete_thread_permanently(thread.id)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):

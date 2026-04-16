@@ -28,39 +28,43 @@ class ThreadLogic:
         self.sync_service = sync_service
 
     # ---------------------------------------------------------
-    # 删除处理逻辑 (首楼删除 / 整个帖子删除)
+    # 删除处理逻辑
     # ---------------------------------------------------------
-    async def handle_thread_deletion(self, thread_id: int):
-        """处理整个帖子被删除的逻辑：将 show_flag 设为 False"""
+    async def delete_thread_permanently(self, thread_id: int):
+        """处理整个帖子被从 Discord 删除的逻辑：物理删除数据库记录"""
         async with self.session_factory() as session:
             repo = ThreadRepository(session)
-            success = await repo.update_thread_visibility(thread_id, show_flag=False)
-            if success:
-                logger.info(f"帖子 {thread_id} 被删除，已将其数据库 show_flag 设为 False")
+            await repo.delete_thread_index(thread_id=thread_id)
+            logger.info(f"帖子 {thread_id} 已从 Discord 删除，已同步清理数据库索引记录")
 
     async def handle_first_message_deletion(self, thread: discord.Thread):
-        """处理首楼被删除的逻辑：隐藏帖子，并在楼内发送公示视图"""
-        # 在数据库中将帖子设为隐藏
-        await self.handle_thread_deletion(thread.id)
-        
-        # 如果无法获取作者信息，则退出
+        """处理首楼被删除但帖子还在的逻辑：隐藏并发送恢复按钮"""
+        async with self.session_factory() as session:
+            repo = ThreadRepository(session)
+            # 逻辑隐藏 (show_flag=False)
+            success = await repo.update_thread_visibility(thread.id, show_flag=False)
+            
+        if not success:
+            return
+
+        logger.info(f"帖子 {thread.id} 首楼被删，已将其隐藏")
+
         if not thread.owner_id:
             return
 
-        # 准备并发送公示消息
+        # 发送恢复按钮视图
         view = ThreadVisibilityView(self.bot, self.session_factory)
         content = (
             f"<@{thread.owner_id}>\n"
             f"系统检测到您的首楼消息已被删除，为防止死链，**本帖已自动从搜索系统中隐藏**。\n"
             f"如果您仍希望本帖在搜索中可见（例如您已在楼中补档），请点击下方按钮重新开放可见性。"
         )
-        
+
         try:
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: thread.send(content=content, view=view),
                 priority=3
             )
-            logger.info(f"已向帖子 {thread.id} 发送可见性切换视图。")
         except Exception as e:
             logger.error(f"向帖子 {thread.id} 发送可见性视图失败", exc_info=True)
 

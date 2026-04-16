@@ -123,14 +123,19 @@ class GenericSearchView(discord.ui.View):
         if self.search_state.channel_ids and not isinstance(
             self.strategy, CollectionSearchStrategy
         ):
-            guild = interaction.guild
-            if guild:
-                channels = [
-                    guild.get_channel(cid) for cid in self.search_state.channel_ids
-                ]
-                channel_mentions = [ch.mention for ch in channels if ch]
-                if channel_mentions:
-                    content = f"在 {', '.join(channel_mentions)} 中搜索"
+            channel_mentions = []
+            for cid in self.search_state.channel_ids:
+                # 尝试从 CacheService 获取频道对象（该缓存包含所有服务器的已索引频道）
+                channel = self.cog.cache_service.indexed_channels.get(cid)
+                if channel:
+                    channel_mentions.append(channel.name)
+                else:
+                    # 即使缓存中没有（可能是极端同步延迟），使用标准的 Discord 提及语法也能显示
+                    channel_mentions.append(f"<#{cid}>")
+            
+            if channel_mentions:
+                content = f"在 **{', '.join(channel_mentions)}** 中搜索"
+
         thread_embeds = results.get("embeds", [])
         summary_embed = self.build_summary_embed(results)
 

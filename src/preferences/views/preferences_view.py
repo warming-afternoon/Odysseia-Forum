@@ -89,17 +89,30 @@ class PreferencesView(discord.ui.View):
             )
 
         # 频道偏好
-        channel_names = []
-        if prefs.preferred_channels and self.original_interaction.guild:
+        channel_info_list = []
+        if prefs.preferred_channels:
             for channel_id in prefs.preferred_channels:
-                channel = self.original_interaction.guild.get_channel(channel_id)
+                # 优先从全局已索引缓存中获取
+                channel = self.service.cache_service.indexed_channels.get(channel_id)
+                
                 if channel:
-                    channel_names.append(channel.mention)
+                    # 使用 频道名
+                    channel_info_list.append(f"{channel.name}")
+                else:
+                    # 如果已索引缓存未命中（可能索引已被删除），尝试从 Bot 全局缓存拿
+                    fallback_channel = self.service.bot.get_channel(channel_id)
+                    if fallback_channel:
+                        # 尝试获取 name 属性，如果没有则显示 ID
+                        name = getattr(fallback_channel, "name", str(channel_id))
+                        channel_info_list.append(f"{name}")
+                    else:
+                        # 彻底没找到（机器人被踢出该服务器或频道被删）
+                        channel_info_list.append(f"频道({channel_id})")
 
-        if channel_names:
+        if channel_info_list:
             embed.add_field(
                 name="🔍 偏好频道",
-                value=", ".join(channel_names),
+                value=", ".join(channel_info_list),
                 inline=False,
             )
 
@@ -413,13 +426,11 @@ class PreferencesView(discord.ui.View):
     ):
         await safe_defer(modal_interaction, ephemeral=True)
         try:
-            guild_id = modal_interaction.guild_id or 0
             await self.service.save_user_keywords(
                 user_id=modal_interaction.user.id,
                 include_str=submitted_include,
                 exclude_str=submitted_exclude,
                 exemption_markers_str=submitted_markers,
-                guild_id=guild_id,
             )
             # 刷新本视图
             await self.refresh(modal_interaction)
