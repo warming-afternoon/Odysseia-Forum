@@ -195,11 +195,11 @@ class UpdateDetector(commands.Cog):
 
     # ── 用户指令：管理更新提醒偏好 ──
 
-    update_remind_group = app_commands.Group(
-        name="更新提醒设置", description="管理帖子更新检测的提醒偏好"
-    )
+    # update_remind_group = app_commands.Group(
+    #     name="更新提醒设置", description="管理帖子更新检测的提醒偏好"
+    # )
 
-    @update_remind_group.command(name="查看", description="查看当前帖子的更新提醒设置")
+    # @update_remind_group.command(name="查看", description="查看当前帖子的更新提醒设置")
     async def view_preference(self, interaction: discord.Interaction):
         await safe_defer(interaction)
 
@@ -248,23 +248,23 @@ class UpdateDetector(commands.Cog):
             priority=1,
         )
 
-    @update_remind_group.command(
-        name="修改", description="修改当前帖子的更新提醒设置"
-    )
-    @app_commands.describe(
-        自动同步="是否自动同步更新到索引页（无需确认）",
-        不再提醒="是否关闭此帖的更新检测提醒",
-    )
-    @app_commands.choices(
-        自动同步=[
-            app_commands.Choice(name="开启", value=1),
-            app_commands.Choice(name="关闭", value=0),
-        ],
-        不再提醒=[
-            app_commands.Choice(name="开启（不再提醒）", value=1),
-            app_commands.Choice(name="关闭（恢复提醒）", value=0),
-        ],
-    )
+    # @update_remind_group.command(
+    #     name="修改", description="修改当前帖子的更新提醒设置"
+    # )
+    # @app_commands.describe(
+    #     自动同步="是否自动同步更新到索引页（无需确认）",
+    #     不再提醒="是否关闭此帖的更新检测提醒",
+    # )
+    # @app_commands.choices(
+    #     自动同步=[
+    #         app_commands.Choice(name="开启", value=1),
+    #         app_commands.Choice(name="关闭", value=0),
+    #     ],
+    #     不再提醒=[
+    #         app_commands.Choice(name="开启（不再提醒）", value=1),
+    #         app_commands.Choice(name="关闭（恢复提醒）", value=0),
+    #     ],
+    # )
     async def modify_preference(
         self,
         interaction: discord.Interaction,
@@ -323,9 +323,9 @@ class UpdateDetector(commands.Cog):
             priority=1,
         )
 
-    @update_remind_group.command(
-        name="重置", description="重置当前帖子的更新提醒设置为默认值"
-    )
+    # @update_remind_group.command(
+    #     name="重置", description="重置当前帖子的更新提醒设置为默认值"
+    # )
     async def reset_preference(self, interaction: discord.Interaction):
         await safe_defer(interaction)
 
