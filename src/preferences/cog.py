@@ -41,27 +41,27 @@ class Preferences(commands.Cog):
         """在Cog加载时注册上下文菜单命令"""
 
         # --- 手动创建和注册上下文菜单 ---
-        add_block_menu = app_commands.ContextMenu(
-            name="加入搜索屏蔽", callback=self.add_to_search_blocklist
-        )
-        remove_block_menu = app_commands.ContextMenu(
-            name="移出搜索屏蔽", callback=self.remove_from_search_blocklist
-        )
-        self.bot.tree.add_command(add_block_menu)
-        self.bot.tree.add_command(remove_block_menu)
+        # add_block_menu = app_commands.ContextMenu(
+        #     name="加入搜索屏蔽", callback=self.add_to_search_blocklist
+        # )
+        # remove_block_menu = app_commands.ContextMenu(
+        #     name="移出搜索屏蔽", callback=self.remove_from_search_blocklist
+        # )
+        # self.bot.tree.add_command(add_block_menu)
+        # self.bot.tree.add_command(remove_block_menu)
 
-    search_prefs = app_commands.Group(name="搜索偏好", description="管理搜索偏好设置")
+    # search_prefs = app_commands.Group(name="搜索偏好", description="管理搜索偏好设置")
 
-    @search_prefs.command(name="作者", description="管理作者偏好设置")
-    @app_commands.describe(action="操作类型", user="要设置的用户（@用户 或 用户ID）")
-    @app_commands.choices(
-        action=[
-            app_commands.Choice(name="只看作者", value="include"),
-            app_commands.Choice(name="屏蔽作者", value="exclude"),
-            app_commands.Choice(name="取消屏蔽", value="unblock"),
-            app_commands.Choice(name="清空作者偏好", value="clear"),
-        ]
-    )
+    # @search_prefs.command(name="作者", description="管理作者偏好设置")
+    # @app_commands.describe(action="操作类型", user="要设置的用户（@用户 或 用户ID）")
+    # @app_commands.choices(
+    #     action=[
+    #         app_commands.Choice(name="只看作者", value="include"),
+    #         app_commands.Choice(name="屏蔽作者", value="exclude"),
+    #         app_commands.Choice(name="取消屏蔽", value="unblock"),
+    #         app_commands.Choice(name="清空作者偏好", value="clear"),
+    #     ]
+    # )
     async def search_preferences_author(
         self,
         interaction: discord.Interaction,
@@ -74,7 +74,7 @@ class Preferences(commands.Cog):
             interaction, action, user
         )
 
-    @search_prefs.command(name="设置", description="打开偏好设置面板")
+    # @search_prefs.command(name="设置", description="打开偏好设置面板")
     async def open_search_preferences_panel(self, interaction: discord.Interaction):
         """打开一个新的交互式视图来管理搜索偏好"""
         await self._open_search_preferences_panel(interaction)

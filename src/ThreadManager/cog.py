@@ -244,9 +244,9 @@ class ThreadManager(commands.Cog):
     # ---------------------------------------------------------
     # 指令区
     # ---------------------------------------------------------
-    @app_commands.command(name="发布更新",
-                          description="发布帖子更新（仅贴主可用）")
-    @app_commands.describe(消息链接="更新消息的Discord链接")
+    # @app_commands.command(name="发布更新",
+    #                       description="发布帖子更新（仅贴主可用）")
+    # @app_commands.describe(消息链接="更新消息的Discord链接")
     async def publish_update(
         self,
         interaction: discord.Interaction,
@@ -276,9 +276,9 @@ class ThreadManager(commands.Cog):
                 "❌ 发生内部错误，请稍后重试", ephemeral=True
             )
 
-    @app_commands.command(
-        name="标签评价", description="对当前帖子的标签进行评价（赞或踩）"
-    )
+    # @app_commands.command(
+    #     name="标签评价", description="对当前帖子的标签进行评价（赞或踩）"
+    # )
     async def tag_rate(self, interaction: discord.Interaction):
         await safe_defer(interaction)
         try:
