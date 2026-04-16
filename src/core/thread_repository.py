@@ -4,7 +4,7 @@ from typing import List, Optional, Sequence, cast
 
 from sqlalchemy import ColumnElement, case, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import select
 
 from dto.meta import ChannelThreadCount
@@ -398,6 +398,52 @@ class ThreadRepository:
 
         result = await self.session.execute(statement)
         return result.scalar_one_or_none() or 0
+
+    async def get_random_threads(
+        self,
+        limit: int,
+        channel_ids: Optional[List[int]] = None,
+        include_tags: Optional[List[str]] = None,
+        exclude_tags: Optional[List[str]] = None,
+        tag_logic: str = "and",
+    ) -> List[Thread]:
+        """随机获取满足条件的帖子"""
+        # 构建基础查询条件排除软删除帖子
+        stmt = select(Thread).where(Thread.not_found_count == 0)
+
+        # 只搜索 show_flag == True 的帖子，避免显示被隐藏的帖子
+        stmt = stmt.where(Thread.show_flag == True)
+
+        # 增加频道筛选条件
+        if channel_ids:
+            stmt = stmt.where(cast(ColumnElement, Thread.channel_id).in_(channel_ids))
+
+        # 增加包含的标签筛选条件
+        if include_tags:
+            if tag_logic == "or":
+                stmt = stmt.where(Thread.tags.any(Tag.name.in_(include_tags)))  # type: ignore
+            else:
+                for tag_name in include_tags:
+                    stmt = stmt.where(Thread.tags.any(Tag.name == tag_name))  # type: ignore
+
+        # 增加必须排除的标签筛选条件
+        if exclude_tags:
+            stmt = stmt.where(~Thread.tags.any(Tag.name.in_(exclude_tags)))  # type: ignore
+
+        # 使用数据库随机函数排序并限制返回数量
+        stmt = stmt.order_by(func.random()).limit(limit)
+
+        # 预加载标签和作者关联数据避免懒加载报错
+        stmt = stmt.options(
+            selectinload(Thread.tags),  # type: ignore
+            joinedload(Thread.author),  # type: ignore
+        )
+
+        # 执行查询
+        result = await self.session.execute(stmt)
+        
+        # 返回结果列表
+        return list(result.scalars().all())
 
     async def update_thread_visibility(self, thread_id: int, show_flag: bool) -> bool:
         """更新帖子的搜索可见性状态"""

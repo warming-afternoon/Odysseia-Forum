@@ -10,6 +10,7 @@ from api.v1.schemas.search.author import AuthorDetail
 from discovery.discovery_service import DiscoveryService
 from core.preferences_repository import PreferencesRepository
 from core.collection_repository import CollectionRepository
+from core.thread_repository import ThreadRepository
 from shared.enum.collection_type import CollectionType
 
 logger = logging.getLogger(__name__)
@@ -92,3 +93,51 @@ async def get_discovery_rails(
     except Exception as e:
         logger.error(f"获取广场轨道数据失败: {e}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取轨道数据发生异常")
+
+@router.get("/random", response_model=List[ThreadDetail], summary="获取随机帖子")
+async def get_random_threads(
+    limit: int = Query(default=10, ge=1, le=50, description="抽取数量"),
+    channel_ids: Optional[List[int]] = Query(default=None, description="频道筛选范围"),
+    include_tags: Optional[List[str]] = Query(default=None, description="包含的标签名"),
+    exclude_tags: Optional[List[str]] = Query(default=None, description="必须排除的标签名"),
+    tag_logic: str = Query(default="and", description="标签逻辑，'and' 表示必须包含所有标签，'or' 表示包含任意标签"),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """根据指定范围随机抽取帖子"""
+    # 检查数据库服务是否就绪
+    if not async_session_factory:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库尚未初始化")
+
+    # 获取当前请求的用户标识
+    user_id = int(current_user["id"]) if current_user and "id" in current_user else None
+
+    try:
+        async with async_session_factory() as session:
+            repo = ThreadRepository(session)
+
+            # 从数据库中获取随机抽取的帖子
+            threads = await repo.get_random_threads(
+                limit=limit,
+                channel_ids=channel_ids,
+                include_tags=include_tags,
+                exclude_tags=exclude_tags,
+                tag_logic=tag_logic,
+            )
+
+            # 准备集合用于存放用户已收藏的帖子标识
+            collected_ids: Set[int] = set()
+
+            # 若用户已登录且查出结果则批量查询收藏状态
+            if user_id and threads:
+                thread_ids = [t.thread_id for t in threads]
+                coll_repo = CollectionRepository(session)
+                collected_ids = await coll_repo.get_collected_target_ids(
+                    user_id, CollectionType.THREAD, thread_ids
+                )
+
+            # 构建并返回包含收藏状态的帖子详情响应模型
+            return [_build_thread_detail(t, collected_ids) for t in threads]
+            
+    except Exception as e:
+        logger.error(f"获取随机帖子失败: {e}", exc_info=True)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="获取随机帖子发生异常")
