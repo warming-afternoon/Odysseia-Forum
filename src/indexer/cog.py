@@ -69,7 +69,7 @@ class Indexer(commands.Cog):
         try:
             thread_manager_cog = cast(ThreadManager, self.bot.get_cog("ThreadManager"))
             if thread_manager_cog:
-                await thread_manager_cog.pre_sync_forum_tags(dashboard.channel)
+                await thread_manager_cog.logic.pre_sync_forum_tags(dashboard.channel)
             else:
                 logging.warning(
                     f"[{dashboard.channel.id}] 无法获取 ThreadManager Cog，跳过标签预同步。"
