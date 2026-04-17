@@ -1,12 +1,15 @@
 import asyncio
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlmodel import select
 
 from core.sync_service import SyncService
 from core.thread_repository import ThreadRepository
+from models import Thread
+from shared.enum.constant_enum import ConstantEnum
 from ThreadManager.update_data_dto import UpdateData
 from discovery.redis_trend_service import RedisTrendService
 
@@ -91,10 +94,23 @@ class BatchUpdateService:
 
             logger.debug(f"批量更新成功写入数据库，影响了 {updated_count} 行。")
 
-            # 将讨论数的增量同步至趋势服务 (redis)
+            # 筛选出 60 天内创建的帖子 ID
+            threshold = datetime.now(timezone.utc) - timedelta(days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value)
+            all_ids = list(updates_to_process.keys())
+            
+            # 从数据库查询在有效期内的帖子ID
+            async with self.session_factory() as session:
+                stmt = select(Thread.thread_id).where(
+                    Thread.thread_id.in_(all_ids), # type: ignore
+                    Thread.created_at >= threshold
+                )
+                valid_result = await session.execute(stmt)
+                valid_ids = set(valid_result.scalars().all())
+
+            # 将讨论数的增量同步至趋势服务 (redis) (仅针对有效ID)
             trend_service = RedisTrendService()
             for tid, update_data in updates_to_process.items():
-                if update_data["increment"] > 0:
+                if tid in valid_ids and update_data["increment"] > 0:
                     await trend_service.record_increment("reply", tid, update_data["increment"])
 
             # 处理可能不存在于数据库里的数据
