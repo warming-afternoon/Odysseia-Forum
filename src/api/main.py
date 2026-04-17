@@ -23,20 +23,34 @@ from api.v1.routers import (
 try:
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
-    enable_docs = config.get("api", {}).get("enable_docs", True)
-
-    # CORS配置：支持配置多个允许的源
+    
     api_config = config.get("api", {})
+    auth_config = config.get("auth", {})
+    
+    enable_docs = api_config.get("enable_docs", True)
+    
+    # 优先读取 api.cors_origins
     cors_origins = api_config.get("cors_origins", [])
+    if isinstance(cors_origins, str): # 防止有人填错成字符串
+        cors_origins = [cors_origins]
+        
+    # 如果没配 cors_origins，尝试读取 auth.frontend_url
+    frontend_url = auth_config.get("frontend_url")
+    
+    # 汇总允许的源
+    allowed_origins = []
+    if cors_origins:
+        allowed_origins.extend(cors_origins)
+    if frontend_url and frontend_url not in allowed_origins:
+        allowed_origins.append(frontend_url)
+        
+    # 如果汇总后依然为空，则允许所有源
+    if not allowed_origins:
+        allowed_origins = ["*"]
 
-    # 向后兼容：如果没有配置cors_origins，使用frontend_url
-    if not cors_origins:
-        frontend_url = config.get("auth", {}).get("frontend_url", "*")
-        cors_origins = [frontend_url] if frontend_url else ["*"]
-
-except (FileNotFoundError, KeyError):
+except (FileNotFoundError, KeyError, json.JSONDecodeError):
     enable_docs = True
-    cors_origins = ["*"]
+    allowed_origins = ["*"]
 
 # 根据配置决定是否启用文档
 docs_url = "/docs" if enable_docs else None
@@ -52,18 +66,18 @@ app = FastAPI(
 
 # 配置 CORS
 # 支持在config.json中配置多个允许的源
-if "*" in cors_origins:
+if "*" in allowed_origins:
     # 允许所有源（不推荐用于生产环境）
-    allowed_origins = ["*"]
+    actual_allowed_origins = ["*"]
     allow_credentials = False  # "*" 不能与 credentials 同时使用
 else:
     # 使用配置的源列表
-    allowed_origins = cors_origins
+    actual_allowed_origins = allowed_origins
     allow_credentials = True
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=actual_allowed_origins,
     allow_credentials=allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],  # 允许所有headers
