@@ -43,7 +43,10 @@
     "ssl_cert_path": "ssl/cert.pem",
     "_comment_ssl_cert_path": "SSL证书路径",
     "ssl_key_path": "ssl/key.pem",
-    "_comment_ssl_key_path": "SSL私钥路径"
+    "_comment_ssl_key_path": "SSL私钥路径",
+
+    "cors_origins": [],
+    "_comment_cors_origins": "允许跨域请求的来源（CORS），支持配置多个域名"
   },
 
 "auth": {
