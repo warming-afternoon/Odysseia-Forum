@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from typing import List, Sequence, Tuple, Type, TypeVar
 
 from sqlalchemy.dialects.sqlite import insert
@@ -9,6 +10,7 @@ from sqlmodel import and_, delete, desc, func, select
 from collection.dto import BatchAddResult, BatchRemoveResult
 from models import Booklist, Thread, ThreadFollow, UserCollection
 from shared.enum.collection_type import CollectionType
+from shared.enum.constant_enum import ConstantEnum
 from discovery.redis_trend_service import RedisTrendService
 
 logger = logging.getLogger(__name__)
@@ -124,11 +126,23 @@ class CollectionRepository:
             await self.session.execute(stmt)
             await self.session.commit()
             
-        # 若添加的是帖子类型则将其增量推送至飙升趋势统计 (redis)
+        # 若添加的是帖子类型，则判定创建时间后再推送至 Redis
         if target_type == CollectionType.THREAD.value and new_ids:
-            trend_service = RedisTrendService()
-            for tid in new_ids:
-                await trend_service.record_increment("collection", tid, 1)
+            # 计算 60 天门槛
+            threshold = datetime.now(timezone.utc) - timedelta(days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value)
+            
+            # 查询哪些帖子是 60 天内创建的
+            stmt = select(Thread.thread_id).where(
+                Thread.thread_id.in_(new_ids),  # type: ignore
+                Thread.created_at >= threshold
+            )
+            valid_result = await self.session.execute(stmt)
+            valid_ids = set(valid_result.scalars().all())
+            
+            if valid_ids:
+                trend_service = RedisTrendService()
+                for tid in valid_ids:
+                    await trend_service.record_increment("collection", tid, 1)
 
         return BatchAddResult(
             added_ids=new_ids,

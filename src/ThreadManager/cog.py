@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from core.follow_repository import ThreadFollowRepository
 from core.thread_repository import ThreadRepository
 from shared.safe_defer import safe_defer
+from shared.enum.constant_enum import ConstantEnum
 from ThreadManager.batch_update_service import BatchUpdateService
 from ThreadManager.thread_logic import ThreadLogic
 from ThreadManager.views.visibility_view import ThreadVisibilityView
@@ -195,16 +196,21 @@ class ThreadManager(commands.Cog):
             return
         try:
             channel = self.bot.get_channel(payload.channel_id)
-            # 只有对首楼消息的反应才更新统计
+            # 只有对首楼消息的反应才更新统计，且需要该帖所在频道已索引
             if (
                 isinstance(channel, discord.Thread)
                 and self.is_channel_indexed(channel.parent_id)
                 and payload.message_id == channel.id
             ):
-                # 记录点赞飙升趋势
-                await RedisTrendService().record_increment(
-                    "reaction", channel.id, 1
-                )
+                # 检查帖子创建时间
+                if channel.created_at:
+                    threshold = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value)
+                    if channel.created_at >= threshold:
+                        # 只有 60 天内创建的帖子才记录点赞飙升
+                        await RedisTrendService().record_increment(
+                            "reaction", channel.id, 1
+                        )
+                
                 await self.bot.api_scheduler.submit(
                     coro_factory=lambda: self.logic.update_reaction_count_and_sync(channel),  # noqa: E501
                     priority=5
