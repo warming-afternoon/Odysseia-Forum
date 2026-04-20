@@ -12,8 +12,8 @@ from shared.enum.collection_type import CollectionType
 logger = logging.getLogger(__name__)
 
 
-class BooklistService:
-    """书单服务，提供书单的CRUD操作"""
+class BooklistRepository:
+    """书单仓库，提供书单的CRUD操作"""
 
     def __init__(self, session: AsyncSession):
         self.session = session

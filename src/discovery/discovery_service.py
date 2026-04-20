@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from discovery.redis_trend_service import RedisTrendService
+from core.redis_trend_service import RedisTrendService
 from discovery.discovery_repository import DiscoveryRepository
 from dto.preferences.user_search_preferences import UserSearchPreferencesDTO
 from models import Thread

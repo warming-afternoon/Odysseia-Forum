@@ -11,7 +11,7 @@ from collection.dto import BatchAddResult, BatchRemoveResult
 from models import Booklist, Thread, ThreadFollow, UserCollection
 from shared.enum.collection_type import CollectionType
 from shared.enum.constant_enum import ConstantEnum
-from discovery.redis_trend_service import RedisTrendService
+from core.redis_trend_service import RedisTrendService
 
 logger = logging.getLogger(__name__)
 

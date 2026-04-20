@@ -14,7 +14,7 @@ from ThreadManager.batch_update_service import BatchUpdateService
 from ThreadManager.thread_logic import ThreadLogic
 from ThreadManager.views.visibility_view import ThreadVisibilityView
 from ThreadManager.views.vote_view import TagVoteView
-from discovery.redis_trend_service import RedisTrendService
+from core.redis_trend_service import RedisTrendService
 
 import logging
 logger = logging.getLogger(__name__)

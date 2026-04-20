@@ -17,8 +17,8 @@ from api.v1.schemas.booklist import (
     BooklistItemUpdateRequest,
     BooklistUpdateResponse,
 )
-from booklist.booklist_item_service import BooklistItemService
-from booklist.booklist_service import BooklistService
+from core.booklist_item_repository import BooklistItemRepository
+from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
 from shared.database import AsyncSessionFactory
 from shared.enum.collection_type import CollectionType
@@ -50,7 +50,7 @@ async def create_booklist(
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             booklist = await service.create_booklist(
                 owner_id=user_id,
                 title=title,
@@ -121,7 +121,7 @@ async def list_public_booklists(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
                 owner_id=owner_id,
                 is_public=True,  # 强制只搜索公开书单
@@ -199,7 +199,7 @@ async def list_my_booklists(
             collected_by_user_id = user_id
 
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
                 owner_id=owner_id,
                 is_public=is_public,
@@ -254,7 +254,7 @@ async def get_booklist(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             booklist = await service.get_booklist(booklist_id)
             if not booklist:
                 raise HTTPException(
@@ -304,7 +304,7 @@ async def update_booklist(
     try:
         user_id = int(current_user["id"])
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             # 检查权限
             booklist = await service.get_booklist(booklist_id)
             if not booklist:
@@ -360,7 +360,7 @@ async def delete_booklist(
     try:
         user_id = int(current_user["id"])
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             # 检查权限
             booklist = await service.get_booklist(booklist_id)
             if not booklist:
@@ -411,7 +411,7 @@ async def add_threads_to_booklist(
     try:
         user_id = int(current_user["id"])
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             # 检查权限
             booklist = await service.get_booklist(booklist_id)
             if not booklist:
@@ -471,7 +471,7 @@ async def remove_threads_from_booklist(
     try:
         user_id = int(current_user["id"])
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             # 检查权限
             booklist = await service.get_booklist(booklist_id)
             if not booklist:
@@ -524,7 +524,7 @@ async def get_booklist_items(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = BooklistService(session)
+            service = BooklistRepository(session)
             # 检查权限
             booklist = await service.get_booklist(booklist_id)
             if not booklist:
@@ -536,7 +536,7 @@ async def get_booklist_items(
                     status_code=status.HTTP_403_FORBIDDEN, detail="无权查看此书单内容"
                 )
 
-            item_service = BooklistItemService(session)
+            item_service = BooklistItemRepository(session)
             items, total = await item_service.get_booklist_items_with_details(
                 booklist_id=booklist_id,
                 display_type=booklist.display_type,
@@ -594,8 +594,8 @@ async def update_booklist_item(
         user_id = int(current_user["id"])
         async with AsyncSessionFactory() as session:
             # 权限检查
-            booklist_service = BooklistService(session)
-            booklist_item_service = BooklistItemService(session)
+            booklist_service = BooklistRepository(session)
+            booklist_item_service = BooklistItemRepository(session)
             booklist = await booklist_service.get_booklist(booklist_id)
             if not booklist:
                 raise HTTPException(
@@ -607,7 +607,7 @@ async def update_booklist_item(
                 )
 
             # 更新书单项
-            item_service = BooklistItemService(session)
+            item_service = BooklistItemRepository(session)
             updated_item = await item_service.update_booklist_item(
                 booklist_id, thread_id, update_data
             )

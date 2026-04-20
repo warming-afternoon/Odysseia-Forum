@@ -11,7 +11,7 @@ from core.thread_repository import ThreadRepository
 from models import Thread
 from shared.enum.constant_enum import ConstantEnum
 from ThreadManager.update_data_dto import UpdateData
-from discovery.redis_trend_service import RedisTrendService
+from core.redis_trend_service import RedisTrendService
 
 logger = logging.getLogger(__name__)
 

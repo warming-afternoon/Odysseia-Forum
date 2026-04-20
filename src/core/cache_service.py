@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class CacheService:
     """
     缓存 BOT 共享数据的服务<br>
-    目前存储的数据包括：已索引的频道（按 guild 分组）
+    目前存储的数据包括：已索引的频道、全局搜索配置 BotConfig
     """
 
     def __init__(self, bot, session_factory: async_sessionmaker):
