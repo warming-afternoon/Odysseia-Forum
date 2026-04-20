@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.v1.dependencies.security import get_current_user
-from booklist.booklist_service import BooklistService
+from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
 from core.thread_repository import ThreadRepository
 from shared.database import AsyncSessionFactory
@@ -45,7 +45,7 @@ async def batch_add_collections(
 
             # 如果收藏的是书单，则更新其收藏计数
             if target_type == CollectionType.BOOKLIST.value and result.added_count > 0:
-                booklist_service = BooklistService(session)
+                booklist_service = BooklistRepository(session)
                 await booklist_service.update_collection_counts(result.added_ids, 1)
 
         return {
@@ -95,7 +95,7 @@ async def batch_remove_collections(
                 target_type == CollectionType.BOOKLIST.value
                 and result.removed_count > 0
             ):
-                booklist_service = BooklistService(session)
+                booklist_service = BooklistRepository(session)
                 await booklist_service.update_collection_counts(result.removed_ids, -1)
 
         return {

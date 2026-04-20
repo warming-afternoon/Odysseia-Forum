@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from api.v1.dependencies.security import get_current_user
 from dto.meta import ChannelDetail
 from core.cache_service import CacheService
-from core.meta_service import MetaService
+from meta.meta_service import MetaService
 from shared.database import AsyncSessionFactory
 # 导入配置类型枚举
 from shared.enum.search_config_type import SearchConfigType

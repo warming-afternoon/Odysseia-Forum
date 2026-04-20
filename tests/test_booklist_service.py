@@ -15,7 +15,7 @@ from models import Booklist
 from models import BooklistItem
 from models import Thread
 from models import Author
-from booklist.booklist_service import BooklistService
+from core.booklist_repository import BooklistRepository
 
 # 使用内存数据库进行测试
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -98,7 +98,7 @@ async def seeded_db_session(
 @pytest.mark.asyncio
 async def test_create_booklist(seeded_db_session: AsyncSession):
     """测试创建书单"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     booklist = await service.create_booklist(
         owner_id=123,
         title="My Booklist",
@@ -118,7 +118,7 @@ async def test_create_booklist(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_get_booklist(seeded_db_session: AsyncSession):
     """测试获取书单"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     created = await service.create_booklist(
         owner_id=456, title="Get Test", description="Test"
     )
@@ -132,7 +132,7 @@ async def test_get_booklist(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_update_booklist(seeded_db_session: AsyncSession):
     """测试更新书单"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     created = await service.create_booklist(
         owner_id=789, title="Original", description="Old"
     )
@@ -154,7 +154,7 @@ async def test_update_booklist(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_delete_booklist(seeded_db_session: AsyncSession):
     """测试删除书单"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     created = await service.create_booklist(
         owner_id=999, title="To Delete", description="Will be deleted"
     )
@@ -168,7 +168,7 @@ async def test_delete_booklist(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_add_thread_to_booklist(seeded_db_session: AsyncSession):
     """测试向书单添加帖子"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     booklist = await service.create_booklist(owner_id=111, title="Add Test")
     assert booklist.id is not None
     booklist_id = booklist.id
@@ -202,7 +202,7 @@ async def test_add_thread_to_booklist(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_remove_thread_from_booklist(seeded_db_session: AsyncSession):
     """测试从书单移除帖子"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     booklist = await service.create_booklist(owner_id=222, title="Remove Test")
     assert booklist.id is not None
     booklist_id = booklist.id
@@ -221,7 +221,7 @@ async def test_remove_thread_from_booklist(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_list_booklists(seeded_db_session: AsyncSession):
     """测试列出书单"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     # 创建多个书单
     for i in range(5):
         await service.create_booklist(
@@ -247,7 +247,7 @@ async def test_list_booklists(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_get_booklist_items(seeded_db_session: AsyncSession):
     """测试获取书单内容"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     booklist = await service.create_booklist(owner_id=444, title="Items Test")
     assert booklist.id is not None
     booklist_id = booklist.id
@@ -273,7 +273,7 @@ async def test_get_booklist_items(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_increment_view_count(seeded_db_session: AsyncSession):
     """测试增加查看次数"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     booklist = await service.create_booklist(owner_id=555, title="View Test")
     assert booklist.id is not None
     booklist_id = booklist.id
@@ -287,7 +287,7 @@ async def test_increment_view_count(seeded_db_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_update_collection_count(seeded_db_session: AsyncSession):
     """测试更新收藏次数"""
-    service = BooklistService(seeded_db_session)
+    service = BooklistRepository(seeded_db_session)
     booklist = await service.create_booklist(owner_id=666, title="Collection Test")
     assert booklist.id is not None
     booklist_id = booklist.id

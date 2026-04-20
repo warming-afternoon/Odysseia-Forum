@@ -9,7 +9,7 @@ from core.config_repository import ConfigRepository
 from core.follow_repository import ThreadFollowRepository
 from core.tag_repository import TagRepository
 from core.thread_repository import ThreadRepository
-from discovery.redis_trend_service import RedisTrendService
+from core.redis_trend_service import RedisTrendService
 from shared.enum.search_config_type import SearchConfigType
 from ThreadManager.views.visibility_view import ThreadVisibilityView
 
