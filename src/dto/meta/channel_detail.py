@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_serializer
 
@@ -13,11 +13,20 @@ class ChannelDetail(BaseModel):
     guild_id: int = Field(description="所属服务器的 Discord ID")
     """所属服务器的 Discord ID"""
 
+    guild_name: str = Field(default="未知服务器", description="服务器名称")
+    """服务器名称"""
+
     channel_id: int = Field(description="频道的 Discord ID")
     """频道的 Discord ID"""
 
     channel_name: str = Field(alias="name", description="频道名称")
     """频道名称"""
+
+    category_id: Optional[int] = Field(default=None, description="频道所属类别的 Discord ID")
+    """频道所属类别的 Discord ID"""
+
+    category_name: Optional[str] = Field(default=None, description="频道所属类别名称")
+    """频道所属类别名称"""
 
     available_tags: List[TagDetail] = Field(default_factory=list, description="该频道原生的可用标签")
     """该频道原生的可用标签"""
@@ -37,10 +46,10 @@ class ChannelDetail(BaseModel):
     total_thread_count: int = Field(default=0, description="总帖子数（实际帖子数 + 虚拟标签映射帖子数）")
     """总帖子数"""
 
-    @field_serializer("guild_id", "channel_id")
-    def serialize_id(self, value: int) -> str:
+    @field_serializer("guild_id", "channel_id", "category_id")
+    def serialize_id(self, value: Optional[int]) -> Optional[str]:
         """序列化频道/服务器 ID 为字符串以防前端 JS 精度丢失"""
-        return str(value)
+        return str(value) if value is not None else None
 
     class Config:
         populate_by_name = True
