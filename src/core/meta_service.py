@@ -6,9 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.cache_service import CacheService
 from core.thread_repository import ThreadRepository
 from dto.meta import (
-    TagDetail, 
-    ChannelDetail, 
-    VirtualTagDetail, 
+    TagDetail,
+    ChannelDetail,
+    VirtualTagDetail,
     MappedSourceChannelDetail
 )
 
@@ -108,11 +108,27 @@ class MetaService:
                     )
                 )
 
+            # 获取频道所属类别信息
+            category_id = channel.category_id
+            category_name = None
+            if category_id:
+                # 优先直接通过 channel.category 获取类别名
+                if channel.category:
+                    category_name = channel.category.name
+                else:
+                    # channel.category 为空时，通过 bot 缓存获取
+                    category = self.cache_service.bot.get_channel(category_id)
+                    if category:
+                        category_name = category.name
+
             results.append(
                 ChannelDetail(
                     guild_id=channel.guild.id,
+                    guild_name=channel.guild.name,
                     channel_id=channel.id,
                     name=channel.name,
+                    category_id=category_id,
+                    category_name=category_name,
                     available_tags=tags,
                     virtual_tags=virtual_tags,
                     mapped_source_channels=mapped_source_channels,

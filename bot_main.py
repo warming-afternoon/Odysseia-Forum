@@ -236,6 +236,7 @@ class MyBot(commands.Bot):
         search_api.impression_cache_service_instance = self.impression_cache_service
 
         tags_api.async_session_factory = AsyncSessionFactory
+        tags_api.cache_service_instance = self.cache_service
 
         discovery_api.async_session_factory = AsyncSessionFactory
         discovery_api.main_guild_id = main_guild_id
