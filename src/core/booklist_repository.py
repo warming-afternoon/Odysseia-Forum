@@ -18,6 +18,33 @@ class BooklistRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def get_or_create_default_booklist(self, owner_id: int) -> Booklist:
+        """获取用户的默认书单，如果不存在则自动创建"""
+        statement = select(Booklist).where(
+            and_(Booklist.owner_id == owner_id, Booklist.is_default == True)
+        )
+        result = await self.session.execute(statement)
+        booklist = result.scalar_one_or_none()
+
+        if not booklist:
+            booklist = Booklist(
+                owner_id=owner_id,
+                title="默认收藏",
+                description="默认收藏夹",
+                is_public=False, # 默认书单设定为私有
+                is_default=True,
+                display_type=1,
+                item_count=0,
+                collection_count=0,
+                view_count=0,
+            )
+            self.session.add(booklist)
+            await self.session.commit()
+            await self.session.refresh(booklist)
+            logger.debug(f"为用户 {owner_id} 创建了默认书单 {booklist.id}")
+            
+        return booklist
+
     async def create_booklist(
         self,
         owner_id: int,
@@ -233,6 +260,10 @@ class BooklistRepository:
         if not new_items_to_add:
             return []
 
+        # 获取书单所有者ID，以便写入 BooklistItem
+        booklist = await self.get_booklist(booklist_id)
+        owner_id = booklist.owner_id if booklist else 0
+
         # 获取当前最大的 display_order 以便追加
         max_order_result = await self.session.execute(
             select(func.max(BooklistItem.display_order)).where(
@@ -252,6 +283,7 @@ class BooklistRepository:
                 BooklistItem(
                     booklist_id=booklist_id,
                     thread_id=item_data.thread_id,  # type: ignore
+                    owner_id=owner_id,
                     comment=item_data.comment,
                     display_order=display_order,
                 )

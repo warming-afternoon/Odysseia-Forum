@@ -10,7 +10,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
-from models import Author, Tag, Thread, ThreadTagLink, UserCollection
+from models import Author, Tag, Thread, ThreadTagLink, UserCollection, BooklistItem
 from search.qo.thread_search import ThreadSearchQuery
 from shared.database import thread_fts_table
 from shared.enum.collection_type import CollectionType
@@ -321,18 +321,20 @@ class SearchService:
             # --- 步骤 3: 组合其他过滤器（不再 JOIN thread_fts）---
             base_stmt = select(Thread.id).distinct()
 
+            # 收藏搜索过滤器
             if query.user_id_for_collection_search:
-                from shared.enum.collection_type import CollectionType
+                # 查询用户的 BooklistItem，获取去重后的 thread_id 列表
+                collected_stmt = select(BooklistItem.thread_id).where(
+                    BooklistItem.owner_id == query.user_id_for_collection_search
+                ).distinct()
+                collected_result = await self.session.execute(collected_stmt)
+                collected_thread_ids = list(collected_result.scalars().all())
+                if not collected_thread_ids:
+                    return [], 0
 
-                base_stmt = base_stmt.join(
-                    UserCollection,
-                    and_(
-                        Thread.thread_id == UserCollection.target_id,
-                        UserCollection.target_type == CollectionType.THREAD,
-                    ),  # type: ignore
-                )
+                # 组合收藏过滤
                 filters.append(
-                    UserCollection.user_id == query.user_id_for_collection_search
+                    Thread.thread_id.in_(collected_thread_ids)  # type: ignore
                 )
 
             # 应用所有过滤器
@@ -391,14 +393,15 @@ class SearchService:
             ):
                 # 按收藏时间排序
                 final_select_stmt = final_select_stmt.join(
-                    UserCollection,
+                    BooklistItem,
                     and_(
-                        Thread.thread_id == UserCollection.target_id,
-                        UserCollection.target_type == CollectionType.THREAD,
-                        UserCollection.user_id == query.user_id_for_collection_search,
+                        Thread.thread_id == BooklistItem.thread_id,
+                        BooklistItem.owner_id == query.user_id_for_collection_search,
                     ),
-                )
-                sort_col = getattr(UserCollection, "created_at")
+                ).group_by(Thread.id)  # type: ignore
+
+                # 取最新的收藏时间
+                sort_col = func.max(BooklistItem.created_at) 
                 order_by = (
                     sort_col.desc() if query.sort_order == "desc" else sort_col.asc()
                 )
@@ -466,13 +469,10 @@ class SearchService:
             .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id)  # type: ignore
             .join(Thread, ThreadTagLink.thread_id == Thread.id)  # type: ignore
             .join(
-                UserCollection,
-                and_(
-                    Thread.thread_id == UserCollection.target_id,
-                    UserCollection.target_type == CollectionType.THREAD,
-                ),  # type: ignore
+                BooklistItem,
+                Thread.thread_id == BooklistItem.thread_id,  # type: ignore
             )
-            .where(UserCollection.user_id == user_id)
+            .where(BooklistItem.owner_id == user_id)
             .distinct()
         )
         result = await self.session.execute(statement)

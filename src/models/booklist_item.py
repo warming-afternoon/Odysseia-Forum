@@ -17,6 +17,9 @@ class BooklistItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     """主键ID"""
 
+    owner_id: int = Field(default=0, index=True, description="所属用户的ID")
+    """所属用户的ID"""
+
     booklist_id: int = Field(index=True, description="所属书单ID")
     """所属书单ID"""
 
