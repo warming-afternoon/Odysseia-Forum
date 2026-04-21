@@ -7,6 +7,7 @@ from sqlmodel import select
 
 from core.thread_repository import ThreadRepository
 from models import BotConfig
+from shared.discord_utils import DiscordUtils
 from shared.enum.search_config_type import SearchConfigType
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ class CacheService:
         """
         logger.debug("正在刷新 CacheService...")
         await self._refresh_indexed_channels_cache()
-        await self._refresh_bot_config_cache()
+        await self.refresh_bot_config_cache()
         logger.info(
             f"CacheService 刷新完毕。缓存了 {len(self.indexed_channel_ids)} 个频道ID，"
             f"{len(self.indexed_channels)} 个频道对象，涉及 {len(self.guild_channels)} 个服务器；"
@@ -53,7 +54,8 @@ class CacheService:
         new_guild_channels: dict[int, dict[int, discord.ForumChannel]] = defaultdict(dict)
 
         for channel_id in self.indexed_channel_ids:
-            channel = await self._get_channel_safely(channel_id)
+            # 优先从缓存获取频道，失败则从 API 获取
+            channel = await DiscordUtils.get_channel_safely(self.bot, channel_id)
             if channel and isinstance(channel, discord.ForumChannel):
                 new_channel_cache[channel_id] = channel
                 new_guild_channels[channel.guild.id][channel_id] = channel
@@ -63,12 +65,7 @@ class CacheService:
         self.indexed_channels = new_channel_cache
         self.guild_channels = dict(new_guild_channels)
 
-        logger.info(
-            f"CacheService 刷新完毕。缓存了 {len(self.indexed_channel_ids)} 个频道ID，"
-            f"{len(self.indexed_channels)} 个频道对象，涉及 {len(self.guild_channels)} 个服务器。"
-        )
-
-    async def _refresh_bot_config_cache(self):
+    async def refresh_bot_config_cache(self):
         """刷新 BotConfig 缓存。"""
         async with self.session_factory() as session:
             result = await session.execute(select(BotConfig))
@@ -87,7 +84,7 @@ class CacheService:
             return config
 
         logger.info(f"配置缓存未命中: {config_type.name}. 正在尝试刷新 CacheService 配置缓存...")
-        await self._refresh_bot_config_cache()
+        await self.refresh_bot_config_cache()
         config = self.bot_configs.get(config_type)
         if config is None:
             logger.error(
@@ -95,24 +92,6 @@ class CacheService:
                 f"请检查数据库中是否存在此配置项，或运行一次初始化。"
             )
         return config
-
-    async def _get_channel_safely(
-        self, channel_id: int
-    ) -> discord.ForumChannel | None:
-        """优先从缓存获取频道，失败则从 API 获取。"""
-        channel = self.bot.get_channel(channel_id)
-        if channel:
-            return channel
-
-        try:
-            return await self.bot.fetch_channel(channel_id)
-        except discord.NotFound:
-            logger.warning(f"无法找到频道 (ID: {channel_id})，机器人可能不在该服务器中。")
-        except discord.Forbidden:
-            logger.warning(f"没有权限访问频道 (ID: {channel_id})。")
-        except Exception as e:
-            logger.error(f"获取频道 (ID: {channel_id}) 时发生未知错误: {e}")
-        return None
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道ID是否已索引。"""

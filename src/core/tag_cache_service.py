@@ -52,9 +52,6 @@ class TagCacheService:
         self.global_merged_tags = sorted(
             [tag.name for tag in all_unique_tags_from_indexed_threads]
         )
-        logger.info(
-            f"全局合并标签预计算完成，共 {len(self.global_merged_tags)} 个唯一标签"
-        )
 
     def get_tag_name_by_id(self, tag_id: int) -> str | None:
         """从缓存中通过ID获取标签名称。"""

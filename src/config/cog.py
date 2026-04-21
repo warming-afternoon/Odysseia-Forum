@@ -76,7 +76,7 @@ class Configuration(commands.Cog):
         """
         logger.debug("Configuration Cog 接收到 'config_updated' 事件，正在刷新缓存...")
         if self.bot.cache_service:
-            await self.bot.cache_service.build_or_refresh_cache()
+            await self.bot.cache_service.refresh_bot_config_cache()
 
     config_group = app_commands.Group(name="配置", description="管理机器人各项配置")
 
