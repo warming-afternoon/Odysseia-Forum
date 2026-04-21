@@ -7,7 +7,7 @@ from sqlmodel import and_, asc, desc, func, select
 
 from api.v1.schemas.booklist import BooklistItemUpdateRequest
 from api.v1.schemas.booklist.booklist_item_detail import BooklistItemDetail
-from api.v1.schemas.search.author import AuthorDetail
+from api.v1.schemas.search.author_detail import AuthorDetail
 from models import Author, BooklistItem, Thread
 
 logger = logging.getLogger(__name__)

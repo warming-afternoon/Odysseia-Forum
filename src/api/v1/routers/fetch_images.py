@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import re
-from typing import Any, List, Optional
+from typing import Any, List, Optional, Union
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -30,10 +30,24 @@ _guild_id: Optional[str] = None
 
 
 class FetchImageItem(BaseModel):
-    thread_id: int = Field(..., description="Discord Thread ID (也是首楼消息ID)")
-    channel_id: Optional[int] = Field(
-        default=None, description="帖子所属频道ID，可选，仅用于调试记录"
+    thread_id: Union[int, str] = Field(..., description="Discord Thread ID (也是首楼消息ID)")
+    channel_id: Optional[Union[int, str]] = Field(
+        default=None, description="帖子所属频道ID，可选，仅用于调试记录，支持数字或字符串"
     )
+
+    @field_validator("thread_id", "channel_id", mode="before")
+    @classmethod
+    def convert_ids_to_int(cls, v: Any) -> Any:
+        """
+        在 Pydantic 校验前，将字符串形式的 Discord ID 转换为 int。
+        """
+        if v is None:
+            return v
+        
+        if isinstance(v, str) and v.isdigit():
+            return int(v)
+            
+        return v
 
 
 class FetchImageRequest(BaseModel):
@@ -127,7 +141,7 @@ async def _process_single_item(
         return response_item
 
     response_item.thumbnail_urls = thumbnail_urls
-    response_item.updated = await _persist_thumbnail(item.thread_id, thumbnail_urls)
+    response_item.updated = await _persist_thumbnail(item.thread_id, thumbnail_urls)  # type: ignore
     return response_item
 
 

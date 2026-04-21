@@ -232,11 +232,15 @@ class Indexer(commands.Cog):
     ):
         """
         监听频道更新事件。
-        只要论坛频道的标签发生任何变化（增、删、改），就重建 TagService 的缓存。
+        当变动的频道为已索引频道且标签发生任何变化（增、删、改）时，重建 TagService 的缓存。
         """
         if not isinstance(after, discord.ForumChannel) or not isinstance(
             before, discord.ForumChannel
         ):
+            return
+
+        # 仅当频道是已索引频道时才继续处理
+        if not self.bot.cache_service.is_channel_indexed(after.id):
             return
 
         # 如果可用标签列表没有发生任何变化，则提前返回，避免不必要的操作。
@@ -244,7 +248,7 @@ class Indexer(commands.Cog):
             return
 
         logging.info(
-            f"检测到论坛频道 '{after.name}' (ID: {after.id}) 的标签发生变化，准备刷新 TagService 缓存。"
+            f"检测到已索引论坛频道 '{after.name}' (ID: {after.id}) 的标签发生变化，准备刷新 TagService 缓存。"
         )
 
         try:

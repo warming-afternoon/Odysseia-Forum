@@ -7,7 +7,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, delete, desc, func, select
 
-from collection.dto import BatchAddResult, BatchRemoveResult
+from dto.collection.batch_add_result import BatchAddResult
+from dto.collection.batch_remove_result import BatchRemoveResult
 from models import Booklist, Thread, ThreadFollow, UserCollection
 from shared.enum.collection_type import CollectionType
 from shared.enum.constant_enum import ConstantEnum

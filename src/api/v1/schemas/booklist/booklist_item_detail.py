@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_serializer
 
-from api.v1.schemas.search.author import AuthorDetail
+from api.v1.schemas.search.author_detail import AuthorDetail
 
 
 class BooklistItemDetail(BaseModel):

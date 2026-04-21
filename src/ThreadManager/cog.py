@@ -93,9 +93,11 @@ class ThreadManager(commands.Cog):
             if not thread or not self.is_channel_indexed(thread.parent_id):
                 return
 
-            # 获取用户对象
-            user = await thread.guild.fetch_member(member.id)
-            if user.bot:
+            # 优先从本地服务器缓存获取，如果没有则从全局用户缓存获取
+            user = thread.guild.get_member(member.id) or self.bot.get_user(member.id)
+            
+            # 如果缓存里能找到这个用户，并且它是机器人，则跳过
+            if user and user.bot:
                 return
 
             async with self.session_factory() as session:

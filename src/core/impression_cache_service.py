@@ -25,11 +25,11 @@ class ImpressionCacheService:
         self,
         bot: "MyBot",
         session_factory: async_sessionmaker,
-        flush_interval: int = 60,
+        flush_interval: int = 180,
     ):
         self.bot = bot
         self.session_factory = session_factory
-        self.flush_interval = flush_interval  # 默认1分钟回写一次
+        self.flush_interval = flush_interval  # 默认3分钟回写一次
         self._impression_cache = Counter()
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
