@@ -13,7 +13,7 @@ from search.dto.search_state import SearchStateDTO
 from search.dto.separated_tags import SeparatedTagsDTO
 from search.qo.thread_search import ThreadSearchQuery
 from search.search_service import SearchService
-from search.channel_mapping_utils import ChannelMappingUtils
+from shared.channel_mapping_utils import ChannelMappingUtils
 from search.strategies import AuthorSearchStrategy, CollectionSearchStrategy
 from search.views import (
     ChannelSelectionView,

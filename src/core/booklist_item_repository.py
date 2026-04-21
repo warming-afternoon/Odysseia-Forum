@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import and_, asc, desc, func, select
 
 from api.v1.schemas.booklist import BooklistItemUpdateRequest
@@ -68,6 +69,7 @@ class BooklistItemRepository:
                     BooklistItem.thread_id == thread_id,
                 )
             )
+            .options(selectinload(Thread.tags))  # type: ignore
         )
         result = await self.session.execute(query)
         row = result.one_or_none()
@@ -80,13 +82,22 @@ class BooklistItemRepository:
         item_detail = BooklistItemDetail(
             booklist_item_id=item.id,
             thread_id=thread.thread_id,
+            guild_id=thread.guild_id,
             channel_id=thread.channel_id,
             title=thread.title,
             author=author_detail,
             created_at=thread.created_at,
+            last_active_at=thread.last_active_at,
             reaction_count=thread.reaction_count,
             reply_count=thread.reply_count,
+            display_count=thread.display_count,
+            first_message_excerpt=thread.first_message_excerpt,
+            latest_update_at=thread.latest_update_at,
+            latest_update_link=thread.latest_update_link,
+            collection_count=thread.collection_count,
             thumbnail_urls=thread.thumbnail_urls or [],
+            tags=[tag.name for tag in thread.tags],
+            virtual_tags=[],
             comment=item.comment,
             display_order=item.display_order,
             added_at=item.created_at,
@@ -110,6 +121,7 @@ class BooklistItemRepository:
             .join(Thread, BooklistItem.thread_id == Thread.thread_id)  # type: ignore
             .join(Author, Thread.author_id == Author.id)  # type: ignore
             .where(BooklistItem.booklist_id == booklist_id)  # type: ignore
+            .options(selectinload(Thread.tags))  # type: ignore
         )
 
         # 根据 display_type 应用不同的排序规则
@@ -136,13 +148,22 @@ class BooklistItemRepository:
             item_detail = BooklistItemDetail(
                 booklist_item_id=item.id,
                 thread_id=thread.thread_id,
+                guild_id=thread.guild_id,
                 channel_id=thread.channel_id,
                 title=thread.title,
                 author=author_detail,
                 created_at=thread.created_at,
+                last_active_at=thread.last_active_at,
                 reaction_count=thread.reaction_count,
                 reply_count=thread.reply_count,
+                display_count=thread.display_count,
+                first_message_excerpt=thread.first_message_excerpt,
+                latest_update_at=thread.latest_update_at,
+                latest_update_link=thread.latest_update_link,
+                collection_count=thread.collection_count,
                 thumbnail_urls=thread.thumbnail_urls or [],
+                tags=[tag.name for tag in thread.tags],
+                virtual_tags=[],
                 comment=item.comment,
                 display_order=item.display_order,
                 added_at=item.created_at,

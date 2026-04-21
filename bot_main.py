@@ -43,6 +43,7 @@ from api.v1.routers import (
     banner as banner_api,
     tags as tags_api,
     discovery as discovery_api,
+    booklists as booklists_api,
 )
 from api.main import app as fastapi_app
 from api.v1.dependencies.security import initialize_api_security
@@ -250,6 +251,7 @@ class MyBot(commands.Bot):
         search_api.channel_mappings_config = channel_mappings_config
         meta_api.channel_mappings_config = channel_mappings_config
         tags_api.channel_mappings_config = channel_mappings_config
+        booklists_api.channel_mappings_config = channel_mappings_config
 
         auth_section = self.config.get("auth", {}) if isinstance(self.config, dict) else {}
         fetch_images_api.configure_fetch_images_router(

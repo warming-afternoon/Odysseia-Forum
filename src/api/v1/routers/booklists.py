@@ -7,6 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.v1.dependencies.security import require_auth
 from api.v1.schemas.base import PaginatedResponse
+from shared.channel_mapping_utils import ChannelMappingUtils
+
 from api.v1.schemas.booklist import (
     BooklistCreateResponse,
     BooklistDetail,
@@ -22,6 +24,9 @@ from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
 from shared.database import AsyncSessionFactory
 from shared.enum.collection_type import CollectionType
+
+# 频道映射配置
+channel_mappings_config: Dict[int, List[Dict]] = {}
 
 logger = logging.getLogger(__name__)
 
@@ -554,10 +559,18 @@ async def get_booklist_items(
                     user_id, CollectionType.THREAD, thread_ids
                 )
 
-            # 更新收藏状态
+            # 预计算全量反向映射 channel_id -> virtual_tags
+            channel_to_virtual: Dict[int, List[str]] = {}
+            if channel_mappings_config:
+                mapping_utils = ChannelMappingUtils(channel_mappings_config)
+                channel_to_virtual = mapping_utils.get_all_channel_virtual_tags_map()
+
+            # 更新收藏状态与虚拟标签
             for item in items:
                 if item.thread_id in collected_thread_ids:
                     item.collected_flag = True
+                if item.channel_id in channel_to_virtual:
+                    item.virtual_tags = list(set(channel_to_virtual[item.channel_id]))
 
         return PaginatedResponse(total=total, limit=limit, offset=offset, results=items)
 
@@ -628,6 +641,16 @@ async def update_booklist_item(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="获取更新后的书单项详情失败",
                 )
+
+            # 计算虚拟标签
+            channel_to_virtual: Dict[int, List[str]] = {}
+            if channel_mappings_config:
+                mapping_utils = ChannelMappingUtils(channel_mappings_config)
+                channel_to_virtual = mapping_utils.get_all_channel_virtual_tags_map()
+            
+            if item_detail.channel_id in channel_to_virtual:
+                item_detail.virtual_tags = list(set(channel_to_virtual[item_detail.channel_id]))
+                
             return item_detail
 
     except HTTPException:
