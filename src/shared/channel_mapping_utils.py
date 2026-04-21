@@ -132,3 +132,12 @@ class ChannelMappingUtils:
                         mapping["tag_name"]
                     )
         return channel_to_virtual
+
+    def get_all_channel_virtual_tags_map(self) -> Dict[int, List[str]]:
+        """构建所有源频道ID到虚拟标签名称的完整映射字典"""
+        channel_to_virtual = {}
+        for target_ch, mappings in self.channel_mappings.items():
+            for m in mappings:
+                for src_id in m.get("source_channel_ids", []):
+                    channel_to_virtual.setdefault(src_id, []).append(m["tag_name"])
+        return channel_to_virtual
