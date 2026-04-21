@@ -251,7 +251,7 @@ class BooklistRepository:
             new_booklist_items.append(
                 BooklistItem(
                     booklist_id=booklist_id,
-                    thread_id=item_data.thread_id,
+                    thread_id=item_data.thread_id,  # type: ignore
                     comment=item_data.comment,
                     display_order=display_order,
                 )

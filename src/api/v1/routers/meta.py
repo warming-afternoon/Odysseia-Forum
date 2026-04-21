@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -24,10 +24,10 @@ router = APIRouter(
     "/channels", response_model=List[ChannelDetail], summary="获取频道目录与基础信息"
 )
 async def get_indexed_channels_with_tags(
-    channel_ids: Optional[List[int]] = Query(
+    channel_ids: Optional[List[Union[int, str]]] = Query(
         default=None, description="要查询的特定频道ID列表"
     ),
-    guild_id: Optional[int] = Query(
+    guild_id: Optional[Union[int, str]] = Query(
         default=None, description="按服务器ID过滤频道"
     ),
 ):
@@ -35,13 +35,35 @@ async def get_indexed_channels_with_tags(
     if not cache_service_instance:
         raise HTTPException(status_code=503, detail="Cache 服务尚未初始化")
 
+    #  ID 转换
+    effective_guild_id = None
+    if guild_id:
+        try:
+            effective_guild_id = int(guild_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail=f"无效的服务器ID格式: {guild_id}"
+                )
+
+    effective_channel_ids = None
+    if channel_ids:
+        effective_channel_ids = []
+        for cid in channel_ids:
+            try:
+                effective_channel_ids.append(int(cid))
+            except ValueError:
+                raise HTTPException(
+                    status_code=400, detail=f"无效的频道ID格式: {cid}"
+                    )
+
     async with AsyncSessionFactory() as session:
         meta_service = MetaService(
             session=session,
             cache_service=cache_service_instance,
             channel_mappings=channel_mappings_config,
         )
-        return await meta_service.get_channels_meta(guild_id, channel_ids)
+        # 传递转换后的 int 类型 ID
+        return await meta_service.get_channels_meta(effective_guild_id, effective_channel_ids)
 
 @router.get(
     "/main-guild",

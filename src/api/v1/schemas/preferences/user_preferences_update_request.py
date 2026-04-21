@@ -1,22 +1,22 @@
-from typing import List, Optional
+from typing import List, Optional, Union, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class UserPreferencesUpdateRequest(BaseModel):
     """用于更新用户搜索偏好设置的 API 请求模型"""
 
     # 频道选择
-    preferred_channels: Optional[List[int]] = Field(
-        default=None, description="用户偏好的频道ID列表，搜索时优先在这些频道中查找"
+    preferred_channels: Optional[List[Union[int, str]]] = Field(
+        default=None, description="用户偏好的频道ID列表，搜索时优先在这些频道中查找，支持数字或字符串"
     )
 
     # 作者偏好
-    include_authors: Optional[List[int]] = Field(
-        default=None, description="只看这些作者的帖子，作者ID列表"
+    include_authors: Optional[List[Union[int, str]]] = Field(
+        default=None, description="只看这些作者的帖子，作者ID列表，支持数字或字符串"
     )
-    exclude_authors: Optional[List[int]] = Field(
-        default=None, description="屏蔽这些作者的帖子，作者ID列表"
+    exclude_authors: Optional[List[Union[int, str]]] = Field(
+        default=None, description="屏蔽这些作者的帖子，作者ID列表，支持数字或字符串"
     )
 
     # 标签偏好
@@ -77,3 +77,23 @@ class UserPreferencesUpdateRequest(BaseModel):
         default=None,
         description="最后活跃时间早于此日期 (格式: YYYY-MM-DD 或相对时间如 -7d)",
     )
+
+    @field_validator("preferred_channels", "include_authors", "exclude_authors", mode="before")
+    @classmethod
+    def convert_ids_to_int(cls, v: Any) -> Any:
+        """
+        在 Pydantic 校验前，将字符串形式的 Discord ID 转换为 int。
+        """
+        if v is None:
+            return v
+        
+        if isinstance(v, list):
+            processed = []
+            for item in v:
+                if isinstance(item, str) and item.isdigit():
+                    processed.append(int(item))
+                else:
+                    processed.append(item)
+            return processed
+            
+        return v
