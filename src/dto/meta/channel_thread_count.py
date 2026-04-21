@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+from typing import Optional
+from pydantic import BaseModel, Field, field_serializer
 
 
 class ChannelThreadCount(BaseModel):
@@ -9,3 +10,8 @@ class ChannelThreadCount(BaseModel):
 
     thread_count: int = Field(description="有效帖子总数")
     """有效帖子总数"""
+
+    @field_serializer("channel_id")
+    def serialize_id(self, value: Optional[int]) -> Optional[str]:
+        """序列化 ID 为字符串以防前端 JS 精度丢失"""
+        return str(value) if value is not None else None

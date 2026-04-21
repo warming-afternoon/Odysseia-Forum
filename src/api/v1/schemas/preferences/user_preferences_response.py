@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 
 class UserPreferencesResponse(BaseModel):
@@ -82,6 +82,21 @@ class UserPreferencesResponse(BaseModel):
         default=None,
         description="最后活跃时间早于此日期 (格式: YYYY-MM-DD 或相对时间如 -7d)",
     )
+
+    @field_serializer("user_id", "preferred_channels", "include_authors", "exclude_authors")
+    def serialize_snowflake_ids(self, value, _info):
+        """
+        序列化 Discord 雪花 ID 为字符串，防止前端 JavaScript 精度丢失
+        """
+        if value is None:
+            return None
+        
+        # 处理列表类型的字段
+        if isinstance(value, list):
+            return [str(item) if item is not None else None for item in value]
+        
+        # 处理单个值
+        return str(value)
 
     class Config:
         from_attributes = True

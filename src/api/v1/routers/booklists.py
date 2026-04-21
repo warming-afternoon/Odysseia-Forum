@@ -489,7 +489,7 @@ async def remove_threads_from_booklist(
                 )
 
             deleted_count = await service.remove_threads_from_booklist(
-                booklist_id, request.thread_ids
+                booklist_id, request.thread_ids  # type: ignore
             )
 
         return {"message": f"成功从书单移除 {deleted_count} 个帖子"}

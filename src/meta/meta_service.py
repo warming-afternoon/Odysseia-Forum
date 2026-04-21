@@ -31,17 +31,22 @@ class MetaService:
     async def get_channels_meta(
         self, guild_id: Optional[int], channel_ids: Optional[List[int]]
     ) -> List[ChannelDetail]:
-        """获取包含标签、虚拟标签及各项帖子数量的频道聚合数据。"""
-        # 从缓存获取频道列表（可按服务器ID过滤）
-        all_channels = self.cache_service.get_indexed_channels(guild_id)
+        """获取包含标签、虚拟标签及各项帖子数量的频道聚合数据"""
         
-        # 将所有已索引频道建立字典索引，方便后续快速查找来源频道信息
-        all_channels_dict = {channel.id: channel for channel in all_channels}
+        # 获取全量已索引频道用于建立查找字典
+        full_channels_cache = self.cache_service.get_indexed_channels()
+        all_channels_dict = {ch.id: ch for ch in full_channels_cache}
 
-        # 筛选目标频道
-        target_channels = [
-            channel for channel in all_channels if not channel_ids or channel.id in channel_ids
-        ]
+        # 筛选本次请求需要展示的目标频道（在这里应用 guild_id 过滤）
+        target_channels = []
+        for ch in full_channels_cache:
+            # 如果指定了 guild_id，过滤掉不属于该服务器的频道
+            if guild_id and ch.guild.id != guild_id:
+                continue
+            # 如果指定了 channel_ids，过滤掉不在列表中的频道
+            if channel_ids and ch.id not in channel_ids:
+                continue
+            target_channels.append(ch)
 
         if not target_channels:
             return []
