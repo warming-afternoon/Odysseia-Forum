@@ -11,6 +11,7 @@ from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
 from models import Author, Tag, Thread, ThreadTagLink, UserCollection, BooklistItem
+from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
 from shared.database import thread_fts_table
 from shared.enum.collection_type import CollectionType
@@ -25,6 +26,72 @@ class SearchService:
     def __init__(self, session: AsyncSession, tag_cache_service: TagCacheService):
         self.session = session
         self.tag_cache_service = tag_cache_service
+
+    def _clean_query(
+        self,
+        query: ThreadSearchQuery,
+        exclude_thread_ids: Sequence[int | str] | None = None,
+    ) -> CleanedThreadSearchQuery:
+        """
+        对 ThreadSearchQuery 进行数据清洗和规范化，返回 CleanedThreadSearchQuery。
+
+        包括：时间解析、标签 ID 解析、排除帖子 ID 规范化、
+        包含作者 ID 初始化、作者名规范化。
+        """
+        # 解析时间字符串
+        try:
+            created_after_dt = parse_time_string(query.created_after)
+            created_before_dt = parse_time_string(query.created_before)
+            active_after_dt = parse_time_string(query.active_after)
+            active_before_dt = parse_time_string(query.active_before)
+        except ValueError as e:
+            # 理论上不应该发生，因为在 Modal 中已经验证过
+            logging.warning(f"时间字符串解析失败: {e}")
+            raise
+
+        # 解析标签 ID
+        resolved_include_tag_ids = [
+            id
+            for name in query.include_tags
+            for id in self.tag_cache_service.get_ids_by_tag_name(name)
+        ]
+        resolved_exclude_tag_ids = [
+            id
+            for name in query.exclude_tags
+            for id in self.tag_cache_service.get_ids_by_tag_name(name)
+        ]
+
+        # 规范化排除帖子 ID
+        normalized_exclude_thread_ids: list[int] = []
+        if exclude_thread_ids:
+            for tid in exclude_thread_ids:
+                try:
+                    normalized_exclude_thread_ids.append(int(tid))
+                except (TypeError, ValueError):
+                    continue
+
+        # 初始化包含作者 ID
+        final_include_author_ids = (
+            set(query.include_authors) if query.include_authors else set()
+        )
+
+        # 规范化作者名
+        normalized_author_name = query.author_name.strip() if query.author_name else None
+        if normalized_author_name == "":
+            normalized_author_name = None
+
+        return CleanedThreadSearchQuery(
+            query=query,
+            created_after_dt=created_after_dt,
+            created_before_dt=created_before_dt,
+            active_after_dt=active_after_dt,
+            active_before_dt=active_before_dt,
+            resolved_include_tag_ids=resolved_include_tag_ids,
+            resolved_exclude_tag_ids=resolved_exclude_tag_ids,
+            normalized_exclude_thread_ids=normalized_exclude_thread_ids,
+            final_include_author_ids=final_include_author_ids,
+            normalized_author_name=normalized_author_name,
+        )
 
     def _apply_range_filter(self, filters, column, range_str):
         """解析范围字符串并应用为SQLAlchemy过滤器"""
@@ -87,173 +154,173 @@ class SearchService:
         根据搜索条件搜索帖子并分页
         """
         try:
-            # 解析时间字符串
-            try:
-                created_after_dt = parse_time_string(query.created_after)
-                created_before_dt = parse_time_string(query.created_before)
-                active_after_dt = parse_time_string(query.active_after)
-                active_before_dt = parse_time_string(query.active_before)
-            except ValueError as e:
-                # 理论上不应该发生，因为在 Modal 中已经验证过
-                logging.warning(f"时间字符串解析失败: {e}")
-                raise
-
-            # --- 步骤 0: 解析标签 ---
-            resolved_include_tag_ids = [
-                id
-                for name in query.include_tags
-                for id in self.tag_cache_service.get_ids_by_tag_name(name)
-            ]
-            resolved_exclude_tag_ids = [
-                id
-                for name in query.exclude_tags
-                for id in self.tag_cache_service.get_ids_by_tag_name(name)
-            ]
+            # 清洗查询数据
+            CleanedQo = self._clean_query(query, exclude_thread_ids)
 
             # --- 步骤 1: 构建基础过滤器列表 (除了反选关键词) ---
             filters = []
+
             # 只搜索 not_found_count == 0 的帖子，避免显示被软删除的帖子
             filters.append(Thread.not_found_count == 0)
             # 只搜索 show_flag == True 的帖子，避免显示被隐藏的帖子
             filters.append(Thread.show_flag == True)
+
             # 当指定了 guild_id 且没有指定具体 channel_ids 时，按服务器过滤
-            if query.guild_id and not query.channel_ids:
-                filters.append(Thread.guild_id == query.guild_id)
-            if query.channel_ids:
-                filters.append(Thread.channel_id.in_(query.channel_ids))  # type: ignore
-            if exclude_thread_ids:
-                normalized_ids = []
-                for tid in exclude_thread_ids:
-                    try:
-                        normalized_ids.append(int(tid))
-                    except (TypeError, ValueError):
-                        continue
-                if normalized_ids:
-                    filters.append(~Thread.thread_id.in_(normalized_ids))  # type: ignore
+            if CleanedQo.query.guild_id and not CleanedQo.query.channel_ids:
+                filters.append(Thread.guild_id == CleanedQo.query.guild_id)
+            if CleanedQo.query.channel_ids:
+                filters.append(Thread.channel_id.in_(CleanedQo.query.channel_ids)) # type: ignore
 
-            final_include_author_ids = (
-                set(query.include_authors) if query.include_authors else set()
-            )
+            # 处理排除的帖子 ID
+            if CleanedQo.normalized_exclude_thread_ids:
+                filters.append(~Thread.thread_id.in_(CleanedQo.normalized_exclude_thread_ids)) # type: ignore
 
-            if query.author_name:
-                normalized_author_name = query.author_name.strip()
-                if normalized_author_name:
-                    # 使用子查询来查找匹配的作者 ID
-                    search_pattern = f"%{normalized_author_name}%"
-                    author_subquery = select(Author.id).where(
-                        (func.lower(Author.name) == normalized_author_name.lower())
-                        | (Author.global_name.like(search_pattern))  # type: ignore
-                        | (Author.display_name.like(search_pattern))  # type: ignore
-                    )  # type: ignore
-                    author_result = await self.session.execute(author_subquery)
-                    matched_author_ids = set(author_result.scalars().all())
+            # 处理作者名搜索
+            if CleanedQo.normalized_author_name:
+                # 查找匹配的作者 ID，以便后续过滤
+                search_pattern = f"%{CleanedQo.normalized_author_name}%"
 
-                    if query.include_authors:
-                        # 如果同时指定了ID和名称，则取交集
-                        final_include_author_ids.intersection_update(matched_author_ids)
-                    else:
-                        final_include_author_ids = matched_author_ids
+                author_subquery = select(Author.id).where(
+                    (func.lower(Author.name) == CleanedQo.normalized_author_name.lower())
+                    | (Author.global_name.like(search_pattern)) # type: ignore
+                    | (Author.display_name.like(search_pattern)) # type: ignore
+                ) # type: ignore
+
+                author_result = await self.session.execute(author_subquery)
+                matched_author_ids = set(author_result.scalars().all())
+
+                if CleanedQo.query.include_authors:
+                    # 如果同时指定了ID和名称，则取交集
+                    CleanedQo.final_include_author_ids.intersection_update(matched_author_ids)
+                else:
+                    CleanedQo.final_include_author_ids = matched_author_ids
 
             # 应用作者过滤器
-            if final_include_author_ids:
+            if CleanedQo.final_include_author_ids:
                 filters.append(
-                    Thread.author_id.in_(list(final_include_author_ids))  # type: ignore
+                    Thread.author_id.in_(list(CleanedQo.final_include_author_ids)) # type: ignore
                 )
-            if query.exclude_authors:
+            if CleanedQo.query.exclude_authors:
                 filters.append(
-                    Thread.author_id.notin_(query.exclude_authors)  # type: ignore
+                    Thread.author_id.notin_(CleanedQo.query.exclude_authors) # type: ignore
                 )
 
-            # --- 范围过滤---
-            if query.reaction_count_range != (
+            # 反应数范围过滤
+            if CleanedQo.query.reaction_count_range != (
                 DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
             ):
                 self._apply_range_filter(
-                    filters, Thread.reaction_count, query.reaction_count_range
+                    filters, Thread.reaction_count, CleanedQo.query.reaction_count_range
                 )
-            if query.reply_count_range != (
+
+            # 回复数范围过滤
+            if CleanedQo.query.reply_count_range != (
                 DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
             ):
                 self._apply_range_filter(
-                    filters, Thread.reply_count, query.reply_count_range
+                    filters, Thread.reply_count, CleanedQo.query.reply_count_range
                 )
 
-            if created_after_dt:
-                filters.append(Thread.created_at >= created_after_dt)
-            if created_before_dt:
-                filters.append(Thread.created_at <= created_before_dt)
+            # 创建时间范围过滤
+            if CleanedQo.created_after_dt:
+                filters.append(Thread.created_at >= CleanedQo.created_after_dt)
+            if CleanedQo.created_before_dt:
+                filters.append(Thread.created_at <= CleanedQo.created_before_dt)
 
-            # 对可能为 None (虽然不太可能，我说)的 last_active_at 进行安全处理
-            if active_after_dt or active_before_dt:
-                conditions = [Thread.last_active_at != None]  # noqa: E711
-                if active_after_dt:
-                    conditions.append(Thread.last_active_at >= active_after_dt)  # type: ignore
-                if active_before_dt:
-                    conditions.append(Thread.last_active_at <= active_before_dt)  # type: ignore
+            # 活跃时间范围过滤
+            if CleanedQo.active_after_dt or CleanedQo.active_before_dt:
+                # 对可能为 None 的 last_active_at 进行安全处理
+                conditions = [Thread.last_active_at != None] # noqa: E711
+                if CleanedQo.active_after_dt:
+                    conditions.append(Thread.last_active_at >= CleanedQo.active_after_dt) # type: ignore
+                if CleanedQo.active_before_dt:
+                    conditions.append(Thread.last_active_at <= CleanedQo.active_before_dt) # type: ignore
                 filters.append(and_(*conditions))
 
-            # -- 标签过滤 --
-            if resolved_include_tag_ids:
+            # 标签过滤
+            if CleanedQo.resolved_include_tag_ids:
                 if query.tag_logic == "and":
                     # TODO : 考虑精简
                     for tag_name in query.include_tags:
                         ids_for_name = self.tag_cache_service.get_ids_by_tag_name(tag_name)
                         if ids_for_name:
-                            filters.append(Thread.tags.any(Tag.id.in_(ids_for_name)))  # type: ignore
+                            filters.append(Thread.tags.any(Tag.id.in_(ids_for_name))) # type: ignore
                 else:
                     filters.append(
-                        Thread.tags.any(Tag.id.in_(resolved_include_tag_ids))  # type: ignore
-                    )  # type: ignore
-            if resolved_exclude_tag_ids:
+                        Thread.tags.any(Tag.id.in_(CleanedQo.resolved_include_tag_ids)) # type: ignore
+                    )
+
+            if CleanedQo.resolved_exclude_tag_ids:
                 filters.append(
-                    ~Thread.tags.any(Tag.id.in_(resolved_exclude_tag_ids))  # type: ignore
+                    ~Thread.tags.any(Tag.id.in_(CleanedQo.resolved_exclude_tag_ids)) # type: ignore
                 )
 
-            # --- 步骤 2: 独立执行 FTS 查询，拿到匹配/排除的 ID 集合 ---
+            # --- 步骤 2: 独立执行关键词的 FTS 查询，拿到匹配/排除的 ID 集合 ---
+            # 获取当前事件循环，用于在线程池中执行阻塞的 jieba 分词操作
             loop = asyncio.get_running_loop()
+    
+            # ============ 反选关键词处理：找出所有包含排除词的帖子 ID ============
 
-            # 2a. 反选关键词 → 获取要排除的 thread ID
             fts_exclude_ids: set[int] = set()
             if query.exclude_keywords:
+                # 豁免标记：当排除词附近出现这些标记时，该排除词不生效
                 exemption_markers = (
                     query.exclude_keyword_exemption_markers
                     if query.exclude_keyword_exemption_markers is not None
                     else ["禁", "🈲"]
                 )
+
+                # 将排除关键词字符串按逗号/顿号/斜杠/空白拆分成多个独立关键词
                 exclude_keywords_list = [
                     kw.strip()
                     for kw in re.split(r"[,，/\s]+", query.exclude_keywords)
                     if kw.strip()
                 ]
 
+                # 逐个关键词构建 FTS5 MATCH 表达式
                 all_exclude_parts = []
                 for keyword in exclude_keywords_list:
+
+                    # 使用 jieba 对排除关键词进行中文分词
                     raw_tokens = await loop.run_in_executor(
                         None, partial(rjieba.cut, keyword)
                     )
                     tokens = [tok.strip() for tok in raw_tokens if tok.strip()]
                     if not tokens:
                         continue
-
+    
+                    # 构建 FTS5 MATCH 的匹配表达式：
+                    # - 前面的分词用精确匹配（双引号包裹），例如 "搬运"
+                    # - 最后一个分词用前缀匹配（加 * 号），例如 "工*"
+                    # - 所有分词之间用 AND 连接，表示必须同时出现
+                    # 例如分词 ["搬运", "工"] → '"搬运" AND "工"*'
                     match_parts = [f'"{tok}"' for tok in tokens[:-1]]
                     match_parts.append(f'"{tokens[-1]}"*')
                     match_expr = " AND ".join(match_parts)
-
+    
                     if exemption_markers:
+                        # 构建豁免子句：检查排除词的第一个分词是否在 4 个词范围内靠近豁免标记
                         first_token = tokens[0]
                         exemption_clauses = [
                             f'NEAR("{first_token}" "{marker}", 4)'
                             for marker in exemption_markers
                         ]
                         exemption_match_str = f"({' OR '.join(exemption_clauses)})"
+
+                        # 最终表达式形如：("搬运" AND "工"*) NOT (NEAR("搬运" "禁", 4) OR NEAR("搬运" "🈲", 4))
+                        # 含义：匹配包含"搬运"和"工*"的帖子，但排除"搬运"附近有"禁"或"🈲"的帖子
                         all_exclude_parts.append(
                             f"({match_expr}) NOT {exemption_match_str}"
                         )
                     else:
+                        # 没有豁免标记时，直接用匹配表达式
                         all_exclude_parts.append(f"({match_expr})")
-
+    
+                # 将所有排除词的 MATCH 表达式用 OR 连接
+                # 含义：命中"搬运"或"转载"任意一个的帖子都要排除
                 if all_exclude_parts:
                     final_exclude_expr = " OR ".join(all_exclude_parts)
+                    # 在 FTS 虚拟表中执行 MATCH 查询，获取所有命中排除词的帖子 rowid
                     exc_result = await self.session.execute(
                         select(thread_fts_table.c.rowid).where(
                             thread_fts_table.c.thread_fts.op("MATCH")(
@@ -262,27 +329,39 @@ class SearchService:
                         )
                     )
                     fts_exclude_ids = set(exc_result.scalars().all())
-
-            # 2b. 正选关键词 → 获取匹配的 thread ID（多组取交集）
+    
+            # ============ 正选关键词处理：找出包含搜索词的帖子 ID ============
             fts_include_ids: set[int] | None = None
             if query.keywords:
+
+                # 按逗号拆分为多个 AND 组，各关键词组之间取交集
                 keywords_str = query.keywords.replace("，", ",").replace("／", "/")
                 and_groups = [
                     group.strip()
                     for group in keywords_str.split(",")
                     if group.strip()
                 ]
+
                 for group in and_groups:
+                    # 按斜杠拆分同一组内的 OR 关键词
                     or_keywords = []
                     for kw in group.split("/"):
                         kw = kw.strip()
                         if not kw:
                             continue
+
+                        # 支持精确匹配语法：用双引号包裹的关键词不做分词，直接精确匹配
+                        # 例如 '"原神启动"' → FTS5 精确匹配 "原神启动"（不分词）
                         if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
                             exact_kw = kw[1:-1].strip()
                             if exact_kw:
                                 or_keywords.append(f'"{exact_kw}"')
                         else:
+                            # 普通关键词：用 jieba 分词后，每个分词结果加 * 前缀匹配
+                            # 例如 "原神启动" 分词为 ["原神", "启动"] → "原神* 启动*"
+                            # 多个分词时用括号包裹，FTS5 隐式 AND 连接
+                            # 即 "原神*" AND "启动*"（帖子必须同时包含"原神*"和"启动*"）
+
                             raw_tokens = await loop.run_in_executor(
                                 None, partial(rjieba.cut, kw)
                             )
@@ -293,63 +372,83 @@ class SearchService:
                                     f"({expr})" if len(tokens) > 1 else expr
                                 )
 
+                    # 同一组内的 OR 关键词用 OR 连接
+                    # 例如 "搬运" 和 "转载" → '"搬运"* OR "转载"*'
+                    # 含义：命中"搬运"或"转载"任意一个即可
                     if or_keywords:
                         match_str = " OR ".join(or_keywords)
+                        # 执行 FTS MATCH 查询，获取当前组匹配的帖子 ID 集合
                         grp_result = await self.session.execute(
                             select(thread_fts_table.c.rowid).where(
                                 thread_fts_table.c.thread_fts.op("MATCH")(match_str)
                             )
                         )
                         group_ids = set(grp_result.scalars().all())
+
+                        # 多个 AND 组之间取交集
                         if fts_include_ids is None:
                             fts_include_ids = group_ids
                         else:
                             fts_include_ids &= group_ids
 
+                # 如果所有 AND 组的交集为空集，说明没有帖子能同时满足所有关键词条件
                 if fts_include_ids is not None and not fts_include_ids:
                     return [], 0
 
-            # 2c. 合并 FTS 结果到过滤器（纯 ID 集合，不再 JOIN thread_fts）
+            # ============ 合并 FTS 结果到过滤器 ============
+
             if fts_include_ids is not None:
+                # 有正选关键词
+
                 final_fts_ids = fts_include_ids - fts_exclude_ids
                 if not final_fts_ids:
                     return [], 0
+
+                # 添加过滤条件：帖子 ID 必须在正选关键词（减去排除）的对应 ID 集合中
                 filters.append(Thread.id.in_(final_fts_ids))  # type: ignore
+
             elif fts_exclude_ids:
+                # 没有正选关键词，但有排除关键词：只排除命中排除词的帖子
                 filters.append(Thread.id.not_in(fts_exclude_ids))  # type: ignore
 
-            # --- 步骤 3: 组合其他过滤器（不再 JOIN thread_fts）---
+            # --- 步骤 3: 组合其他过滤器 ---
+            # 构建基础 SELECT 语句，只查 Thread.id（后续步骤再用 ID 列表查完整数据）
             base_stmt = select(Thread.id).distinct()
-
+    
             # 收藏搜索过滤器
             if query.user_id_for_collection_search:
-                # 查询用户的 BooklistItem，获取去重后的 thread_id 列表
+                # 查询用户的帖子收藏记录，获取该用户收藏过的所有 thread_id
                 collected_stmt = select(BooklistItem.thread_id).where(
                     BooklistItem.owner_id == query.user_id_for_collection_search
                 ).distinct()
+
                 collected_result = await self.session.execute(collected_stmt)
                 collected_thread_ids = list(collected_result.scalars().all())
+
                 if not collected_thread_ids:
                     return [], 0
-
-                # 组合收藏过滤
+    
+                # 添加过滤条件：帖子 thread_id 必须在该用户的收藏列表中
                 filters.append(
                     Thread.thread_id.in_(collected_thread_ids)  # type: ignore
                 )
-
-            # 应用所有过滤器
+    
+            # 将所有已收集的过滤条件用 AND 组合，应用到基础查询语句
             if filters:
                 base_stmt = base_stmt.where(and_(*filters))
 
-            # --- 步骤 4: 一次性执行 ID 查询（FTS MATCH 只跑一次）---
+            # --- 步骤 4: 执行 ID 查询 ---
+            # 执行组合了所有过滤条件的查询，获取满足所有条件的帖子 ID 列表
             id_result = await self.session.execute(base_stmt)
             matched_ids = list(id_result.scalars().all())
+
+            # matched_ids 的长度就是满足所有条件的帖子总数，用于分页计算
             total_count = len(matched_ids)
 
             if total_count == 0:
                 return [], 0
 
-            # --- 步骤 5: 用具体 ID 列表获取分页数据（无嵌套子查询）---
+            # --- 步骤 5: 用满足条件的帖子 ID 列表获取分页数据 ---
             final_select_stmt = (
                 select(Thread)
                 .where(Thread.id.in_(matched_ids))  # type: ignore
@@ -376,6 +475,7 @@ class SearchService:
                 effective_sort_method = "comprehensive"
 
             if effective_sort_method == "comprehensive":
+                # 按综合排序
                 final_select_stmt, final_score_expr = self._apply_ucb1_ranking(
                     final_select_stmt,
                     total_display_count,
@@ -398,7 +498,7 @@ class SearchService:
                         Thread.thread_id == BooklistItem.thread_id,
                         BooklistItem.owner_id == query.user_id_for_collection_search,
                     ),
-                ).group_by(Thread.id)  # type: ignore
+                ).group_by(Thread.id) # type: ignore
 
                 # 取最新的收藏时间
                 sort_col = func.max(BooklistItem.created_at) 
@@ -406,6 +506,7 @@ class SearchService:
                     sort_col.desc() if query.sort_order == "desc" else sort_col.asc()
                 )
             else:
+                # 按对应统计数据排序
                 sort_col_name = (
                     effective_sort_method
                     if hasattr(Thread, effective_sort_method)
@@ -416,9 +517,11 @@ class SearchService:
                     sort_col.desc() if query.sort_order == "desc" else sort_col.asc()
                 )
 
+            # 应用排序
             if order_by is not None:
                 final_select_stmt = final_select_stmt.order_by(order_by)
 
+            # 应用偏移和返回数
             if offset:
                 final_select_stmt = final_select_stmt.offset(offset)
             final_select_stmt = final_select_stmt.limit(limit)
