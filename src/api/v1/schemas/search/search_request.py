@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Union, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from shared.enum.default_preferences import DefaultPreferences
 
@@ -12,10 +12,10 @@ class SearchRequest(BaseModel):
     包含所有可用的搜索条件，用于精确查找论坛帖子
     """
 
-    guild_id: Optional[int] = Field(
+    guild_id: Optional[Union[int, str]] = Field(
         default=None, description="要搜索的服务器ID，为空则不按服务器过滤"
     )
-    channel_ids: Optional[List[int]] = Field(
+    channel_ids: Optional[List[Union[int, str]]] = Field(
         default=None, description="要搜索的频道ID列表，为空则搜索所有频道"
     )
     include_tags: List[str] = Field(
@@ -38,11 +38,11 @@ class SearchRequest(BaseModel):
         default=None,
         description="关键词排除的豁免标记，附近包含这些标记的反选关键词不会被排除",
     )
-    include_authors: Optional[List[int]] = Field(
-        default=None, description="只看这些作者的帖子，作者ID列表"
+    include_authors: Optional[List[Union[int, str]]] = Field(
+        default=None, description="包含的作者 ID 列表"
     )
-    exclude_authors: Optional[List[int]] = Field(
-        default=None, description="屏蔽这些作者的帖子，作者ID列表"
+    exclude_authors: Optional[List[Union[int, str]]] = Field(
+        default=None, description="屏蔽的作者 ID 列表"
     )
     author_name: Optional[str] = Field(
         default=None, description="模糊搜索作者的全局用户名或昵称"
@@ -94,10 +94,44 @@ class SearchRequest(BaseModel):
         le=100,
         description="每次请求期望返回的新帖子数量 (范围: 1-100)",
     )
-    exclude_thread_ids: List[int] = Field(
+    exclude_thread_ids: List[Union[int, str]] = Field(
         default_factory=list,
         description="已在前端展示的帖子 thread_id 列表，本次请求将排除这些帖子",
     )
     offset: int = Field(
         default=0, ge=0, description="结果的偏移页（已弃用，为兼容旧版本保留）"
     )
+
+    # --- 统一转换逻辑 ---
+
+    @field_validator(
+        "guild_id",
+        "channel_ids",
+        "include_authors",
+        "exclude_authors",
+        "exclude_thread_ids",
+        mode="before"
+    )
+    @classmethod
+    def convert_ids_to_int(cls, v: Any) -> Any:
+        """
+        在 Pydantic 校验前，将字符串形式的 Discord ID 转换为 int。
+        """
+        if v is None:
+            return v
+        
+        # 处理单值 (如 guild_id)
+        if isinstance(v, str):
+            return int(v) if v.isdigit() else v
+            
+        # 处理列表 (如 channel_ids, exclude_thread_ids)
+        if isinstance(v, list):
+            processed = []
+            for item in v:
+                if isinstance(item, str) and item.isdigit():
+                    processed.append(int(item))
+                else:
+                    processed.append(item)
+            return processed
+            
+        return v

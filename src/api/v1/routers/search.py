@@ -68,7 +68,9 @@ async def execute_search(
 
     # 处理频道映射虚拟标签，解析实际搜索的频道ID和标签
     channel_result = _resolve_channel_mappings(
-        request.channel_ids, request.include_tags, request.exclude_tags
+        request.channel_ids,  # type: ignore
+        request.include_tags,
+        request.exclude_tags
     )
     effective_channel_ids = channel_result["channel_ids"]
     effective_include_tags = channel_result["include_tags"]
@@ -78,7 +80,7 @@ async def execute_search(
 
     # 构建查询对象，封装所有搜索条件
     query_object = ThreadSearchQuery(
-        guild_id=request.guild_id,
+        guild_id=request.guild_id,  # type: ignore
         channel_ids=effective_channel_ids,
         include_tags=effective_include_tags,
         exclude_tags=effective_exclude_tags,
@@ -86,8 +88,8 @@ async def execute_search(
         keywords=final_keywords,
         exclude_keywords=final_exclude_keywords,
         exclude_keyword_exemption_markers=request.exclude_keyword_exemption_markers,
-        include_authors=request.include_authors,
-        exclude_authors=request.exclude_authors,
+        include_authors=request.include_authors,  # type: ignore
+        exclude_authors=request.exclude_authors,  # type: ignore
         author_name=author_name,
         created_after=request.created_after,
         created_before=request.created_before,
@@ -110,7 +112,7 @@ async def execute_search(
         async with async_session_factory() as session:
             # 执行搜索查询并更新展示计数
             threads, total_threads = await _perform_search_and_update_counts(
-                session, query_object, search_config, request.limit, exclude_thread_ids
+                session, query_object, search_config, request.limit, exclude_thread_ids  # type: ignore
             )
 
             # 获取当前用户ID用于后续收藏状态和未读数查询
@@ -130,17 +132,17 @@ async def execute_search(
             # 转换搜索结果为响应格式，包含虚拟标签匹配
             results = _build_thread_results(
                 threads, has_mapping, effective_channel_ids,
-                request.channel_ids, collected_thread_ids
+                request.channel_ids, collected_thread_ids  # type: ignore
             )
 
             # 构建可用的标签列表：虚拟标签置顶 + 实际被搜索频道的真实标签
             available_tags, virtual_tags = _build_available_tags(
-                request.channel_ids, searched_channel_ids, has_mapping
+                request.channel_ids, searched_channel_ids, has_mapping  # type: ignore
             )
 
             # 获取Banner轮播列表和未读更新数量
             banner_carousel, unread_count = await _get_banner_and_unread(
-                session, request.channel_ids, user_id
+                session, request.channel_ids, user_id  # type: ignore
             )
 
         return SearchResponse(
