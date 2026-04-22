@@ -8,8 +8,15 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import select
 
 from dto.meta import ChannelThreadCount
+from dto.search.fts_result_dto import FTSResultDTO
 from models import Tag, TagVote, Thread, ThreadTagLink
 from ThreadManager.update_data_dto import UpdateData
+
+import asyncio
+from functools import partial
+import rjieba
+import re
+from shared.database import thread_fts_table
 
 logger = logging.getLogger(__name__)
 
@@ -461,3 +468,149 @@ class ThreadRepository:
         stmt = select(Thread.show_flag).where(Thread.thread_id == thread_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def get_fts_matched_thread_ids(
+        self,
+        keywords: str | None,
+        exclude_keywords: str | None,
+        exemption_markers: list[str] | None = None,
+    ) -> "FTSResultDTO":
+        """
+        处理 FTS 关键词搜索，返回正选的 thread.id 集合和反选的 thread.id 集合。
+        注意：返回的是内部主键 `thread.id` 而不是 Discord 的 `thread_id`
+        """
+
+        loop = asyncio.get_running_loop()
+        fts_exclude_ids: set[int] = set()
+
+        # ============ 反选关键词处理：找出所有包含排除词的帖子 ID ============
+        if exclude_keywords:
+            # 豁免标记：当排除词附近出现这些标记时，该排除词不生效
+            markers = exemption_markers if exemption_markers is not None else ["禁", "🈲"]
+
+            # 将排除关键词字符串按逗号/顿号/斜杠/空白拆分成多个独立关键词
+            exclude_keywords_list = [
+                kw.strip()
+                for kw in re.split(r"[,，/\s]+", exclude_keywords)
+                if kw.strip()
+            ]
+
+            # 逐个关键词构建 FTS5 MATCH 表达式
+            all_exclude_parts = []
+            for keyword in exclude_keywords_list:
+                # 使用 jieba 对排除关键词进行中文分词
+                raw_tokens = await loop.run_in_executor(
+                    None, partial(rjieba.cut, keyword)
+                )
+                tokens = [tok.strip() for tok in raw_tokens if tok.strip()]
+                if not tokens:
+                    continue
+
+                # 构建 FTS5 MATCH 的匹配表达式：
+                # - 前面的分词用精确匹配（双引号包裹），例如 "搬运"
+                # - 最后一个分词用前缀匹配（加 * 号），例如 "工*"
+                # - 所有分词之间用 AND 连接，表示必须同时出现
+                # 例如分词 ["搬运", "工"] → '"搬运" AND "工"*'
+                match_parts = [f'"{tok}"' for tok in tokens[:-1]]
+                match_parts.append(f'"{tokens[-1]}"*')
+                match_expr = " AND ".join(match_parts)
+
+                if markers:
+                    # 构建豁免子句：检查排除词的第一个分词是否在 4 个词范围内靠近豁免标记
+                    first_token = tokens[0]
+                    exemption_clauses = [
+                        f'NEAR("{first_token}" "{marker}", 4)'
+                        for marker in markers
+                    ]
+                    exemption_match_str = f"({' OR '.join(exemption_clauses)})"
+
+                    # 最终表达式形如：("搬运" AND "工"*) NOT (NEAR("搬运" "禁", 4) OR NEAR("搬运" "🈲", 4))
+                    # 含义：匹配包含"搬运"和"工*"的帖子，但排除"搬运"附近有"禁"或"🈲"的帖子
+                    all_exclude_parts.append(
+                        f"({match_expr}) NOT {exemption_match_str}"
+                    )
+                else:
+                    # 没有豁免标记时，直接用匹配表达式
+                    all_exclude_parts.append(f"({match_expr})")
+
+            # 将所有排除词的 MATCH 表达式用 OR 连接
+            # 含义：命中"搬运"或"转载"任意一个的帖子都要排除
+            if all_exclude_parts:
+                final_exclude_expr = " OR ".join(all_exclude_parts)
+                # 在 FTS 虚拟表中执行 MATCH 查询，获取所有命中排除词的帖子 rowid
+                from sqlmodel import select
+                
+                exc_result = await self.session.execute(
+                    select(thread_fts_table.c.rowid).where(
+                        thread_fts_table.c.thread_fts.op("MATCH")(
+                            final_exclude_expr
+                        )
+                    )
+                )
+                fts_exclude_ids = set(exc_result.scalars().all())
+
+        # ============ 正选关键词处理：找出包含搜索词的帖子 ID ============
+        fts_include_ids: set[int] | None = None
+        if keywords:
+            # 按逗号拆分为多个 AND 组，各关键词组之间取交集
+            keywords_str = keywords.replace("，", ",").replace("／", "/")
+            and_groups = [
+                group.strip()
+                for group in keywords_str.split(",")
+                if group.strip()
+            ]
+
+            for group in and_groups:
+                # 按斜杠拆分同一组内的 OR 关键词
+                or_keywords = []
+                for kw in group.split("/"):
+                    kw = kw.strip()
+                    if not kw:
+                        continue
+
+                    # 支持精确匹配语法：用双引号包裹的关键词不做分词，直接精确匹配
+                    # 例如 '"原神启动"' → FTS5 精确匹配 "原神启动"（不分词）
+                    if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
+                        exact_kw = kw[1:-1].strip()
+                        if exact_kw:
+                            or_keywords.append(f'"{exact_kw}"')
+                    else:
+                        # 普通关键词：用 jieba 分词后，每个分词结果加 * 前缀匹配
+                        # 例如 "原神启动" 分词为 ["原神", "启动"] → "原神* 启动*"
+                        # 多个分词时用括号包裹，FTS5 隐式 AND 连接
+                        # 即 "原神*" AND "启动*"（帖子必须同时包含"原神*"和"启动*"）
+                        raw_tokens = await loop.run_in_executor(
+                            None, partial(rjieba.cut, kw)
+                        )
+                        tokens = [t.strip() for t in raw_tokens if t.strip()]
+                        if tokens:
+                            expr = " ".join(f"{t}*" for t in tokens)
+                            or_keywords.append(
+                                f"({expr})" if len(tokens) > 1 else expr
+                            )
+
+                # 同一组内的 OR 关键词用 OR 连接
+                # 例如 "搬运" 和 "转载" → '"搬运"* OR "转载"*'
+                # 含义：命中"搬运"或"转载"任意一个即可
+                if or_keywords:
+                    match_str = " OR ".join(or_keywords)
+                    # 执行 FTS MATCH 查询，获取当前组匹配的帖子 ID 集合
+                    from sqlmodel import select
+                    grp_result = await self.session.execute(
+                        select(thread_fts_table.c.rowid).where(
+                            thread_fts_table.c.thread_fts.op("MATCH")(match_str)
+                        )
+                    )
+                    group_ids = set(grp_result.scalars().all())
+
+                    # 多个 AND 组之间取交集
+                    if fts_include_ids is None:
+                        fts_include_ids = group_ids
+                    else:
+                        fts_include_ids &= group_ids
+
+            # 如果所有 AND 组的交集为空集，说明没有帖子能同时满足所有关键词条件
+            if fts_include_ids is None:
+                fts_include_ids = set()
+
+        return FTSResultDTO(include_ids=fts_include_ids, exclude_ids=fts_exclude_ids)

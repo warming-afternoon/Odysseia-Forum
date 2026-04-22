@@ -3,43 +3,77 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
 from sqlmodel import select, case
 from models import Thread, Tag, ThreadTagLink
-from dto.preferences.user_search_preferences import UserSearchPreferencesDTO
+from dto.preferences.user_search_preferences_dto import UserSearchPreferencesDTO
+from core.thread_repository import ThreadRepository
 
 class DiscoveryRepository:
     """提供发现页所需的底层数据拉取功能"""
 
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.thread_repo = ThreadRepository(session)
 
-    def _apply_preferences_filter(self, stmt, prefs: Optional[UserSearchPreferencesDTO]):
+    async def _apply_preferences_filter(self, stmt, prefs: Optional[UserSearchPreferencesDTO]):
         """应用用户偏好到查询构建器"""
         if not prefs:
             return stmt
 
-        if prefs.exclude_authors:
-            stmt = stmt.where(Thread.author_id.notin_(prefs.exclude_authors))  # type: ignore
-            
+        # 频道过滤
         if prefs.preferred_channels:
             stmt = stmt.where(Thread.channel_id.in_(prefs.preferred_channels))  # type: ignore
 
-        if prefs.exclude_tags:
-            subquery = (
-                select(ThreadTagLink.thread_id)
-                .join(Tag, Tag.id == ThreadTagLink.tag_id)  # type: ignore
-                .where(Tag.name.in_(prefs.exclude_tags))  # type: ignore
-            )
-            stmt = stmt.where(Thread.id.notin_(subquery))  # type: ignore
+        # 作者过滤
+        if prefs.exclude_authors:
+            stmt = stmt.where(Thread.author_id.notin_(prefs.exclude_authors))  # type: ignore
+
+        # 标签过滤 (先查出 ID 再用 EXISTS 进行 OR 匹配)
+        if prefs.include_tags or prefs.exclude_tags:
+            all_tags = []
+            if prefs.include_tags: all_tags.extend(prefs.include_tags)
+            if prefs.exclude_tags: all_tags.extend(prefs.exclude_tags)
+            
+            tag_stmt = select(Tag.id, Tag.name).where(Tag.name.in_(all_tags))  # type: ignore
+            tag_res = await self.session.execute(tag_stmt)
+            tag_map = {name: tid for tid, name in tag_res.fetchall()}
+            
+            include_tag_ids = [tag_map[name] for name in prefs.include_tags if name in tag_map] if prefs.include_tags else []
+            exclude_tag_ids = [tag_map[name] for name in prefs.exclude_tags if name in tag_map] if prefs.exclude_tags else []
+
+            if include_tag_ids:
+                # 默认 or 逻辑，只要带有一个偏好标签就放行
+                stmt = stmt.where(Thread.tags.any(Tag.id.in_(include_tag_ids)))  # type: ignore
+            if exclude_tag_ids:
+                stmt = stmt.where(~Thread.tags.any(Tag.id.in_(exclude_tag_ids)))  # type: ignore
+
+        # FTS5 正反选关键词过滤处理
+        fts_result = await self.thread_repo.get_fts_matched_thread_ids(
+            keywords=prefs.include_keywords,
+            exclude_keywords=prefs.exclude_keywords,
+            exemption_markers=prefs.exclude_keyword_exemption_markers
+        )
+
+        if fts_result.has_include_ids:
+            final_fts_ids = fts_result.get_final_ids()
+            if not final_fts_ids:
+                # FTS 有查询词但全被排除或没有满足的，给一个必假条件让此轨道返回空
+                stmt = stmt.where(Thread.id == -1)  # type: ignore
+            else:
+                stmt = stmt.where(Thread.id.in_(final_fts_ids))  # type: ignore
+        elif fts_result.has_exclude_ids:
+            # 只有排除词
+            stmt = stmt.where(Thread.id.notin_(fts_result.exclude_ids))  # type: ignore
 
         return stmt
 
-    async def get_latest_threads(self, limit: int, prefs: Optional[UserSearchPreferencesDTO]) -> List[Thread]:
+    async def get_latest_threads(self, limit: int, offset: int, prefs: Optional[UserSearchPreferencesDTO]) -> List[Thread]:
         """拉取最新的帖子列表"""
         stmt = select(Thread).where(Thread.not_found_count == 0, Thread.show_flag.is_(True))  # type: ignore
         
-        stmt = self._apply_preferences_filter(stmt, prefs)
+        # 应用偏好过滤器并 await
+        stmt = await self._apply_preferences_filter(stmt, prefs)
         
         stmt = stmt.options(selectinload(Thread.tags), joinedload(Thread.author))  # type: ignore
-        stmt = stmt.order_by(Thread.created_at.desc()).limit(limit)  # type: ignore
+        stmt = stmt.order_by(Thread.created_at.desc()).offset(offset).limit(limit)  # type: ignore
         
         result = await self.session.execute(stmt)
         return list(result.scalars().unique().all())
@@ -55,11 +89,11 @@ class DiscoveryRepository:
             Thread.show_flag.is_(True)  # type: ignore
         )
         
-        stmt = self._apply_preferences_filter(stmt, prefs)
+        # 应用偏好过滤器并 await
+        stmt = await self._apply_preferences_filter(stmt, prefs)
         
         stmt = stmt.options(selectinload(Thread.tags), joinedload(Thread.author))  # type: ignore
         
-        # 构建按照目标ID数组排列的排序条件
         order_case = case(
             {tid: index for index, tid in enumerate(thread_ids)},
             value=Thread.thread_id

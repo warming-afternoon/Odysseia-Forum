@@ -23,14 +23,14 @@ class RedisTrendService:
         await redis.zincrby(key, count, str(thread_id))
         await redis.expire(key, 86400 * ConstantEnum.MAX_SURGE_DAYS.value)
 
-    async def get_top_surging_ids(self, metric: str, days: int, limit: int) -> list[int]:
+    async def get_top_surging_ids(self, metric: str, days: int, limit: int, offset: int = 0) -> list[int]:
         """聚合多天数据带有分布式锁机制以确保高并发性能"""
         redis = RedisManager.get_client()
         cache_key = f"cache:surge:{metric}:{days}"
         
         # 尝试直接命中短效聚合结果缓存
         if await redis.exists(cache_key):
-            top_items = await redis.zrevrange(cache_key, 0, limit - 1)
+            top_items = await redis.zrevrange(cache_key, offset, offset + limit - 1)
             return [int(item) for item in top_items if item != "-1"]
 
         lock_key = f"lock:surge:{metric}:{days}"
@@ -51,7 +51,7 @@ class RedisTrendService:
                 # 为聚合结果赋予十分钟的生命周期
                 await redis.expire(cache_key, ConstantEnum.TREND_CACHE_EXPIRE_SECONDS.value)
                 
-                top_items = await redis.zrevrange(cache_key, 0, limit - 1)
+                top_items = await redis.zrevrange(cache_key, offset, offset + limit - 1)
                 return [int(item) for item in top_items if item != "-1"]
             finally:
                 # 计算完毕后主动释放计算锁
@@ -61,7 +61,7 @@ class RedisTrendService:
             for _ in range(20):
                 await asyncio.sleep(0.15)
                 if await redis.exists(cache_key):
-                    top_items = await redis.zrevrange(cache_key, 0, limit - 1)
+                    top_items = await redis.zrevrange(cache_key, offset, offset + limit - 1)
                     return [int(item) for item in top_items if item != "-1"]
                     
             return []

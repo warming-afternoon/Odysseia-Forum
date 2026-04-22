@@ -12,7 +12,7 @@ from core.tag_cache_service import TagCacheService
 from core.preferences_repository import PreferencesRepository
 from preferences.views.channel_preferences_view import ChannelPreferencesView
 from preferences.views.tag_preferences_view import TagPreferencesView
-from dto.preferences.user_search_preferences import UserSearchPreferencesDTO
+from dto.preferences import UserSearchPreferencesDTO
 from shared.safe_defer import safe_defer
 from shared.utils import process_string_to_set
 from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigDefaultsInt

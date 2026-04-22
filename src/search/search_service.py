@@ -10,6 +10,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
+from core.thread_repository import ThreadRepository
 from models import Author, Tag, Thread, ThreadTagLink, UserCollection, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
@@ -157,11 +158,12 @@ class SearchService:
             # 清洗查询数据
             CleanedQo = self._clean_query(query, exclude_thread_ids)
 
-            # --- 步骤 1: 构建基础过滤器列表 (除了反选关键词) ---
+            # --- 步骤 1: 构建过滤器列表 ---
             filters = []
 
             # 只搜索 not_found_count == 0 的帖子，避免显示被软删除的帖子
             filters.append(Thread.not_found_count == 0)
+
             # 只搜索 show_flag == True 的帖子，避免显示被隐藏的帖子
             filters.append(Thread.show_flag == True)
 
@@ -255,166 +257,28 @@ class SearchService:
                     ~Thread.tags.any(Tag.id.in_(CleanedQo.resolved_exclude_tag_ids)) # type: ignore
                 )
 
-            # --- 步骤 2: 独立执行关键词的 FTS 查询，拿到匹配/排除的 ID 集合 ---
-            # 获取当前事件循环，用于在线程池中执行阻塞的 jieba 分词操作
-            loop = asyncio.get_running_loop()
-    
-            # ============ 反选关键词处理：找出所有包含排除词的帖子 ID ============
+            # 关键词匹配过滤
+            thread_repo = ThreadRepository(self.session)
 
-            fts_exclude_ids: set[int] = set()
-            if query.exclude_keywords:
-                # 豁免标记：当排除词附近出现这些标记时，该排除词不生效
-                exemption_markers = (
-                    query.exclude_keyword_exemption_markers
-                    if query.exclude_keyword_exemption_markers is not None
-                    else ["禁", "🈲"]
-                )
+            # 处理 FTS 关键词搜索，返回正选的 thread.id 集合和反选的 thread.id 集合。
+            fts_result = await thread_repo.get_fts_matched_thread_ids(
+                keywords=query.keywords,
+                exclude_keywords=query.exclude_keywords,
+                exemption_markers=query.exclude_keyword_exemption_markers
+            )
 
-                # 将排除关键词字符串按逗号/顿号/斜杠/空白拆分成多个独立关键词
-                exclude_keywords_list = [
-                    kw.strip()
-                    for kw in re.split(r"[,，/\s]+", query.exclude_keywords)
-                    if kw.strip()
-                ]
-
-                # 逐个关键词构建 FTS5 MATCH 表达式
-                all_exclude_parts = []
-                for keyword in exclude_keywords_list:
-
-                    # 使用 jieba 对排除关键词进行中文分词
-                    raw_tokens = await loop.run_in_executor(
-                        None, partial(rjieba.cut, keyword)
-                    )
-                    tokens = [tok.strip() for tok in raw_tokens if tok.strip()]
-                    if not tokens:
-                        continue
-    
-                    # 构建 FTS5 MATCH 的匹配表达式：
-                    # - 前面的分词用精确匹配（双引号包裹），例如 "搬运"
-                    # - 最后一个分词用前缀匹配（加 * 号），例如 "工*"
-                    # - 所有分词之间用 AND 连接，表示必须同时出现
-                    # 例如分词 ["搬运", "工"] → '"搬运" AND "工"*'
-                    match_parts = [f'"{tok}"' for tok in tokens[:-1]]
-                    match_parts.append(f'"{tokens[-1]}"*')
-                    match_expr = " AND ".join(match_parts)
-    
-                    if exemption_markers:
-                        # 构建豁免子句：检查排除词的第一个分词是否在 4 个词范围内靠近豁免标记
-                        first_token = tokens[0]
-                        exemption_clauses = [
-                            f'NEAR("{first_token}" "{marker}", 4)'
-                            for marker in exemption_markers
-                        ]
-                        exemption_match_str = f"({' OR '.join(exemption_clauses)})"
-
-                        # 最终表达式形如：("搬运" AND "工"*) NOT (NEAR("搬运" "禁", 4) OR NEAR("搬运" "🈲", 4))
-                        # 含义：匹配包含"搬运"和"工*"的帖子，但排除"搬运"附近有"禁"或"🈲"的帖子
-                        all_exclude_parts.append(
-                            f"({match_expr}) NOT {exemption_match_str}"
-                        )
-                    else:
-                        # 没有豁免标记时，直接用匹配表达式
-                        all_exclude_parts.append(f"({match_expr})")
-    
-                # 将所有排除词的 MATCH 表达式用 OR 连接
-                # 含义：命中"搬运"或"转载"任意一个的帖子都要排除
-                if all_exclude_parts:
-                    final_exclude_expr = " OR ".join(all_exclude_parts)
-                    # 在 FTS 虚拟表中执行 MATCH 查询，获取所有命中排除词的帖子 rowid
-                    exc_result = await self.session.execute(
-                        select(thread_fts_table.c.rowid).where(
-                            thread_fts_table.c.thread_fts.op("MATCH")(
-                                final_exclude_expr
-                            )
-                        )
-                    )
-                    fts_exclude_ids = set(exc_result.scalars().all())
-    
-            # ============ 正选关键词处理：找出包含搜索词的帖子 ID ============
-            fts_include_ids: set[int] | None = None
-            if query.keywords:
-
-                # 按逗号拆分为多个 AND 组，各关键词组之间取交集
-                keywords_str = query.keywords.replace("，", ",").replace("／", "/")
-                and_groups = [
-                    group.strip()
-                    for group in keywords_str.split(",")
-                    if group.strip()
-                ]
-
-                for group in and_groups:
-                    # 按斜杠拆分同一组内的 OR 关键词
-                    or_keywords = []
-                    for kw in group.split("/"):
-                        kw = kw.strip()
-                        if not kw:
-                            continue
-
-                        # 支持精确匹配语法：用双引号包裹的关键词不做分词，直接精确匹配
-                        # 例如 '"原神启动"' → FTS5 精确匹配 "原神启动"（不分词）
-                        if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
-                            exact_kw = kw[1:-1].strip()
-                            if exact_kw:
-                                or_keywords.append(f'"{exact_kw}"')
-                        else:
-                            # 普通关键词：用 jieba 分词后，每个分词结果加 * 前缀匹配
-                            # 例如 "原神启动" 分词为 ["原神", "启动"] → "原神* 启动*"
-                            # 多个分词时用括号包裹，FTS5 隐式 AND 连接
-                            # 即 "原神*" AND "启动*"（帖子必须同时包含"原神*"和"启动*"）
-
-                            raw_tokens = await loop.run_in_executor(
-                                None, partial(rjieba.cut, kw)
-                            )
-                            tokens = [t.strip() for t in raw_tokens if t.strip()]
-                            if tokens:
-                                expr = " ".join(f"{t}*" for t in tokens)
-                                or_keywords.append(
-                                    f"({expr})" if len(tokens) > 1 else expr
-                                )
-
-                    # 同一组内的 OR 关键词用 OR 连接
-                    # 例如 "搬运" 和 "转载" → '"搬运"* OR "转载"*'
-                    # 含义：命中"搬运"或"转载"任意一个即可
-                    if or_keywords:
-                        match_str = " OR ".join(or_keywords)
-                        # 执行 FTS MATCH 查询，获取当前组匹配的帖子 ID 集合
-                        grp_result = await self.session.execute(
-                            select(thread_fts_table.c.rowid).where(
-                                thread_fts_table.c.thread_fts.op("MATCH")(match_str)
-                            )
-                        )
-                        group_ids = set(grp_result.scalars().all())
-
-                        # 多个 AND 组之间取交集
-                        if fts_include_ids is None:
-                            fts_include_ids = group_ids
-                        else:
-                            fts_include_ids &= group_ids
-
-                # 如果所有 AND 组的交集为空集，说明没有帖子能同时满足所有关键词条件
-                if fts_include_ids is not None and not fts_include_ids:
-                    return [], 0
-
-            # ============ 合并 FTS 结果到过滤器 ============
-
-            if fts_include_ids is not None:
+            if fts_result.has_include_ids:
                 # 有正选关键词
-
-                final_fts_ids = fts_include_ids - fts_exclude_ids
+                final_fts_ids = fts_result.get_final_ids()
                 if not final_fts_ids:
                     return [], 0
 
                 # 添加过滤条件：帖子 ID 必须在正选关键词（减去排除）的对应 ID 集合中
                 filters.append(Thread.id.in_(final_fts_ids))  # type: ignore
-
-            elif fts_exclude_ids:
+            elif fts_result.has_exclude_ids:
                 # 没有正选关键词，但有排除关键词：只排除命中排除词的帖子
-                filters.append(Thread.id.not_in(fts_exclude_ids))  # type: ignore
+                filters.append(Thread.id.not_in(fts_result.exclude_ids))  # type: ignore
 
-            # --- 步骤 3: 组合其他过滤器 ---
-            # 构建基础 SELECT 语句，只查 Thread.id（后续步骤再用 ID 列表查完整数据）
-            base_stmt = select(Thread.id).distinct()
-    
             # 收藏搜索过滤器
             if query.user_id_for_collection_search:
                 # 查询用户的帖子收藏记录，获取该用户收藏过的所有 thread_id
@@ -432,12 +296,18 @@ class SearchService:
                 filters.append(
                     Thread.thread_id.in_(collected_thread_ids)  # type: ignore
                 )
-    
+
+            # --- 步骤 2: 组合所有过滤器 ---
+
+            # 构建基础 SELECT 语句，只查 Thread.id（后续步骤再用 ID 列表查完整数据）
+            base_stmt = select(Thread.id).distinct()
+
             # 将所有已收集的过滤条件用 AND 组合，应用到基础查询语句
             if filters:
                 base_stmt = base_stmt.where(and_(*filters))
 
-            # --- 步骤 4: 执行 ID 查询 ---
+            # --- 步骤 3: 执行 ID 查询 ---
+
             # 执行组合了所有过滤条件的查询，获取满足所有条件的帖子 ID 列表
             id_result = await self.session.execute(base_stmt)
             matched_ids = list(id_result.scalars().all())
@@ -448,7 +318,7 @@ class SearchService:
             if total_count == 0:
                 return [], 0
 
-            # --- 步骤 5: 用满足条件的帖子 ID 列表获取分页数据 ---
+            # --- 步骤 4: 用满足条件的帖子 ID 列表进行排序，并获取返回分页的关联数据 ---
             final_select_stmt = (
                 select(Thread)
                 .where(Thread.id.in_(matched_ids))  # type: ignore
