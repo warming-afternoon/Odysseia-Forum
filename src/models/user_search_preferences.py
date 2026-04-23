@@ -75,6 +75,9 @@ class UserSearchPreferences(SQLModel, table=True):
     results_per_page: int = Field(default=5)
     """每页结果数量"""
 
+    ui_page_size: int = Field(default=48)
+    """网页端每页结果数量"""
+
     # 排序算法偏好
     sort_method: str = Field(default="comprehensive", nullable=False)
     """排序方法"""
