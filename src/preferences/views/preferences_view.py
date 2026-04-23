@@ -331,12 +331,9 @@ class PreferencesView(discord.ui.View):
         await self.fetch_preferences()
         self.update_components()
         embed = self.build_embed()
-        await self.service.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.edit_original_response(
+        await interaction.edit_original_response(
                 embed=embed, view=self
-            ),
-            priority=1,
-        )
+            )
 
     async def button_callback(self, interaction: discord.Interaction):
         """统一处理所有按钮点击事件"""

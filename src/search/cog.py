@@ -22,7 +22,7 @@ from search.views import (
     PersistentChannelSearchView,
     ThreadEmbedBuilder,
 )
-from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigDefaultsInt, SearchConfigType
+from shared.enum.search_config_type import SearchConfigDefaultsInt, SearchConfigType
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:
@@ -518,31 +518,7 @@ class Search(commands.Cog):
             search_qo.guild_id = None
 
             # 获取 UCB1 配置
-            total_disp_conf = await self.cache_service.get_bot_config(
-                SearchConfigType.TOTAL_DISPLAY_COUNT
-            )
-            ucb_factor_conf = await self.cache_service.get_bot_config(
-                SearchConfigType.UCB1_EXPLORATION_FACTOR
-            )
-            strength_conf = await self.cache_service.get_bot_config(
-                SearchConfigType.STRENGTH_WEIGHT
-            )
-
-            total_display_count = (
-                total_disp_conf.value_int
-                if total_disp_conf and total_disp_conf.value_int is not None
-                else 1
-            )
-            exploration_factor = (
-                ucb_factor_conf.value_float
-                if ucb_factor_conf and ucb_factor_conf.value_float is not None
-                else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
-            )
-            strength_weight = (
-                strength_conf.value_float
-                if strength_conf and strength_conf.value_float is not None
-                else SearchConfigDefaults.STRENGTH_WEIGHT.value
-            )
+            ucb1_config = await self.cache_service.get_ucb1_config()
 
             async with self.session_factory() as session:
                 repo = SearchService(session, self.tag_service)
@@ -551,9 +527,9 @@ class Search(commands.Cog):
                     search_qo,
                     limit=per_page,
                     offset=offset,
-                    total_display_count=total_display_count,
-                    exploration_factor=exploration_factor,
-                    strength_weight=strength_weight,
+                    total_display_count=ucb1_config.total_display_count,
+                    exploration_factor=ucb1_config.exploration_factor,
+                    strength_weight=ucb1_config.strength_weight,
                 )
 
             # 当排序方法为按创建时间或收藏时间排序时，不记录展示次数

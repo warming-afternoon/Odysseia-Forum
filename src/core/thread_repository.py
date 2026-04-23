@@ -502,13 +502,18 @@ class ThreadRepository:
                 raw_tokens = await loop.run_in_executor(
                     None, partial(rjieba.cut, keyword)
                 )
-                tokens = [tok.strip() for tok in raw_tokens if tok.strip()]
+                # 清理 token 内部的双引号，防止破坏 FTS5 语法
+                tokens = []
+                for tok in raw_tokens:
+                    clean_tok = tok.strip().replace('"', '')
+                    if clean_tok:
+                        tokens.append(clean_tok)
                 if not tokens:
                     continue
-
+    
                 # 构建 FTS5 MATCH 的匹配表达式：
                 # - 前面的分词用精确匹配（双引号包裹），例如 "搬运"
-                # - 最后一个分词用前缀匹配（加 * 号），例如 "工*"
+                # - 最后一个分词用前缀匹配（* 在双引号外面），例如 "工"*
                 # - 所有分词之间用 AND 连接，表示必须同时出现
                 # 例如分词 ["搬运", "工"] → '"搬运" AND "工"*'
                 match_parts = [f'"{tok}"' for tok in tokens[:-1]]
@@ -571,20 +576,26 @@ class ThreadRepository:
                     # 支持精确匹配语法：用双引号包裹的关键词不做分词，直接精确匹配
                     # 例如 '"原神启动"' → FTS5 精确匹配 "原神启动"（不分词）
                     if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
-                        exact_kw = kw[1:-1].strip()
+                        # 清理用户输入的非法内嵌双引号，防止破坏 FTS5 语法
+                        exact_kw = kw[1:-1].strip().replace('"', '')
                         if exact_kw:
                             or_keywords.append(f'"{exact_kw}"')
                     else:
                         # 普通关键词：用 jieba 分词后，每个分词结果加 * 前缀匹配
-                        # 例如 "原神启动" 分词为 ["原神", "启动"] → "原神* 启动*"
+                        # 例如 "原神启动" 分词为 ["原神", "启动"] → "原神"* "启动"*
                         # 多个分词时用括号包裹，FTS5 隐式 AND 连接
-                        # 即 "原神*" AND "启动*"（帖子必须同时包含"原神*"和"启动*"）
+                        # 即 "原神"* AND "启动"*（帖子必须同时包含"原神*"和"启动*"）
                         raw_tokens = await loop.run_in_executor(
                             None, partial(rjieba.cut, kw)
                         )
-                        tokens = [t.strip() for t in raw_tokens if t.strip()]
+                        # 清理 token 内部的双引号，防止破坏 FTS5 语法
+                        tokens = []
+                        for tok in raw_tokens:
+                            clean_tok = tok.strip().replace('"', '')
+                            if clean_tok:
+                                tokens.append(clean_tok)
                         if tokens:
-                            expr = " ".join(f"{t}*" for t in tokens)
+                            expr = " ".join(f'"{t}"*' for t in tokens)
                             or_keywords.append(
                                 f"({expr})" if len(tokens) > 1 else expr
                             )

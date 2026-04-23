@@ -13,12 +13,14 @@ from core.cache_service import CacheService
 from core.collection_repository import CollectionRepository
 from core.follow_repository import ThreadFollowRepository
 from core.impression_cache_service import ImpressionCacheService
+from core.preferences_repository import PreferencesRepository
 from core.tag_cache_service import TagCacheService
+from dto.preferences import UserSearchPreferencesDTO
+from dto.search import UCB1ConfigDTO
 from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
 from shared.enum.collection_type import CollectionType
-from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigType
 from shared.keyword_parser import KeywordParser
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
@@ -55,6 +57,20 @@ async def execute_search(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Search 服务尚未初始化",
         )
+
+    user_id = (
+        int(current_user["id"])
+        if current_user and "id" in current_user
+        else None
+    )
+
+    # 处理偏好合并：仅在用户已登录且 apply_preferences 为 True 时执行
+    if request.apply_preferences and user_id:
+        async with async_session_factory() as session:
+            pref_repo = PreferencesRepository(session)
+            prefs = await pref_repo.get_user_preferences(user_id)
+            if prefs:
+                _merge_user_preferences(request, prefs)
 
     # 解析高级搜索语法，提取作者名和最终搜索词
     author_name, final_keywords, final_exclude_keywords = _parse_search_keywords(
@@ -105,14 +121,14 @@ async def execute_search(
 
     try:
         # 获取搜索配置参数（UCB1排序算法相关配置）
-        search_config = await _get_search_config()
+        ucb1_config = await cache_service_instance.get_ucb1_config()
 
         exclude_thread_ids = request.exclude_thread_ids or []
 
         async with async_session_factory() as session:
             # 执行搜索查询并更新展示计数
             threads, total_threads = await _perform_search_and_update_counts(
-                session, query_object, search_config, request.limit, exclude_thread_ids  # type: ignore
+                session, query_object, ucb1_config, request.limit, exclude_thread_ids  # type: ignore
             )
 
             # 获取当前用户ID用于后续收藏状态和未读数查询
@@ -162,10 +178,101 @@ async def execute_search(
             detail="执行搜索时发生内部错误",
         )
 
+@router.get(
+    "/thread/{thread_id}",
+    response_model=ThreadDetail,
+    summary="按 Discord 帖子 ID 获取详情",
+)
+async def get_thread_detail(
+    thread_id: int, current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """用于 Banner 点击等场景；避免依赖当前页搜索结果是否已包含该帖。"""
+    if not tag_cache_service_instance or not async_session_factory:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search 服务尚未初始化",
+        )
+
+    user_id = int(current_user["id"]) if current_user and "id" in current_user else None
+
+    async with async_session_factory() as session:
+        repo = SearchService(session, tag_cache_service_instance)
+        thread = await repo.get_thread_by_discord_id(thread_id)
+        if not thread:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="帖子不存在或不可查看"
+            )
+
+        collected_thread_ids: set[int] = set()
+        if user_id:
+            collection_service = CollectionRepository(session)
+            collected_thread_ids = await collection_service.get_collected_target_ids(
+                user_id, CollectionType.THREAD, [thread.thread_id]
+            )
+
+        return ThreadDetail(
+            thread_id=thread.thread_id,
+            guild_id=thread.guild_id,
+            channel_id=thread.channel_id,
+            title=thread.title,
+            author=AuthorDetail.model_validate(thread.author)
+            if thread.author
+            else None,
+            created_at=thread.created_at,
+            last_active_at=thread.last_active_at,
+            reaction_count=thread.reaction_count,
+            reply_count=thread.reply_count,
+            display_count=thread.display_count,
+            first_message_excerpt=thread.first_message_excerpt,
+            thumbnail_urls=thread.thumbnail_urls or [],
+            tags=[tag.name for tag in thread.tags],
+            virtual_tags=[],
+            collected_flag=thread.thread_id in collected_thread_ids,
+        )
 
 # -------------------------
 # 辅助方法
 # -------------------------
+
+
+def _merge_user_preferences(
+    request: SearchRequest, prefs: UserSearchPreferencesDTO
+):
+    """
+    将用户偏好合并到搜索请求中。
+    原则：仅当前端未显示传递（未出现在 unset 列表中）
+    且偏好有值时，才使用偏好值覆盖。
+    """
+    # 获取前端明确传递的字段集合
+    explicit_fields = request.model_dump(exclude_unset=True)
+
+    # 映射表: 偏好字段名 -> 请求对象字段名
+    mapping = {
+        "preferred_channels": "channel_ids",
+        "include_authors": "include_authors",
+        "exclude_authors": "exclude_authors",
+        "include_tags": "include_tags",
+        "exclude_tags": "exclude_tags",
+        "include_keywords": "keywords",
+        "exclude_keywords": "exclude_keywords",
+        "exclude_keyword_exemption_markers": (
+            "exclude_keyword_exemption_markers"
+        ),
+        "sort_method": "sort_method",
+        "custom_base_sort": "custom_base_sort",
+        "created_after": "created_after",
+        "created_before": "created_before",
+        "active_after": "active_after",
+        "active_before": "active_before",
+    }
+
+    for pref_key, req_key in mapping.items():
+        # 如果前端没传这个参数
+        if req_key not in explicit_fields:
+            pref_value = getattr(prefs, pref_key, None)
+            # 如果偏好设置中有非空有效值，则覆盖默认值
+            if pref_value is not None and pref_value != "":
+                setattr(request, req_key, pref_value)
 
 
 def _parse_search_keywords(
@@ -282,53 +389,10 @@ def _resolve_channel_mappings(
     return result
 
 
-async def _get_search_config() -> Dict[str, Any]:
-    """
-    从配置服务获取搜索排序所需的UCB1算法参数。
-
-    获取总展示次数、探索因子和强度权重三个参数，
-    如果配置不存在则使用默认值。
-
-    Returns:
-        Dict: 包含 total_display_count, exploration_factor, strength_weight
-    """
-    total_disp_conf = await cache_service_instance.get_bot_config(  # type: ignore[union-attr]
-        SearchConfigType.TOTAL_DISPLAY_COUNT
-    )
-    ucb_factor_conf = await cache_service_instance.get_bot_config(  # type: ignore[union-attr]
-        SearchConfigType.UCB1_EXPLORATION_FACTOR
-    )
-    strength_conf = await cache_service_instance.get_bot_config(  # type: ignore[union-attr]
-        SearchConfigType.STRENGTH_WEIGHT
-    )
-
-    total_display_count = (
-        total_disp_conf.value_int
-        if total_disp_conf and total_disp_conf.value_int is not None
-        else 1
-    )
-    exploration_factor = (
-        ucb_factor_conf.value_float
-        if ucb_factor_conf and ucb_factor_conf.value_float is not None
-        else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
-    )
-    strength_weight = (
-        strength_conf.value_float
-        if strength_conf and strength_conf.value_float is not None
-        else SearchConfigDefaults.STRENGTH_WEIGHT.value
-    )
-
-    return {
-        "total_display_count": total_display_count,
-        "exploration_factor": exploration_factor,
-        "strength_weight": strength_weight,
-    }
-
-
 async def _perform_search_and_update_counts(
     session: Any,
     query_object: ThreadSearchQuery,
-    search_config: Dict[str, Any],
+    ucb1_config: UCB1ConfigDTO,
     limit: int,
     exclude_thread_ids: List[int],
 ) -> tuple[Any, int]:
@@ -342,9 +406,9 @@ async def _perform_search_and_update_counts(
     threads, total_threads = await repo.search_threads_with_count(
         query_object,
         limit=limit,
-        total_display_count=search_config["total_display_count"],
-        exploration_factor=search_config["exploration_factor"],
-        strength_weight=search_config["strength_weight"],
+        total_display_count=ucb1_config.total_display_count,
+        exploration_factor=ucb1_config.exploration_factor,
+        strength_weight=ucb1_config.strength_weight,
         exclude_thread_ids=exclude_thread_ids,
     )
 
@@ -515,56 +579,3 @@ async def _get_banner_and_unread(
             unread_count = 0
 
     return banner_carousel, unread_count
-
-
-@router.get(
-    "/thread/{thread_id}",
-    response_model=ThreadDetail,
-    summary="按 Discord 帖子 ID 获取详情",
-)
-async def get_thread_detail(
-    thread_id: int, current_user: Dict[str, Any] = Depends(get_current_user)
-):
-    """用于 Banner 点击等场景；避免依赖当前页搜索结果是否已包含该帖。"""
-    if not tag_cache_service_instance or not async_session_factory:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Search 服务尚未初始化",
-        )
-
-    user_id = int(current_user["id"]) if current_user and "id" in current_user else None
-
-    async with async_session_factory() as session:
-        repo = SearchService(session, tag_cache_service_instance)
-        thread = await repo.get_thread_by_discord_id(thread_id)
-        if not thread:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="帖子不存在或不可查看"
-            )
-
-        collected_thread_ids: set[int] = set()
-        if user_id:
-            collection_service = CollectionRepository(session)
-            collected_thread_ids = await collection_service.get_collected_target_ids(
-                user_id, CollectionType.THREAD, [thread.thread_id]
-            )
-
-        return ThreadDetail(
-            thread_id=thread.thread_id,
-            guild_id=thread.guild_id,
-            channel_id=thread.channel_id,
-            title=thread.title,
-            author=AuthorDetail.model_validate(thread.author)
-            if thread.author
-            else None,
-            created_at=thread.created_at,
-            last_active_at=thread.last_active_at,
-            reaction_count=thread.reaction_count,
-            reply_count=thread.reply_count,
-            display_count=thread.display_count,
-            first_message_excerpt=thread.first_message_excerpt,
-            thumbnail_urls=thread.thumbnail_urls or [],
-            tags=[tag.name for tag in thread.tags],
-            virtual_tags=[],
-            collected_flag=thread.thread_id in collected_thread_ids,
-        )

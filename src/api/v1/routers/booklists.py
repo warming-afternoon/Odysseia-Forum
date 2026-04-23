@@ -125,6 +125,11 @@ async def list_public_booklists(
     - offset: 偏移页
     """
     try:
+        # 当 search_by_collect 为真时，获取当前用户ID作为 collected_by_user_id
+        collected_by_user_id = None
+        if search_by_collect:
+            collected_by_user_id = int(current_user["id"])
+
         async with AsyncSessionFactory() as session:
             service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
@@ -132,7 +137,7 @@ async def list_public_booklists(
                 is_public=True,  # 强制只搜索公开书单
                 keywords=keywords,
                 included_thread_id=included_thread_id,
-                collected_by_user_id=None,
+                collected_by_user_id=collected_by_user_id,
                 sort_method=sort_method,
                 sort_order=sort_order,
                 limit=limit,
