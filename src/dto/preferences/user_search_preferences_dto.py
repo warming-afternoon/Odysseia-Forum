@@ -56,6 +56,9 @@ class UserSearchPreferencesDTO(BaseModel):
     results_per_page: int = 5
     """每页结果数量"""
 
+    ui_page_size: int = 48
+    """网页端每页结果数量"""
+
     # 排序算法偏好
     sort_method: str = "comprehensive"
     """排序方法（comprehensive/created/active/custom）"""
