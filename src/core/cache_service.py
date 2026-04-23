@@ -6,9 +6,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 
 from core.thread_repository import ThreadRepository
+from dto.search import UCB1ConfigDTO
 from models import BotConfig
 from shared.discord_utils import DiscordUtils
-from shared.enum.search_config_type import SearchConfigType
+from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigType
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +93,44 @@ class CacheService:
                 f"请检查数据库中是否存在此配置项，或运行一次初始化。"
             )
         return config
+
+    async def get_ucb1_config(self) -> UCB1ConfigDTO:
+        """
+        获取 UCB1 算法所需的三个配置参数，封装为 DTO 返回。
+
+        从缓存中获取总展示次数、探索因子和强度权重
+        """
+        total_disp_conf = await self.get_bot_config(
+            SearchConfigType.TOTAL_DISPLAY_COUNT
+        )
+        ucb_factor_conf = await self.get_bot_config(
+            SearchConfigType.UCB1_EXPLORATION_FACTOR
+        )
+        strength_conf = await self.get_bot_config(
+            SearchConfigType.STRENGTH_WEIGHT
+        )
+
+        total_display_count = (
+            total_disp_conf.value_int
+            if total_disp_conf and total_disp_conf.value_int is not None
+            else 1
+        )
+        exploration_factor = (
+            ucb_factor_conf.value_float
+            if ucb_factor_conf and ucb_factor_conf.value_float is not None
+            else SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value
+        )
+        strength_weight = (
+            strength_conf.value_float
+            if strength_conf and strength_conf.value_float is not None
+            else SearchConfigDefaults.STRENGTH_WEIGHT.value
+        )
+
+        return UCB1ConfigDTO(
+            total_display_count=total_display_count,
+            exploration_factor=exploration_factor,
+            strength_weight=strength_weight,
+        )
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道ID是否已索引。"""

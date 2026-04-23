@@ -50,6 +50,13 @@ class SearchRequest(BaseModel):
     search_by_collection: Optional[bool] = Field(
         default=False, description="仅搜索当前用户收藏的帖子"
     )
+
+    apply_preferences: bool = Field(
+        default=False, 
+        description="是否应用当前用户的搜索偏好。"
+        "若为True，前端未传的字段将使用用户偏好补全"
+    )
+
     created_after: Optional[str] = Field(
         default=None,
         description="发帖时间晚于此日期 (格式: YYYY-MM-DD 或相对时间如 -7d)",

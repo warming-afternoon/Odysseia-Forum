@@ -184,7 +184,7 @@ class GenericSearchView(discord.ui.View):
                 )
             # 回退到编辑原始响应
             else:
-                edit_coro = interaction.edit_original_response(
+                await interaction.edit_original_response(
                     content=content, view=final_view, embeds=final_embeds_to_send
                 )
 
