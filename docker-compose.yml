@@ -6,10 +6,6 @@ services:
     container_name: odysseia-forum
     restart: unless-stopped
     working_dir: /app
-    environment:
-      PYTHONPATH: /app/src
-      # 这里的 redis 地址使用容器名
-      REDIS_URL: redis://odysseia-redis:6379/0
     ports:
       - "10810:10810"
     volumes:
@@ -19,7 +15,13 @@ services:
     depends_on:
       odysseia-redis:
         condition: service_healthy
-    command: ["uv", "run", "bot_main.py"]
+    # 默认不执行迁移；需要迁移时通过命令行传入：
+    #   RUN_MIGRATE=1 docker compose up -d --build
+    environment:
+      PYTHONPATH: /app/src
+      REDIS_URL: redis://odysseia-redis:6379/0
+      RUN_MIGRATE: ${RUN_MIGRATE:-0}
+    command: ["/app/entrypoint.sh"]
 
   odysseia-redis:
     image: redis:alpine

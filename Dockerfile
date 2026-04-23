@@ -22,9 +22,12 @@ COPY config.example.json ./
 COPY migrate.py ./
 COPY migrate_to_multi_server.py ./
 COPY start.sh ./
+COPY entrypoint.sh ./
 
 RUN uv sync --locked --no-dev
 
 RUN mkdir -p /app/data
 
-CMD ["uv", "run", "bot_main.py"]
+RUN chmod +x /app/entrypoint.sh
+
+CMD ["/app/entrypoint.sh"]
