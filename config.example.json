@@ -140,5 +140,13 @@
       "1374491950161330277": "其它区"
     },
     "_comment_available_channels": "用户可选择的展示频道列表，格式为 频道ID: 频道名称"
+  },
+
+  "abyss": {
+    "_comment": "深渊区配置：仅拥有指定身份组的用户可看到这些频道的帖子",
+    "channel_ids": [],
+    "_comment_channel_ids": "需要屏蔽的频道ID列表，未授权的用户将看不到这些频道的帖子",
+    "required_role_id": "",
+    "_comment_required_role_id": "允许查看深渊区的身份组ID，用户需拥有此身份组才能看到被屏蔽频道的帖子"
   }
 }

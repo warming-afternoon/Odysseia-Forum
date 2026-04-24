@@ -64,7 +64,7 @@ export default {
       }
 
       // 签发 JWT
-      const token = await signJWT({ id: user.id, username: user.username }, env.JWT_SECRET, 7 * 24 * 60 * 60);
+      const token = await signJWT({ id: user.id, username: user.username, roles: member.roles }, env.JWT_SECRET, 7 * 24 * 60 * 60);
 
       const cookieDomainAttr = env.COOKIE_DOMAIN ? `; Domain=${env.COOKIE_DOMAIN}` : "";
       const headersOut = new Headers({
@@ -97,14 +97,15 @@ export default {
           const secret = new TextEncoder().encode(env.JWT_SECRET);
   
           // 再次检查 Discord 身份（Bot Token）
-          const ok = await validateGuildRole(env, payload.id);
-          if (!ok) {
+          const roleCheck = await validateGuildRole(env, payload.id);
+          if (!roleCheck.ok) {
             return new Response(JSON.stringify({ loggedIn: false }), { status: 200, headers: {
               'Set-Cookie': `token=; Path=/; HttpOnly; Secure; Max-Age=0; SameSite=Strict`
             }});
           }
   
-          // 刷新 token
+          // 刷新 token 时带上最新的 roles
+          payload.roles = roleCheck.roles;
           const newToken = await signJWT(payload, secret, 7 * 24 * 60 * 60);
   
           const headers = new Headers();
@@ -178,7 +179,7 @@ export default {
 
 async function validateGuildRole(env, userId) {
   const memberRes = await fetch(`https://discord.com/api/guilds/${env.GUILD_ID}/members/${userId}`, { headers: { Authorization: `Bot ${env.BOT_TOKEN}` } });
-  if (memberRes.status !== 200) return false;
+  if (memberRes.status !== 200) return { ok: false };
   const member = await memberRes.json();
   const roles = env.ROLE_ID.split(",");
   let hasRole = false;
@@ -188,7 +189,7 @@ async function validateGuildRole(env, userId) {
       break;
     }
   }
-  return hasRole;
+  return { ok: hasRole, roles: member.roles };
 }
 
 // -------------- JWT 工具 ------------------

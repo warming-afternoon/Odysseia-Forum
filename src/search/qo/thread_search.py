@@ -14,6 +14,9 @@ class ThreadSearchQuery:
     channel_ids: Optional[List[int]] = None
     """Discord 频道 ID 列表，用于按频道筛选帖子"""
 
+    exclude_channel_ids: Optional[List[int]] = None
+    """要排除的 Discord 频道 ID 列表（如深渊区频道）"""
+
     include_tags: List[str] = field(default_factory=list)
     """包含的标签名称列表，帖子必须包含这些标签"""
 
