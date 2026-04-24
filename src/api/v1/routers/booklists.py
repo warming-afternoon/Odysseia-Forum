@@ -19,6 +19,7 @@ from api.v1.schemas.booklist import (
     BooklistItemUpdateRequest,
     BooklistUpdateResponse,
 )
+from booklist.booklist_service import BooklistService
 from core.booklist_item_repository import BooklistItemRepository
 from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
@@ -421,19 +422,9 @@ async def add_threads_to_booklist(
     try:
         user_id = int(current_user["id"])
         async with AsyncSessionFactory() as session:
-            service = BooklistRepository(session)
-            # 检查权限
-            booklist = await service.get_booklist(booklist_id)
-            if not booklist:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="书单不存在"
-                )
-            if booklist.owner_id != user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail="无权修改此书单"
-                )
-
-            added_items = await service.add_threads_to_booklist(
+            service = BooklistService(session)
+            added_items = await service.add_threads(
+                user_id=user_id,
                 booklist_id=booklist_id,
                 items=request.items,
             )
@@ -481,20 +472,11 @@ async def remove_threads_from_booklist(
     try:
         user_id = int(current_user["id"])
         async with AsyncSessionFactory() as session:
-            service = BooklistRepository(session)
-            # 检查权限
-            booklist = await service.get_booklist(booklist_id)
-            if not booklist:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND, detail="书单不存在"
-                )
-            if booklist.owner_id != user_id:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail="无权修改此书单"
-                )
-
-            deleted_count = await service.remove_threads_from_booklist(
-                booklist_id, request.thread_ids  # type: ignore
+            service = BooklistService(session)
+            deleted_count = await service.remove_threads(
+                user_id=user_id,
+                booklist_id=booklist_id,
+                thread_ids=request.thread_ids,  # type: ignore
             )
 
         return {"message": f"成功从书单移除 {deleted_count} 个帖子"}
