@@ -105,6 +105,11 @@ class SearchRequest(BaseModel):
         default_factory=list,
         description="已在前端展示的帖子 thread_id 列表，本次请求将排除这些帖子",
     )
+    exclude_channel_ids: List[Union[int, str]] = Field(
+        default_factory=list,
+        description="要排除的频道ID列表",
+    )
+
     offset: int = Field(
         default=0, ge=0, description="结果的偏移页（已弃用，为兼容旧版本保留）"
     )
@@ -114,6 +119,7 @@ class SearchRequest(BaseModel):
     @field_validator(
         "guild_id",
         "channel_ids",
+        "exclude_channel_ids",
         "include_authors",
         "exclude_authors",
         "exclude_thread_ids",

@@ -35,6 +35,7 @@ from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
 from shared.api_scheduler import APIScheduler
 from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigDefaultsInt
+from shared.enum.abyss_defaults import AbyssDefaults
 from api.v1.routers import (
     preferences as preferences_api,
     search as search_api,
@@ -252,6 +253,13 @@ class MyBot(commands.Bot):
         meta_api.channel_mappings_config = channel_mappings_config
         tags_api.channel_mappings_config = channel_mappings_config
         booklists_api.channel_mappings_config = channel_mappings_config
+
+        # 注入深渊区配置（若配置文件中不存在则使用默认值）
+        raw_abyss = self.config.get("abyss", {}) if isinstance(self.config, dict) else {}
+        search_api.abyss_config = {
+            "channel_ids": raw_abyss.get("channel_ids", AbyssDefaults.CHANNEL_IDS),
+            "required_role_id": raw_abyss.get("required_role_id", AbyssDefaults.REQUIRED_ROLE_ID),
+        }
 
         auth_section = self.config.get("auth", {}) if isinstance(self.config, dict) else {}
         fetch_images_api.configure_fetch_images_router(

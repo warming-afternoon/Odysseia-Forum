@@ -152,7 +152,11 @@ async def callback(code: Optional[str] = None):
 
             # 签发 JWT
             token = await sign_jwt(
-                {"id": user["id"], "username": user["username"]},
+                {
+                    "id": user["id"],
+                    "username": user["username"],
+                    "roles": member.get("roles", []),
+                },
                 _AUTH_CONFIG["jwt_secret"],
                 7 * 24 * 60 * 60,  # 7天
             )
@@ -292,7 +296,11 @@ async def callback_dev(code: Optional[str] = None):
                 )
 
             token = await sign_jwt(
-                {"id": user["id"], "username": user["username"]},
+                {
+                    "id": user["id"],
+                    "username": user["username"],
+                    "roles": member.get("roles", []),
+                },
                 _AUTH_CONFIG["jwt_secret"],
                 7 * 24 * 60 * 60,
             )
@@ -434,6 +442,7 @@ async def check_auth(request: Request):
                     return response
 
                 member = member_response.json()
+                user_roles = member.get("roles", [])
                 role_ids = _AUTH_CONFIG["role_ids"].split(",")
                 has_role = any(
                     role_id in member.get("roles", []) for role_id in role_ids
@@ -477,7 +486,11 @@ async def check_auth(request: Request):
 
     # 刷新 token
     new_token = await sign_jwt(
-        {"id": payload["id"], "username": payload.get("username", "")},
+        {
+            "id": payload["id"],
+            "username": payload.get("username", ""),
+            "roles": user_roles if 'user_roles' in locals() else payload.get("roles", []),
+        },
         _AUTH_CONFIG["jwt_secret"],
         7 * 24 * 60 * 60,
     )

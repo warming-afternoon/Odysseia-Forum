@@ -168,10 +168,14 @@ class SearchService:
             filters.append(Thread.show_flag == True)
 
             # 当指定了 guild_id 且没有指定具体 channel_ids 时，按服务器过滤
-            if CleanedQo.query.guild_id and not CleanedQo.query.channel_ids:
-                filters.append(Thread.guild_id == CleanedQo.query.guild_id)
-            if CleanedQo.query.channel_ids:
-                filters.append(Thread.channel_id.in_(CleanedQo.query.channel_ids)) # type: ignore
+            if query.guild_id and not query.channel_ids:
+                filters.append(Thread.guild_id == query.guild_id)
+            if query.channel_ids:
+                filters.append(Thread.channel_id.in_(query.channel_ids)) # type: ignore
+
+            # 处理屏蔽的频道 ID
+            if query.exclude_channel_ids:
+                filters.append(~Thread.channel_id.in_(query.exclude_channel_ids)) # type: ignore
 
             # 处理排除的帖子 ID
             if CleanedQo.normalized_exclude_thread_ids:
@@ -191,7 +195,7 @@ class SearchService:
                 author_result = await self.session.execute(author_subquery)
                 matched_author_ids = set(author_result.scalars().all())
 
-                if CleanedQo.query.include_authors:
+                if query.include_authors:
                     # 如果同时指定了ID和名称，则取交集
                     CleanedQo.final_include_author_ids.intersection_update(matched_author_ids)
                 else:
@@ -202,25 +206,25 @@ class SearchService:
                 filters.append(
                     Thread.author_id.in_(list(CleanedQo.final_include_author_ids)) # type: ignore
                 )
-            if CleanedQo.query.exclude_authors:
+            if query.exclude_authors:
                 filters.append(
-                    Thread.author_id.notin_(CleanedQo.query.exclude_authors) # type: ignore
+                    Thread.author_id.notin_(query.exclude_authors) # type: ignore
                 )
 
             # 反应数范围过滤
-            if CleanedQo.query.reaction_count_range != (
+            if query.reaction_count_range != (
                 DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
             ):
                 self._apply_range_filter(
-                    filters, Thread.reaction_count, CleanedQo.query.reaction_count_range
+                    filters, Thread.reaction_count, query.reaction_count_range
                 )
 
             # 回复数范围过滤
-            if CleanedQo.query.reply_count_range != (
+            if query.reply_count_range != (
                 DefaultPreferences.DEFAULT_NUMERIC_RANGE.value
             ):
                 self._apply_range_filter(
-                    filters, Thread.reply_count, CleanedQo.query.reply_count_range
+                    filters, Thread.reply_count, query.reply_count_range
                 )
 
             # 创建时间范围过滤

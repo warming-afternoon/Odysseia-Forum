@@ -20,6 +20,7 @@ from dto.search import UCB1ConfigDTO
 from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
+from shared.enum.abyss_defaults import AbyssDefaults
 from shared.enum.collection_type import CollectionType
 from shared.keyword_parser import KeywordParser
 
@@ -30,6 +31,12 @@ tag_cache_service_instance: TagCacheService | None = None
 impression_cache_service_instance: ImpressionCacheService | None = None
 # 频道映射配置: { target_channel_id: [ { "tag_name": str, "source_channel_ids": [int] } ] }
 channel_mappings_config: Dict[int, List[Dict]] = {}
+
+# 深渊区配置
+abyss_config: Dict[str, Any] = {
+    "channel_ids": AbyssDefaults.CHANNEL_IDS,
+    "required_role_id": AbyssDefaults.REQUIRED_ROLE_ID,
+}
 
 router = APIRouter(
     prefix="/search", tags=["帖子搜索"], dependencies=[Depends(require_auth)]
@@ -63,6 +70,23 @@ async def execute_search(
         if current_user and "id" in current_user
         else None
     )
+
+    # [深渊区权限判断] 读取用户身份组，判断是否需要屏蔽深渊区频道
+    user_roles = current_user.get("roles", []) if current_user else []
+    exclude_channel_ids: list[int] = [
+        int(cid) for cid in (request.exclude_channel_ids or [])
+    ]
+
+    if abyss_config:
+        required_role = str(abyss_config.get("required_role_id", ""))
+        abyss_channels: list[int] = abyss_config.get("channel_ids", [])
+
+        # 若用户未登录，或已登录但身份组列表中不包括深渊区查看需要的身份组
+        if not user_roles or required_role not in [str(r) for r in user_roles]:
+            exclude_channel_ids.extend(abyss_channels)
+
+    # 去重
+    exclude_channel_ids = list(set(exclude_channel_ids))
 
     # 处理偏好合并：仅在用户已登录且 apply_preferences 为 True 时执行
     if request.apply_preferences and user_id:
@@ -98,6 +122,7 @@ async def execute_search(
     query_object = ThreadSearchQuery(
         guild_id=request.guild_id,  # type: ignore
         channel_ids=effective_channel_ids,
+        exclude_channel_ids=exclude_channel_ids,
         include_tags=effective_include_tags,
         exclude_tags=effective_exclude_tags,
         tag_logic=request.tag_logic,
