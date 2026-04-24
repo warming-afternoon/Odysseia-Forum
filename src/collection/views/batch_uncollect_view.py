@@ -6,7 +6,6 @@ from collection.views.base_management_view import BaseManagementView
 from collection.views.confirmation_view import ConfirmationView
 from collection.views.thread_select import ThreadSelect
 from core.collection_repository import CollectionRepository
-from core.thread_repository import ThreadRepository
 from shared.enum.collection_type import CollectionType
 
 if TYPE_CHECKING:
@@ -50,9 +49,9 @@ class BatchUncollectView(BaseManagementView):
                 interaction.user.id, CollectionType.THREAD, thread_ids
             )
 
+            # 事件派发：此处的 removed_ids 净减量
             if result.removed_count > 0:
-                thread_service = ThreadRepository(session)
-                await thread_service.update_collection_counts(result.removed_ids, -1)
+                self.cog.bot.dispatch("thread_collection_updated", result.removed_ids, -1)
 
         await interaction.response.edit_message(
             content=f"操作完成！成功取消收藏 {result.removed_count} 个帖子。",
@@ -104,9 +103,9 @@ class BatchUncollectView(BaseManagementView):
                 interaction.user.id, CollectionType.THREAD, thread_ids
             )
 
+            # 事件派发
             if result.removed_count > 0:
-                thread_service = ThreadRepository(session)
-                await thread_service.update_collection_counts(result.removed_ids, -1)
+                self.cog.bot.dispatch("thread_collection_updated", result.removed_ids, -1)
 
         await interaction.response.send_message(
             f"操作完成！成功取消收藏 {result.removed_count} 个帖子。",

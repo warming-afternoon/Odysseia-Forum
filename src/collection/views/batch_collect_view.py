@@ -5,7 +5,6 @@ import discord
 from collection.views.base_management_view import BaseManagementView
 from collection.views.thread_select import ThreadSelect
 from core.collection_repository import CollectionRepository
-from core.thread_repository import ThreadRepository
 from shared.enum.collection_type import CollectionType
 
 if TYPE_CHECKING:
@@ -50,13 +49,21 @@ class BatchCollectView(BaseManagementView):
 
         async with self.cog.get_session() as session:
             collection_service = CollectionRepository(session)
+
+            # 获取净增量
+            already_collected = await collection_service.get_collected_target_ids(
+                interaction.user.id, CollectionType.THREAD, thread_ids
+            )
+            net_new_ids = [tid for tid in thread_ids if tid not in already_collected]
+
+            # 实际插入数据库
             result = await collection_service.add_collections(
                 interaction.user.id, CollectionType.THREAD, thread_ids
             )
 
-            if result.added_count > 0:
-                thread_service = ThreadRepository(session)
-                await thread_service.update_collection_counts(result.added_ids, 1)
+            # 发送事件更新收藏数
+            if net_new_ids:
+                self.cog.bot.dispatch("thread_collection_updated", net_new_ids, 1)
 
         await interaction.response.send_message(
             f"操作完成！成功收藏 {result.added_count} 个帖子，{result.duplicate_count} 个已存在。",
@@ -89,13 +96,20 @@ class BatchCollectView(BaseManagementView):
         thread_ids = [int(tid) for tid in self.selected_threads]
         async with self.cog.get_session() as session:
             collection_service = CollectionRepository(session)
+
+            # 获取净增量
+            already_collected = await collection_service.get_collected_target_ids(
+                interaction.user.id, CollectionType.THREAD, thread_ids
+            )
+            net_new_ids = [tid for tid in thread_ids if tid not in already_collected]
+
             result = await collection_service.add_collections(
                 interaction.user.id, CollectionType.THREAD, thread_ids
             )
 
-            if result.added_count > 0:
-                thread_service = ThreadRepository(session)
-                await thread_service.update_collection_counts(result.added_ids, 1)
+            # 发送事件更新收藏数
+            if net_new_ids:
+                self.cog.bot.dispatch("thread_collection_updated", net_new_ids, 1)
 
         await interaction.response.send_message(
             f"操作完成！成功收藏 {result.added_count} 个帖子，{result.duplicate_count} 个已存在。",

@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -338,6 +338,22 @@ class BooklistRepository:
             # logger.info(f"{deleted_count} 个帖子已从书单 {booklist_id} 移除")
 
         return deleted_count
+
+    async def get_threads_in_users_booklists(self, owner_id: int, thread_ids: List[int]) -> Set[int]:
+        """
+        查询指定的一批帖子中，有哪些已经被该用户加入过任何书单。
+        """
+        if not thread_ids:
+            return set()
+
+        statement = select(BooklistItem.thread_id).where(
+            and_(
+                BooklistItem.owner_id == owner_id,
+                BooklistItem.thread_id.in_(thread_ids),  # type: ignore
+            )
+        )
+        result = await self.session.execute(statement)
+        return set(result.scalars().all())
 
     async def increment_view_count(self, booklist_id: int) -> None:
         """
