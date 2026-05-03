@@ -37,6 +37,9 @@ abyss_config: Dict[str, Any] = {
     "required_role_id": AbyssDefaults.REQUIRED_ROLE_ID,
 }
 
+# 主服务器 ID
+main_guild_id: int = 0
+
 router = APIRouter(
     prefix="/search", tags=["帖子搜索"], dependencies=[Depends(require_auth)]
 )
@@ -91,7 +94,7 @@ async def execute_search(
     if request.apply_preferences and user_id:
         async with async_session_factory() as session:
             pref_repo = PreferencesRepository(session)
-            prefs = await pref_repo.get_user_preferences(user_id)
+            prefs = await pref_repo.get_user_preferences(user_id, main_guild_id)
             if prefs:
                 _merge_user_preferences(request, prefs)
 
