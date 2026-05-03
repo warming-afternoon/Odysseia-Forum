@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional, Set
-from search.dto.channel_mapping_resolution import ChannelMappingResolutionDTO
+from dto.search import ChannelMappingResolutionDTO
 
 class ChannelMappingUtils:
     """处理频道与虚拟标签映射逻辑的工具类"""

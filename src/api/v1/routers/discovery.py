@@ -5,8 +5,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.schemas.discovery import DiscoveryRailsResponse
-from api.v1.schemas.search.thread_detail import ThreadDetail
-from api.v1.schemas.search.author_detail import AuthorDetail
+from api.v1.schemas.search import ThreadDetail, AuthorDetail
 from discovery.discovery_service import DiscoveryService
 from core.preferences_repository import PreferencesRepository
 from core.collection_repository import CollectionRepository

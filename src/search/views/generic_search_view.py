@@ -6,15 +6,12 @@ import discord
 from search.dto.search_state import SearchStateDTO
 from search.qo.thread_search import ThreadSearchQuery
 from search.strategies import (
-    AuthorSearchStrategy,
     CollectionSearchStrategy,
-    DefaultSearchStrategy,
     SearchStrategy,
 )
 from search.views.combined_search_view import CombinedSearchView
 from search.views.custom_search_settings_view import CustomSearchSettingsView
 from search.views.results_view import SearchResultsView
-from search.views.timeout_view import TimeoutView
 from search.components.keyword_modal import KeywordModal
 from shared.enum.default_preferences import DefaultPreferences
 from shared.safe_defer import safe_defer
@@ -39,20 +36,6 @@ class GenericSearchView(discord.ui.View):
         self.last_interaction = interaction
         self.search_state = search_state
         self.strategy = strategy
-        self.last_message: Optional[discord.WebhookMessage] = None
-
-        # 将策略信息保存到状态中，以便超时恢复
-        if isinstance(strategy, DefaultSearchStrategy):
-            self.search_state.strategy_type = "default"
-            self.search_state.strategy_params = {}
-        elif isinstance(strategy, AuthorSearchStrategy):
-            self.search_state.strategy_type = "author"
-            self.search_state.strategy_params = {
-                "author_id": strategy.author_id,
-            }
-        elif isinstance(strategy, CollectionSearchStrategy):
-            self.search_state.strategy_type = "collection"
-            self.search_state.strategy_params = {"user_id": strategy.user_id}
 
         # --- UI状态 ---
         self.tags_per_page = 25
@@ -166,32 +149,24 @@ class GenericSearchView(discord.ui.View):
         # 更新消息
         # 根据模式选择是编辑还是发送新消息
         if send_new_ephemeral:
-            # 首次发送新消息时，使用 wait=True 获取消息对象作为锚点
-            msg = await interaction.followup.send(
+            # 首次作为独立私密消息弹出
+            send_coro = interaction.followup.send(
                 content=content,
                 view=final_view,
                 embeds=final_embeds_to_send,
-                ephemeral=True,
-                wait=True,
+                ephemeral=True
             )
-            self.last_message = msg
+            await self.cog.bot.api_scheduler.submit(
+                coro_factory=lambda: send_coro, priority=1
+            )
         else:
-            edit_coro = None
-            # 优先编辑锚点消息
-            if self.last_message:
-                edit_coro = self.last_message.edit(
-                    content=content, view=final_view, embeds=final_embeds_to_send
-                )
-            # 回退到编辑原始响应
-            else:
-                await interaction.edit_original_response(
-                    content=content, view=final_view, embeds=final_embeds_to_send
-                )
-
-            if edit_coro:
-                await self.cog.bot.api_scheduler.submit(
-                    coro_factory=lambda: edit_coro, priority=1
-                )
+            # 编辑原消息
+            edit_coro = interaction.edit_original_response(
+                content=content, view=final_view, embeds=final_embeds_to_send
+            )
+            await self.cog.bot.api_scheduler.submit(
+                coro_factory=lambda: edit_coro, priority=1
+            )
 
     async def _execute_search(self, interaction: discord.Interaction) -> dict:
         """执行搜索并返回结果"""
@@ -430,37 +405,6 @@ class GenericSearchView(discord.ui.View):
             await self.update_view(self.last_interaction, rerun_search=True)
 
     async def on_timeout(self):
-        """当视图超时时，保存状态并显示一个带有"继续"按钮的新视图"""
-
-        state = self.search_state.model_dump()
-
-        timeout_view = TimeoutView(
-            self.cog, self.last_interaction, state, view_class=self.__class__
-        )
-
-        edit_coro = None
-        # 优先编辑锚点消息
-        if self.last_message:
-            edit_coro = self.last_message.edit(
-                content="⏰ 搜索界面已超时，点击下方按钮可恢复之前的搜索状态。",
-                view=timeout_view,
-                embeds=[],
-            )
-        # 回退到编辑原始响应
-        elif self.last_interaction:
-            edit_coro = self.last_interaction.edit_original_response(
-                content="⏰ 搜索界面已超时，点击下方按钮可恢复之前的搜索状态。",
-                view=timeout_view,
-                embeds=[],
-            )
-        else:
-            # 没有任何可编辑的目标，静默返回
-            return
-
-        try:
-            if edit_coro:
-                await self.cog.bot.api_scheduler.submit(
-                    coro_factory=lambda: edit_coro, priority=1
-                )
-        except (discord.errors.NotFound, discord.errors.HTTPException):
-            pass
+        """当视图超时时，由于是私密消息且交互 Token 必已过期，无需（也无法）进行编辑。"""
+        # 释放内存中可能存在的大型结果缓存
+        self.last_search_results = None

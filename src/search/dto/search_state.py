@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Set
+from typing import List, Optional, Set
 
 from pydantic import BaseModel
 
@@ -79,12 +79,6 @@ class SearchStateDTO(BaseModel):
 
     tag_page: int = 0
     """当前标签选择界面的分页页码"""
-
-    strategy_type: str = "default"
-    """当前使用的搜索策略类型标识"""
-
-    strategy_params: Dict[str, Any] = {}
-    """搜索策略所需的额外参数字典"""
 
     class Config:
         arbitrary_types_allowed = True
