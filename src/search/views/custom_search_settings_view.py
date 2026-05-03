@@ -196,18 +196,13 @@ class CustomSearchSettingsView(discord.ui.View):
             )
 
     async def on_timeout(self):
-        """视图超时后，删除该私密消息以清理界面"""
-        # 通知父视图，此自定义设置窗口已失效
+        """
+        视图超时后，清理程序内存状态。
+        由于是私密消息，此时交互 Token 已失效，无法通过 API 删除它。
+        """
         if self.parent:
             self.parent.custom_settings_message = None
-
-        # 当用户与此视图交互过时，我们有权限删除它。
-        if self.last_settings_interaction:
-            try:
-                await self.last_settings_interaction.delete_original_response()
-            except (discord.errors.NotFound, discord.errors.HTTPException):
-                # 消息可能已被手动删除或因其他原因无法访问，这是正常情况，无需报错。
-                pass
+        self.last_settings_interaction = None
 
     async def handle_time_modal_submit(
         self, interaction: discord.Interaction, values: dict

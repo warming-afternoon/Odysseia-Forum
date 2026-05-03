@@ -6,8 +6,7 @@ from sqlmodel import select
 
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.schemas.banner import BannerItem
-from api.v1.schemas.search import SearchRequest, SearchResponse, ThreadDetail
-from api.v1.schemas.search.author_detail import AuthorDetail
+from api.v1.schemas.search import SearchRequest, SearchResponse, ThreadDetail, AuthorDetail
 from banner.banner_service import BannerService
 from core.cache_service import CacheService
 from core.collection_repository import CollectionRepository

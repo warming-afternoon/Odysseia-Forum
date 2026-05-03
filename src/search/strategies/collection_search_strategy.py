@@ -6,6 +6,7 @@ import discord
 from search.constants import SortMethod
 from search.search_service import SearchService
 from search.strategies.search_strategy import SearchStrategy
+from search.components.batch_collection_button import BatchCollectionButton
 from search.components.keyword_modal import KeywordButton
 from search.components.sort_method_select import SortMethodSelect
 from search.components.sort_order_button import SortOrderButton
@@ -165,25 +166,3 @@ class CollectionSearchStrategy(SearchStrategy):
         if not has_filters:
             return "您还没有收藏帖子\n请点击想收藏的帖子中任意消息，在菜单中选择 APP -> 收藏此贴"
         return None
-
-
-class BatchCollectionButton(discord.ui.Button):
-    """用于触发批量收藏/取消收藏视图的按钮"""
-
-    def __init__(
-        self,
-        label: str,
-        emoji: str,
-        callback_func,
-        refresh_callback: Callable[[], Awaitable[None]],
-        row: int,
-    ):
-        super().__init__(
-            label=label, emoji=emoji, style=discord.ButtonStyle.secondary, row=row
-        )
-        self.callback_func = callback_func
-        self.refresh_callback = refresh_callback
-
-    async def callback(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        await self.callback_func(interaction, self.refresh_callback)
