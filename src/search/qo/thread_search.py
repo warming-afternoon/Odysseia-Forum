@@ -47,7 +47,7 @@ class ThreadSearchQuery:
     sort_method: str = "comprehensive"
     """排序方法，可选值：'comprehensive'（综合排序）、'created_at'（创建时间）、
     'last_active_at'（最后活跃时间）、'reaction_count'（点赞数）、
-    'reply_count'（回复数）、'collected_at'（收藏时间）、'custom'（自定义）"""
+    'reply_count'（回复数）、'collection_count'（收藏数）、'collected_at'（收藏时间）、'custom'（自定义）"""
 
     sort_order: str = "desc"
     """排序顺序，'desc' 表示降序，'asc' 表示升序"""

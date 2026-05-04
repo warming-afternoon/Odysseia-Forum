@@ -77,7 +77,7 @@ class UserPreferencesResponse(BaseModel):
         default="comprehensive",
         description="排序方法：'comprehensive'(综合排序), "
         "'created_at'(发帖时间), 'last_active'(最后活跃时间), "
-        "'reaction_count'(点赞数), 'reply_count'(回复数)",
+        "'reaction_count'(点赞数), 'reply_count'(回复数), 'collection_count'(收藏数)",
     )
     """排序方法"""
 

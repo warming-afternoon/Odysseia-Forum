@@ -62,7 +62,9 @@ class ThreadEmbedBuilder:
         basic_stats = (
             f"发帖日期: <t:{created_at_ts}:D> | "
             f"最近活跃: {last_active_str}\n"
-            f"最高反应数: **{thread.reaction_count}** | 总回复数: **{thread.reply_count}**\n"
+            f"最高反应数: **{thread.reaction_count}** | "
+            f"回复数: **{thread.reply_count}** | "
+            f"收藏数: **{thread.collection_count}**\n"
             f"标签: **{', '.join(all_tags) if all_tags else '无'}**"
         )
 

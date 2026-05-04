@@ -56,6 +56,12 @@ class SortMethod(Enum):
         description="按帖子回复数量排列",
         short_label="回复数",
     )
+    COLLECTION_COUNT = SortMethodInfo(
+        value="collection_count",
+        label="⭐ 按收藏数",
+        description="按帖子被收藏的数量排列",
+        short_label="收藏数",
+    )
     CUSTOM = SortMethodInfo(
         value="custom",
         label="🛠️ 自定义搜索",

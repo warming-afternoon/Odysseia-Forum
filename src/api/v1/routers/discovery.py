@@ -32,6 +32,7 @@ def _build_thread_detail(thread, collected_ids: Set[int]) -> ThreadDetail:
         last_active_at=thread.last_active_at,
         reaction_count=thread.reaction_count,
         reply_count=thread.reply_count,
+        collection_count=thread.collection_count,
         display_count=thread.display_count,
         first_message_excerpt=thread.first_message_excerpt,
         thumbnail_urls=thread.thumbnail_urls or [],
