@@ -253,6 +253,7 @@ class MyBot(commands.Bot):
         search_api.channel_mappings_config = channel_mappings_config
         meta_api.channel_mappings_config = channel_mappings_config
         tags_api.channel_mappings_config = channel_mappings_config
+        discovery_api.channel_mappings_config = channel_mappings_config
         booklists_api.channel_mappings_config = channel_mappings_config
 
         # 注入深渊区配置（若配置文件中不存在则使用默认值）

@@ -6,7 +6,8 @@ from sqlmodel import select
 
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.schemas.banner import BannerItem
-from api.v1.schemas.search import SearchRequest, SearchResponse, ThreadDetail, AuthorDetail
+from api.v1.schemas.search import SearchRequest, SearchResponse, ThreadDetail
+from api.v1.utils import ThreadDetailBuilder
 from banner.banner_service import BannerService
 from core.cache_service import CacheService
 from core.collection_repository import CollectionRepository
@@ -21,6 +22,7 @@ from models import Thread
 from search.search_service import SearchService
 from shared.enum.abyss_defaults import AbyssDefaults
 from shared.enum.collection_type import CollectionType
+from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.keyword_parser import KeywordParser
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
@@ -109,16 +111,19 @@ async def execute_search(
         user_id_for_collection_search = int(current_user["id"])
 
     # 处理频道映射虚拟标签，解析实际搜索的频道ID和标签
-    channel_result = _resolve_channel_mappings(
-        request.channel_ids,  # type: ignore
-        request.include_tags,
-        request.exclude_tags
+    all_indexed_channels = cache_service_instance.get_indexed_channel_ids_list()
+    channel_result = ChannelMappingUtils(channel_mappings_config).resolve(
+        channel_ids=request.channel_ids,  # type: ignore
+        include_tags=request.include_tags,
+        exclude_tags=request.exclude_tags,
+        tag_logic=request.tag_logic,
+        all_indexed_channels=all_indexed_channels,
     )
-    effective_channel_ids = channel_result["channel_ids"]
-    effective_include_tags = channel_result["include_tags"]
-    effective_exclude_tags = channel_result["exclude_tags"]
-    searched_channel_ids = channel_result["searched_ids"]
-    has_mapping = channel_result["has_mapping"]
+    effective_channel_ids = channel_result.effective_channel_ids
+    effective_include_tags = channel_result.effective_include_tags
+    effective_exclude_tags = channel_result.effective_exclude_tags
+    searched_channel_ids = channel_result.searched_ids
+    has_mapping = channel_result.has_mapping
 
     # 构建查询对象，封装所有搜索条件
     query_object = ThreadSearchQuery(
@@ -172,11 +177,21 @@ async def execute_search(
                     user_id, CollectionType.THREAD, thread_ids
                 )
 
-            # 转换搜索结果为响应格式，包含虚拟标签匹配
-            results = _build_thread_results(
-                threads, has_mapping, effective_channel_ids,
-                request.channel_ids, collected_thread_ids  # type: ignore
-            )
+            # 使用 ThreadDetailBuilder 转换搜索结果为响应格式
+            builder = ThreadDetailBuilder(channel_mappings_config)
+            channel_to_virtual = None
+
+            # 仅当是在单一频道搜索时，为该上下文计算局部虚拟标签
+            if has_mapping and effective_channel_ids and request.channel_ids:
+                origin_ch = int(request.channel_ids[0]) if request.channel_ids else None
+                if origin_ch:
+                    channel_to_virtual = {}
+                    for m in channel_mappings_config.get(origin_ch, []):
+                        for src_id in m.get("source_channel_ids", []):
+                            channel_to_virtual.setdefault(src_id, []).append(m["tag_name"])
+
+            # 全站搜索时 channel_to_virtual 为 None，Builder 自动使用全局虚拟标签映射
+            results = builder.build_list(threads, collected_thread_ids, channel_to_virtual=channel_to_virtual)
 
             # 构建可用的标签列表：虚拟标签置顶 + 实际被搜索频道的真实标签
             available_tags, virtual_tags = _build_available_tags(
@@ -237,26 +252,8 @@ async def get_thread_detail(
                 user_id, CollectionType.THREAD, [thread.thread_id]
             )
 
-        return ThreadDetail(
-            thread_id=thread.thread_id,
-            guild_id=thread.guild_id,
-            channel_id=thread.channel_id,
-            title=thread.title,
-            author=AuthorDetail.model_validate(thread.author)
-            if thread.author
-            else None,
-            created_at=thread.created_at,
-            last_active_at=thread.last_active_at,
-            reaction_count=thread.reaction_count,
-            reply_count=thread.reply_count,
-            collection_count=thread.collection_count,
-            display_count=thread.display_count,
-            first_message_excerpt=thread.first_message_excerpt,
-            thumbnail_urls=thread.thumbnail_urls or [],
-            tags=[tag.name for tag in thread.tags],
-            virtual_tags=[],
-            collected_flag=thread.thread_id in collected_thread_ids,
-        )
+        builder = ThreadDetailBuilder(channel_mappings_config)
+        return builder.build(thread, collected_thread_ids)
 
 # -------------------------
 # 辅助方法
@@ -350,73 +347,6 @@ def _parse_search_keywords(
     return author_name, final_keywords, final_exclude_keywords or None
 
 
-def _resolve_channel_mappings(
-    channel_ids: List[int] | None,
-    include_tags: List[str],
-    exclude_tags: List[str],
-) -> Dict[str, Any]:
-    """
-    处理频道映射虚拟标签，将虚拟标签转换为实际频道ID。
-
-    Returns:
-        Dict: 包含处理后channel_ids、include_tags、exclude_tags、
-              searched_ids（实际搜索的频道集合）、has_mapping（是否有映射）
-    """
-    result = {
-        "channel_ids": list(channel_ids) if channel_ids else None,
-        "include_tags": list(include_tags),
-        "exclude_tags": list(exclude_tags),
-        "searched_ids": set(),
-        "has_mapping": False,
-    }
-
-    # 无频道ID或多频道时不处理映射，直接返回
-    if not result["channel_ids"] or len(result["channel_ids"]) != 1:
-        return result
-
-    origin_channel_id = result["channel_ids"][0]
-    mappings = channel_mappings_config.get(origin_channel_id, [])
-    if not mappings:
-        return result
-
-    result["has_mapping"] = True
-    virtual_tag_set = {m["tag_name"] for m in mappings}
-    mapping_tag_lookup = {m["tag_name"]: m for m in mappings}
-
-    # 分离虚拟标签和真实标签，虚拟标签不传给后端搜索
-    included_virtual = [t for t in result["include_tags"] if t in virtual_tag_set]
-    excluded_virtual = [t for t in result["exclude_tags"] if t in virtual_tag_set]
-    result["include_tags"] = [t for t in result["include_tags"] if t not in virtual_tag_set]
-    result["exclude_tags"] = [t for t in result["exclude_tags"] if t not in virtual_tag_set]
-
-    # 计算需要排除的频道（被排除虚拟标签对应的所有频道）
-    excluded_channels: set[int] = set()
-    for vt in excluded_virtual:
-        excluded_channels.update(mapping_tag_lookup[vt].get("source_channel_ids", []))
-
-    # 根据是否选中虚拟标签决定频道范围
-    if included_virtual:
-        # 有选中的虚拟标签 → 取选中标签对应频道的交集
-        channel_sets: list[set[int]] = []
-        for vt in included_virtual:
-            channel_sets.append(set(mapping_tag_lookup[vt].get("source_channel_ids", [])))
-        intersected = channel_sets[0]
-        for cs in channel_sets[1:]:
-            intersected &= cs
-        intersected -= excluded_channels
-        result["channel_ids"] = list(intersected)
-    else:
-        # 无选中虚拟标签 → 搜索原频道 + 所有映射频道（排除被排除的）
-        all_mapped: set[int] = set()
-        for m in mappings:
-            all_mapped.update(m.get("source_channel_ids", []))
-        all_mapped -= excluded_channels
-        result["channel_ids"] = [origin_channel_id] + list(all_mapped)
-
-    result["searched_ids"] = set(result["channel_ids"])
-    return result
-
-
 async def _perform_search_and_update_counts(
     session: Any,
     query_object: ThreadSearchQuery,
@@ -455,58 +385,6 @@ async def _perform_search_and_update_counts(
         )
 
     return threads, total_threads
-
-
-def _build_thread_results(
-    threads: List[Any],
-    has_mapping: bool,
-    effective_channel_ids: List[int] | None,
-    request_channel_ids: List[int] | None,
-    collected_thread_ids: set[int],
-) -> List[ThreadDetail]:
-    """
-    将Thread模型列表转换为ThreadDetail响应列表。
-
-    构建频道ID到虚拟标签的映射，用于在帖子卡片上展示匹配的虚拟标签。
-    同时处理作者信息序列化和收藏状态标记。
-
-    Returns:
-        List[ThreadDetail]: 转换后的帖子详情列表
-    """
-    # 预计算 channel_id → 匹配的虚拟标签名（用于帖子卡片标签展示）
-    channel_to_virtual: dict[int, list[str]] = {}
-    if has_mapping and effective_channel_ids and request_channel_ids:
-        origin_ch = request_channel_ids[0] if request_channel_ids else None
-        if origin_ch:
-            for m in channel_mappings_config.get(origin_ch, []):
-                for src_id in m.get("source_channel_ids", []):
-                    channel_to_virtual.setdefault(src_id, []).append(m["tag_name"])
-
-    # 转换每个帖子为响应格式
-    results: list[ThreadDetail] = []
-    for thread in threads:
-        matched_virtual = channel_to_virtual.get(thread.channel_id, [])
-        thread_detail = ThreadDetail(
-            thread_id=thread.thread_id,
-            guild_id=thread.guild_id,
-            channel_id=thread.channel_id,
-            title=thread.title,
-            author=AuthorDetail.model_validate(thread.author) if thread.author else None,
-            created_at=thread.created_at,
-            last_active_at=thread.last_active_at,
-            reaction_count=thread.reaction_count,
-            reply_count=thread.reply_count,
-            collection_count=thread.collection_count,
-            display_count=thread.display_count,
-            first_message_excerpt=thread.first_message_excerpt,
-            thumbnail_urls=thread.thumbnail_urls or [],
-            tags=[tag.name for tag in thread.tags],
-            virtual_tags=matched_virtual,
-            collected_flag=thread.thread_id in collected_thread_ids,
-        )
-        results.append(thread_detail)
-
-    return results
 
 
 def _build_available_tags(

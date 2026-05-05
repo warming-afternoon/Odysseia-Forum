@@ -1,45 +1,26 @@
 import logging
-from typing import Any, Dict, Optional, Set, List
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from typing import Any, Dict, List, Optional, Set
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.schemas.discovery import DiscoveryRailsResponse
-from api.v1.schemas.search import ThreadDetail, AuthorDetail
-from discovery.discovery_service import DiscoveryService
-from core.preferences_repository import PreferencesRepository
+from api.v1.schemas.search import ThreadDetail
+from api.v1.utils import ThreadDetailBuilder
 from core.collection_repository import CollectionRepository
+from core.preferences_repository import PreferencesRepository
 from core.thread_repository import ThreadRepository
+from discovery.discovery_service import DiscoveryService
 from shared.enum.collection_type import CollectionType
 
 logger = logging.getLogger(__name__)
 
 async_session_factory: Optional[async_sessionmaker] = None
 main_guild_id: int = 0  # 注入的主服务器 ID
+channel_mappings_config: Dict[int, List[Dict]] = {}  # 注入的频道映射配置
 
 router = APIRouter(prefix="/discovery", tags=["发现"], dependencies=[Depends(require_auth)])
-
-
-def _build_thread_detail(thread, collected_ids: Set[int]) -> ThreadDetail:
-    """将ORM模型转为前端展示对象"""
-    return ThreadDetail(
-        thread_id=thread.thread_id,
-        guild_id=thread.guild_id,
-        channel_id=thread.channel_id,
-        title=thread.title,
-        author=AuthorDetail.model_validate(thread.author) if thread.author else None,
-        created_at=thread.created_at,
-        last_active_at=thread.last_active_at,
-        reaction_count=thread.reaction_count,
-        reply_count=thread.reply_count,
-        collection_count=thread.collection_count,
-        display_count=thread.display_count,
-        first_message_excerpt=thread.first_message_excerpt,
-        thumbnail_urls=thread.thumbnail_urls or [],
-        tags=[tag.name for tag in thread.tags],
-        virtual_tags=[],
-        collected_flag=thread.thread_id in collected_ids
-    )
 
 
 @router.get("/rails", response_model=DiscoveryRailsResponse, summary="获取广场轨道数据")
@@ -49,7 +30,7 @@ async def get_discovery_rails(
     apply_preferences: bool = Query(default=True, description="是否应用当前用户的过滤偏好"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """一次性获取多条轨道数据并处理收藏标记"""
+    """一次性获取多条轨道数据并处理收藏标记和虚拟标签"""
     if not async_session_factory:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库尚未初始化")
 
@@ -68,7 +49,7 @@ async def get_discovery_rails(
             # 获取四条轨道的原始数据
             rails_data = await service.get_discovery_rails(limit, days, prefs)
 
-            # 汇总所有轨道中出现的帖子ID以便批量查询收藏状态
+            # 汇总所有轨道中出现的帖子 ID 以便批量查询收藏状态
             all_threads = []
             for rail_list in rails_data.values():
                 all_threads.extend(rail_list)
@@ -83,12 +64,15 @@ async def get_discovery_rails(
                     user_id, CollectionType.THREAD, all_ids
                 )
 
-            # 将结果转换为前端 Schema 对象并注入收藏状态
+            # 初始化构造器
+            builder = ThreadDetailBuilder(channel_mappings_config)
+
+            # 将结果转换为前端 Schema 对象并注入收藏状态与虚拟标签
             return DiscoveryRailsResponse(
-                latest=[_build_thread_detail(t, collected_ids) for t in rails_data["latest"]],
-                reaction_surge=[_build_thread_detail(t, collected_ids) for t in rails_data["reaction_surge"]],
-                discussion_surge=[_build_thread_detail(t, collected_ids) for t in rails_data["discussion_surge"]],
-                collection_surge=[_build_thread_detail(t, collected_ids) for t in rails_data["collection_surge"]],
+                latest=builder.build_list(rails_data["latest"], collected_ids),
+                reaction_surge=builder.build_list(rails_data["reaction_surge"], collected_ids),
+                discussion_surge=builder.build_list(rails_data["discussion_surge"], collected_ids),
+                collection_surge=builder.build_list(rails_data["collection_surge"], collected_ids),
             )
     except Exception as e:
         logger.error(f"获取广场轨道数据失败: {e}", exc_info=True)
@@ -103,7 +87,7 @@ async def get_random_threads(
     tag_logic: str = Query(default="and", description="标签逻辑，'and' 表示必须包含所有标签，'or' 表示包含任意标签"),
     current_user: Dict[str, Any] = Depends(get_current_user)
 ):
-    """根据指定范围随机抽取帖子"""
+    """根据指定范围随机抽取帖子，包含虚拟标签"""
     # 检查数据库服务是否就绪
     if not async_session_factory:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="数据库尚未初始化")
@@ -135,8 +119,8 @@ async def get_random_threads(
                     user_id, CollectionType.THREAD, thread_ids
                 )
 
-            # 构建并返回包含收藏状态的帖子详情响应模型
-            return [_build_thread_detail(t, collected_ids) for t in threads]
+            builder = ThreadDetailBuilder(channel_mappings_config)
+            return builder.build_list(threads, collected_ids)
             
     except Exception as e:
         logger.error(f"获取随机帖子失败: {e}", exc_info=True)

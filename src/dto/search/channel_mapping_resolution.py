@@ -8,30 +8,30 @@ class ChannelMappingResolutionDTO(BaseModel):
 
     effective_channel_ids: Optional[List[int]] = Field(
         default=None,
-        description="实际用于查询的真实频道ID列表，None 表示检索全部频道",
+        description="传入 SQL 查询的频道 ID 列表；None 表示不限制频道",
     )
-    """实际用于查询的真实频道ID列表，None 表示检索全部频道"""
+    """传入 SQL 查询的频道 ID 列表；None 表示不限制频道"""
 
     effective_include_tags: List[str] = Field(
         default_factory=list,
-        description="过滤掉虚拟标签后的实际正选标签",
+        description="过滤掉虚拟标签后传给数据库的真实正选标签",
     )
-    """过滤掉虚拟标签后的实际正选标签"""
+    """过滤掉虚拟标签后传给数据库的真实正选标签"""
 
     effective_exclude_tags: List[str] = Field(
         default_factory=list,
-        description="过滤掉虚拟标签后的实际反选标签",
+        description="过滤掉虚拟标签后传给数据库的真实反选标签",
     )
-    """过滤掉虚拟标签后的实际反选标签"""
+    """过滤掉虚拟标签后传给数据库的真实反选标签"""
 
     searched_ids: Set[int] = Field(
         default_factory=set,
-        description="实际参与搜索的所有真实频道ID集合",
+        description="逻辑上覆盖的真实频道 ID 集合（永不为空），用于构建前端可用标签列表等下游消费",
     )
-    """实际参与搜索的所有真实频道ID集合"""
+    """逻辑上覆盖的真实频道 ID 集合（永不为空），用于构建前端可用标签列表等下游消费"""
 
     has_mapping: bool = Field(
         default=False,
-        description="本次查询是否触发了频道映射过滤机制",
+        description="本次查询是否触发了频道映射（虚拟标签）解析",
     )
-    """本次查询是否触发了频道映射过滤机制"""
+    """本次查询是否触发了频道映射（虚拟标签）解析"""
