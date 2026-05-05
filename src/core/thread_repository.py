@@ -410,6 +410,7 @@ class ThreadRepository:
         self,
         limit: int,
         channel_ids: Optional[List[int]] = None,
+        exclude_channel_ids: Optional[List[int]] = None,
         include_tags: Optional[List[str]] = None,
         exclude_tags: Optional[List[str]] = None,
         tag_logic: str = "and",
@@ -421,11 +422,15 @@ class ThreadRepository:
         # 只搜索 show_flag == True 的帖子，避免显示被隐藏的帖子
         stmt = stmt.where(Thread.show_flag == True)
 
-        # 增加频道筛选条件
+        # 频道筛选
         if channel_ids:
             stmt = stmt.where(cast(ColumnElement, Thread.channel_id).in_(channel_ids))
 
-        # 增加包含的标签筛选条件
+        # 必须排除的频道筛选
+        if exclude_channel_ids:
+            stmt = stmt.where(~cast(ColumnElement, Thread.channel_id).in_(exclude_channel_ids))
+
+        # 包含的标签筛选
         if include_tags:
             if tag_logic == "or":
                 stmt = stmt.where(Thread.tags.any(Tag.name.in_(include_tags)))  # type: ignore
@@ -433,7 +438,7 @@ class ThreadRepository:
                 for tag_name in include_tags:
                     stmt = stmt.where(Thread.tags.any(Tag.name == tag_name))  # type: ignore
 
-        # 增加必须排除的标签筛选条件
+        # 必须排除的标签
         if exclude_tags:
             stmt = stmt.where(~Thread.tags.any(Tag.name.in_(exclude_tags)))  # type: ignore
 

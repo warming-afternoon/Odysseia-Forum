@@ -243,6 +243,7 @@ class MyBot(commands.Bot):
 
         discovery_api.async_session_factory = AsyncSessionFactory
         discovery_api.main_guild_id = main_guild_id
+        discovery_api.cache_service_instance = self.cache_service
 
         banner_api.async_session_factory = AsyncSessionFactory
         banner_api.banner_config = self.config.get("banner", {})
@@ -256,12 +257,15 @@ class MyBot(commands.Bot):
         discovery_api.channel_mappings_config = channel_mappings_config
         booklists_api.channel_mappings_config = channel_mappings_config
 
-        # 注入深渊区配置（若配置文件中不存在则使用默认值）
+        # 注入深渊区配置
         raw_abyss = self.config.get("abyss", {}) if isinstance(self.config, dict) else {}
-        search_api.abyss_config = {
+        abyss_config = {
             "channel_ids": raw_abyss.get("channel_ids", AbyssDefaults.CHANNEL_IDS),
             "required_role_id": raw_abyss.get("required_role_id", AbyssDefaults.REQUIRED_ROLE_ID),
         }
+
+        search_api.abyss_config = abyss_config
+        discovery_api.abyss_config = abyss_config
 
         auth_section = self.config.get("auth", {}) if isinstance(self.config, dict) else {}
         fetch_images_api.configure_fetch_images_router(
