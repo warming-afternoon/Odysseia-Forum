@@ -226,7 +226,7 @@ class BooklistRepository:
         total = count_result.scalar_one_or_none() or 0
 
         # 获取数据
-        data_stmt = query.offset(offset * limit).limit(limit)
+        data_stmt = query.offset(offset).limit(limit)
         result = await self.session.execute(data_stmt)
         booklists = result.scalars().all()
 

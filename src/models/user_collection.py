@@ -7,7 +7,7 @@ from shared.enum.collection_type import CollectionType
 
 
 class UserCollection(SQLModel, table=True):
-    """存储用户收藏的内容（帖子 或 书单）"""
+    """存储用户收藏的内容"""
 
     __tablename__ = "user_collection"  # type: ignore
 
@@ -26,7 +26,7 @@ class UserCollection(SQLModel, table=True):
     target_type: int = Field(
         default=CollectionType.THREAD.value,
         index=True,
-        description="收藏目标的类型 : 1=帖子, 2=书单, 默认为 1 (帖子)",
+        description="收藏目标的类型 : 1=帖子(已废弃使用), 2=书单, 默认为 1 ",
     )
 
     target_id: int = Field(

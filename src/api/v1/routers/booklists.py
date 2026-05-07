@@ -111,7 +111,7 @@ async def list_public_booklists(
         le=100,
         description="每次请求返回的数量 (范围: 1-100)",
     ),
-    offset: int = Query(default=0, ge=0, description="结果的偏移页，从0开始"),
+    offset: int = Query(default=0, ge=0, description="结果的偏移量，从0开始"),
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
     """
@@ -123,7 +123,7 @@ async def list_public_booklists(
     - sort_method: 排序方式 (1: 书单内帖子数, 2: 浏览数, 3: 收藏数, 4: 创建时间, 5: 更新时间)
     - sort_order: 排序顺序 ('asc' 或 'desc')
     - limit: 返回数量
-    - offset: 偏移页
+    - offset: 偏移量
     """
     try:
         # 当 search_by_collect 为真时，获取当前用户ID作为 collected_by_user_id
@@ -186,7 +186,7 @@ async def list_my_booklists(
         le=100,
         description="每次请求返回的数量 (范围: 1-100)",
     ),
-    offset: int = Query(default=0, ge=0, description="结果的偏移页，从0开始"),
+    offset: int = Query(default=0, ge=0, description="结果的偏移量，从0开始"),
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
     """
@@ -197,7 +197,7 @@ async def list_my_booklists(
     - sort_method: 排序方式 (1: 帖子数, 2: 浏览数, 3: 收藏数, 4: 创建时间, 5: 更新时间, 6-收藏时间 collect_by_current_user=true 时可用,)
     - sort_order: 排序顺序 ('asc' 或 'desc')
     - limit: 返回数量
-    - offset: 偏移页
+    - offset: 偏移量
     """
     try:
         user_id = int(current_user["id"])
@@ -504,7 +504,7 @@ async def get_booklist_items(
         le=100,
         description="每次请求返回的数量 (范围: 1-100)",
     ),
-    offset: int = Query(default=0, ge=0, description="结果的偏移页，从0开始"),
+    offset: int = Query(default=0, ge=0, description="结果的偏移量，从0开始"),
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
     """
@@ -512,7 +512,7 @@ async def get_booklist_items(
 
     - booklist_id: 书单ID
     - limit: 返回数量
-    - offset: 偏移页
+    - offset: 偏移量
     """
     try:
         async with AsyncSessionFactory() as session:
