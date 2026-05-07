@@ -1,4 +1,7 @@
-FROM python:3.13-slim
+# ============================================================
+# base — 仅安装核心依赖，用于正常启动 Bot
+# ============================================================
+FROM python:3.13-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -22,12 +25,16 @@ COPY config.example.json ./
 COPY migrate.py ./
 COPY migrate_to_multi_server.py ./
 COPY start.sh ./
-COPY entrypoint.sh ./
 
 RUN uv sync --locked --no-dev
 
 RUN mkdir -p /app/data
 
-RUN chmod +x /app/entrypoint.sh
+CMD ["uv", "run", "bot_main.py"]
 
-CMD ["/app/entrypoint.sh"]
+# ============================================================
+# dev — 基于 base，额外安装 dev 依赖（pytest、ruff 等）
+# ============================================================
+FROM base AS dev
+
+RUN uv sync --locked --extra dev

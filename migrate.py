@@ -3,7 +3,7 @@ import sqlite3
 import sys
 import shutil
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 # --- 配置 ---
@@ -57,7 +57,7 @@ def parse_iso_datetime_with_timezone(s):
 
 
 def migrate_favorites_from_follow_bot():
-    """如果存在旧的 follow_bot.db，则将其 thread_favorites 数据分批迁移到 user_collection"""
+    """将旧 follow_bot.db 的 thread_favorites 迁移到当前系统的默认书单 (BooklistItem)"""
     old_db_path = DATA_DIR / "follow_bot.db"
     if not old_db_path.exists():
         print_info("未找到旧的收藏数据库 (follow_bot.db)，跳过数据迁移。")
@@ -66,86 +66,164 @@ def migrate_favorites_from_follow_bot():
     print_info("=" * 50)
     print_info("检测到旧的收藏数据库，开始迁移数据...")
 
-    batch_size = 100  # 每次处理 100 条记录
-    total_migrated = 0
-    total_ignored = 0
-    old_conn = None
-    main_conn = None
+    batch_size = 100  # 每次从旧库分批读取的记录数
+    total_attempted = 0  # 旧库中尝试迁移的总记录数
+    total_migrated = 0  # 成功迁移（非重复）的记录数
+    old_conn = None  # 旧数据库连接
+    main_conn = None  # 主数据库连接
 
     try:
-        # 注册自定义的转换器和适配器来处理 datetime 对象
         sqlite3.register_adapter(datetime, adapt_datetime)
         sqlite3.register_converter("timestamp", parse_iso_datetime_with_timezone)
 
-        # 连接旧数据库和主数据库 (detect_types 会启用类型转换)
         old_conn = sqlite3.connect(
-            old_db_path, detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES
+            old_db_path,
+            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
         )
         old_cursor = old_conn.cursor()
 
         main_conn = sqlite3.connect(DB_PATH)
         main_cursor = main_conn.cursor()
 
-        # 开启事务
-        main_cursor.execute("BEGIN TRANSACTION")
+        # Step 1: 查询旧库中所有收藏用户 ID
+        old_cursor.execute("SELECT DISTINCT user_id FROM thread_favorites")
+        old_user_ids = [row[0] for row in old_cursor.fetchall()]
+        if not old_user_ids:
+            print_info("旧数据库中没有收藏记录，跳过数据迁移。")
+            return
+        print_info(f"旧数据库中共有 {len(old_user_ids)} 个不同的用户有收藏记录。")
 
-        # 从旧数据库读取数据
-        old_cursor.execute("SELECT user_id, thread_id, added_at FROM thread_favorites")
+        # Step 2: 批量查询这些用户在当前库中的默认书单
+        placeholders = ",".join("?" * len(old_user_ids))
+        main_cursor.execute(
+            f"SELECT id, owner_id FROM booklist WHERE owner_id IN ({placeholders}) AND is_default = 1",
+            old_user_ids,
+        )
+        existing_booklists = {
+            row[1]: row[0] for row in main_cursor.fetchall()
+        }  # owner_id -> booklist_id
+        print_info(f"其中 {len(existing_booklists)} 个用户已有默认书单。")
+
+        # Step 3: 为没有默认书单的用户批量创建默认书单
+        users_without_booklist = [
+            uid for uid in old_user_ids if uid not in existing_booklists
+        ]
+        if users_without_booklist:
+            now = datetime.now(timezone.utc)
+            for user_id in users_without_booklist:
+                main_cursor.execute(
+                    "INSERT INTO booklist (owner_id, title, description, is_public,"
+                    " is_default, display_type, item_count, collection_count,"
+                    " view_count, created_at, updated_at)"
+                    " VALUES (?, '默认收藏', '默认收藏夹', 0, 1, 1, 0, 0, 0, ?, ?)",
+                    (user_id, now, now),
+                )
+                existing_booklists[user_id] = main_cursor.lastrowid
+            main_conn.commit()
+            print_success(f"为 {len(users_without_booklist)} 个用户创建了默认书单。")
+
+        # Step 4: 分批读取旧收藏数据，按用户分组后批量插入
+        old_cursor.execute(
+            "SELECT user_id, thread_id, added_at FROM thread_favorites"
+            " ORDER BY user_id, added_at"
+        )
+
+        # 缓存每个书单当前的 max(display_order)，避免逐批重复查询
+        booklist_max_order: dict[int, int] = {}
 
         while True:
-            # 分批获取数据
-            favorites_batch = old_cursor.fetchmany(batch_size)
-            if not favorites_batch:
-                break  # 没有更多数据了
+            batch = old_cursor.fetchmany(batch_size)
+            if not batch:
+                break
 
-            # 准备批量插入
-            insert_query = """
-            INSERT OR IGNORE INTO user_collection (user_id, target_type, target_id, created_at)
-            VALUES (?, ?, ?, ?)
-            """
-            # target_type=1 代表帖子
-            data_to_insert = [
-                (user_id, 1, thread_id, added_at)
-                for user_id, thread_id, added_at in favorites_batch
-            ]
+            # 按 user_id 分组
+            grouped: dict = {}
+            for user_id, thread_id, added_at in batch:
+                grouped.setdefault(user_id, []).append((thread_id, added_at))
 
-            # 执行批量插入
-            main_cursor.executemany(insert_query, data_to_insert)
+            for user_id, items in grouped.items():
+                booklist_id = existing_booklists.get(user_id)
+                if booklist_id is None:
+                    total_attempted += len(items)
+                    continue
 
-            # 更新计数
-            migrated_in_batch = main_cursor.rowcount
-            total_migrated += migrated_in_batch
-            total_ignored += len(data_to_insert) - migrated_in_batch
+                thread_ids = [item[0] for item in items]
 
-        # 提交事务
-        main_conn.commit()
+                # 查询该书单中已存在的 thread_id（去重）
+                ph = ",".join("?" * len(thread_ids))
+                main_cursor.execute(
+                    f"SELECT thread_id FROM booklist_item"
+                    f" WHERE booklist_id = ? AND thread_id IN ({ph})",
+                    [booklist_id] + thread_ids,
+                )
+                existing_thread_ids = set(row[0] for row in main_cursor.fetchall())
+
+                # 过滤出待插入的新项
+                new_items = [
+                    item for item in items if item[0] not in existing_thread_ids
+                ]
+                total_attempted += len(items)
+
+                if new_items:
+                    # 获取该书单当前的最大 display_order
+                    if booklist_id not in booklist_max_order:
+                        main_cursor.execute(
+                            "SELECT MAX(display_order) FROM booklist_item"
+                            " WHERE booklist_id = ?",
+                            (booklist_id,),
+                        )
+                        row = main_cursor.fetchone()
+                        booklist_max_order[booklist_id] = row[0] if row[0] is not None else 0
+
+                    insert_data = []
+                    for i, (thread_id, added_at) in enumerate(new_items):
+                        booklist_max_order[booklist_id] += 1
+                        insert_data.append(
+                            (booklist_id, thread_id, user_id,
+                             booklist_max_order[booklist_id], added_at, added_at)
+                        )
+
+                    main_cursor.executemany(
+                        "INSERT INTO booklist_item"
+                        " (booklist_id, thread_id, owner_id, display_order,"
+                        " created_at, updated_at)"
+                        " VALUES (?, ?, ?, ?, ?, ?)",
+                        insert_data,
+                    )
+                    total_migrated += len(new_items)
+
+                    # 更新对应书单的 item_count
+                    main_cursor.execute(
+                        "UPDATE booklist SET item_count = item_count + ? WHERE id = ?",
+                        (len(new_items), booklist_id),
+                    )
+
+            main_conn.commit()
+
+        total_ignored = total_attempted - total_migrated
         print_success(
             f"成功迁移 {total_migrated} 条收藏记录 (忽略了 {total_ignored} 条重复记录)。"
         )
 
-        # 更新帖子的收藏计数
+        # Step 5: 更新受影响帖子的收藏计数
         try:
-            # 从旧数据库统计每个帖子的收藏数
             old_cursor.execute(
-                "SELECT thread_id, COUNT(*) FROM thread_favorites GROUP BY thread_id"
+                "SELECT thread_id, COUNT(DISTINCT user_id) FROM thread_favorites"
+                " GROUP BY thread_id"
             )
             collection_counts = old_cursor.fetchall()
 
-            if not collection_counts:
-                print_info("旧数据库中没有收藏记录，无需更新计数。")
-            else:
-                # 在主数据库中批量更新
-                update_query = """
-                UPDATE thread
-                SET collection_count = collection_count + ?
-                WHERE thread_id = ?
-                """
-                # 重新组织数据为 (count, thread_id) 的格式
+            if collection_counts:
                 update_data = [(count, tid) for tid, count in collection_counts]
-
-                main_cursor.executemany(update_query, update_data)
+                main_cursor.executemany(
+                    "UPDATE thread SET collection_count = collection_count + ?"
+                    " WHERE thread_id = ?",
+                    update_data,
+                )
                 main_conn.commit()
-                print_success(f"成功更新了 {main_cursor.rowcount} 个帖子的收藏计数。")
+                print_success(f"成功更新了 {len(collection_counts)} 个帖子的收藏计数。")
+            else:
+                print_info("旧数据库中没有收藏记录，无需更新计数。")
 
         except Exception as e:
             print_error(f"更新帖子收藏计数时出错: {e}")
@@ -154,11 +232,10 @@ def migrate_favorites_from_follow_bot():
 
     except Exception as e:
         if main_conn:
-            main_conn.rollback()  # 如果发生错误，回滚事务
+            main_conn.rollback()
         print_error(f"从 follow_bot.db 迁移数据时发生错误: {e}")
         print_warning("数据迁移失败，但不会影响 Alembic 的迁移结果。")
     finally:
-        # 关闭数据库连接
         if old_conn:
             old_conn.close()
         if main_conn:

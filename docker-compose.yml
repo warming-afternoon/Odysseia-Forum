@@ -3,6 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      target: base
     container_name: odysseia-forum
     restart: unless-stopped
     working_dir: /app
@@ -11,17 +12,28 @@ services:
     volumes:
       - ./config.json:/app/config.json:ro
       - ./data:/app/data
-    # 确保 Redis 健康后再启动机器人
     depends_on:
       odysseia-redis:
         condition: service_healthy
-    # 默认不执行迁移；需要迁移时通过命令行传入：
-    #   RUN_MIGRATE=1 docker compose up -d --build
     environment:
       PYTHONPATH: /app/src
       REDIS_URL: redis://odysseia-redis:6379/0
-      RUN_MIGRATE: ${RUN_MIGRATE:-0}
-    command: ["/app/entrypoint.sh"]
+
+  odysseia-forum-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: dev
+    container_name: odysseia-forum-migrate
+    profiles:
+      - migrate
+    working_dir: /app
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+    environment:
+      PYTHONPATH: /app/src
+    command: ["uv", "run", "migrate.py"]
 
   odysseia-redis:
     image: redis:alpine
@@ -31,7 +43,6 @@ services:
       - "11810:6379"
     volumes:
       - ./data/redis:/data
-    # 健康检查
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
