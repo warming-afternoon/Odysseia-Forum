@@ -145,9 +145,25 @@ async def list_public_booklists(
                 offset=offset,
             )
 
-        results = [
-            BooklistDetail.model_validate(b, from_attributes=True) for b in booklists
-        ]
+            # 检查收藏状态
+            collected_booklist_ids = set()
+            user_id = int(current_user["id"])
+            if user_id and booklists:
+                booklist_ids = [b.id for b in booklists if b.id is not None]
+                collection_service = CollectionRepository(session)
+                collected_booklist_ids = (
+                    await collection_service.get_collected_target_ids(
+                        user_id, CollectionType.BOOKLIST, booklist_ids
+                    )
+                )
+
+        results = []
+        for b in booklists:
+            detail = BooklistDetail.model_validate(b, from_attributes=True)
+            if b.id in collected_booklist_ids:
+                detail.collected_flag = True
+            results.append(detail)
+
         return PaginatedResponse(
             total=total, limit=limit, offset=offset, results=results
         )
@@ -279,7 +295,19 @@ async def get_booklist(
             # 增加查看次数
             await service.increment_view_count(booklist_id)
 
-        return BooklistDetail.model_validate(booklist, from_attributes=True)
+            # 检查当前用户是否收藏了该书单
+            collected_flag = False
+            user_id = int(current_user["id"])
+            if booklist.id is not None:
+                collection_service = CollectionRepository(session)
+                collected_ids = await collection_service.get_collected_target_ids(
+                    user_id, CollectionType.BOOKLIST, [booklist.id]
+                )
+                collected_flag = booklist.id in collected_ids
+
+        detail = BooklistDetail.model_validate(booklist, from_attributes=True)
+        detail.collected_flag = collected_flag
+        return detail
 
     except HTTPException:
         raise
