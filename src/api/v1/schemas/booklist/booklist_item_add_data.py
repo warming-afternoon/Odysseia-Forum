@@ -8,10 +8,10 @@ class BooklistItemAddData(BaseModel):
 
     thread_id: Union[int, str] = Field(..., description="Discord Thread ID")
     """Discord Thread ID"""
-    
+
     comment: Optional[str] = Field(None, description="推荐语/备注")
     """推荐语/备注"""
-    
+
     display_order: Optional[int] = Field(None, description="排序权重")
     """排序权重"""
 

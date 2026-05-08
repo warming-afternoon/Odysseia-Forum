@@ -8,9 +8,7 @@ class UserUpdatePreference(SQLModel, table=True):
 
     __tablename__ = "user_update_preference"  # type: ignore
     __table_args__ = (
-        UniqueConstraint(
-            "user_id", "thread_id", name="uk_user_thread_update_pref"
-        ),
+        UniqueConstraint("user_id", "thread_id", name="uk_user_thread_update_pref"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)

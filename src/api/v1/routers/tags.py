@@ -16,9 +16,7 @@ channel_mappings_config: Dict[int, List[Dict]] = {}
 async_session_factory: async_sessionmaker | None = None
 cache_service_instance: Optional[CacheService] = None
 
-router = APIRouter(
-    prefix="/tags", tags=["标签"], dependencies=[Depends(require_auth)]
-)
+router = APIRouter(prefix="/tags", tags=["标签"], dependencies=[Depends(require_auth)])
 
 
 @router.post(
@@ -35,8 +33,7 @@ async def stats_tags(
     """
     if not async_session_factory or not cache_service_instance:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="核心服务尚未初始化"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="核心服务尚未初始化"
         )
 
     try:
@@ -44,13 +41,13 @@ async def stats_tags(
             tag_service = TagStatisticsService(
                 session=session,
                 cache_service=cache_service_instance,
-                channel_mappings=channel_mappings_config
+                channel_mappings=channel_mappings_config,
             )
             return await tag_service.aggregate_tag_stats(request)
-            
+
     except Exception as e:
         logger.error(f"执行标签聚合查询时出错: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="服务器内部错误，无法获取标签统计信息"
+            detail="服务器内部错误，无法获取标签统计信息",
         )

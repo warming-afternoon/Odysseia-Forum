@@ -8,7 +8,8 @@ class UserPreferencesUpdateRequest(BaseModel):
 
     # 频道选择
     preferred_channels: Optional[List[Union[int, str]]] = Field(
-        default=None, description="用户偏好的频道ID列表，搜索时优先在这些频道中查找，支持数字或字符串"
+        default=None,
+        description="用户偏好的频道ID列表，搜索时优先在这些频道中查找，支持数字或字符串",
     )
     """偏好的频道ID列表"""
 
@@ -128,7 +129,9 @@ class UserPreferencesUpdateRequest(BaseModel):
             raise ValueError("网页端每页结果数量不能大于100")
         return v
 
-    @field_validator("preferred_channels", "include_authors", "exclude_authors", mode="before")
+    @field_validator(
+        "preferred_channels", "include_authors", "exclude_authors", mode="before"
+    )
     @classmethod
     def convert_ids_to_int(cls, v: Any) -> Any:
         """
@@ -136,7 +139,7 @@ class UserPreferencesUpdateRequest(BaseModel):
         """
         if v is None:
             return v
-        
+
         if isinstance(v, list):
             processed = []
             for item in v:
@@ -145,5 +148,5 @@ class UserPreferencesUpdateRequest(BaseModel):
                 else:
                     processed.append(item)
             return processed
-            
+
         return v

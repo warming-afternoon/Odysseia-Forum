@@ -64,9 +64,7 @@ class Configuration(commands.Cog):
         self.mutex_handler = MutexTagsHandler(
             bot, self.session_factory, self.api_scheduler, self.tag_service
         )
-        self.general_config_handler = GeneralConfigHandler(
-            bot, self.session_factory
-        )
+        self.general_config_handler = GeneralConfigHandler(bot, self.session_factory)
         logger.info("Config 模块已加载")
 
     @commands.Cog.listener()

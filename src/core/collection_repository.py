@@ -85,7 +85,9 @@ class CollectionRepository:
                 await self.session.commit()
                 return True
             except IntegrityError:
-                logger.debug(f"用户 {user_id} 尝试收藏已存在的目标 {target_type}:{target_id}")
+                logger.debug(
+                    f"用户 {user_id} 尝试收藏已存在的目标 {target_type}:{target_id}"
+                )
                 await self.session.rollback()
                 return False
             except Exception as e:
@@ -177,7 +179,9 @@ class CollectionRepository:
                 BooklistItem.booklist_id == booklist.id,
                 BooklistItem.thread_id.in_(target_ids),  # type: ignore
             )
-            existing_ids = set((await self.session.execute(existing_stmt)).scalars().all())
+            existing_ids = set(
+                (await self.session.execute(existing_stmt)).scalars().all()
+            )
             new_ids = [tid for tid in target_ids if tid not in existing_ids]
 
             if not new_ids:
@@ -467,11 +471,7 @@ class CollectionRepository:
         total_count = count_result.scalar_one_or_none() or 0
 
         # 获取数据
-        data_stmt = (
-            base_query.order_by(sort_order)
-            .offset(offset)
-            .limit(per_page)
-        )
+        data_stmt = base_query.order_by(sort_order).offset(offset).limit(per_page)
         data_result = await self.session.execute(data_stmt)
         targets = data_result.scalars().all()
 
@@ -505,7 +505,7 @@ class CollectionRepository:
             result = await self.session.execute(statement)
             return set(result.scalars().all())
         else:
-            # 书单类型，查询 UserCollection 
+            # 书单类型，查询 UserCollection
             statement = select(UserCollection.target_id).where(
                 and_(
                     UserCollection.user_id == user_id,

@@ -11,12 +11,12 @@ class ThreadDetailBuilder:
     处理作者信息嵌套、标签提取、虚拟映射标签计算以及收藏状态标记。
     """
 
-    def __init__(self,
-        channel_mappings_config: Optional[Dict[int, List[Dict]]] = None
-        ):
+    def __init__(self, channel_mappings_config: Optional[Dict[int, List[Dict]]] = None):
         self.channel_mappings = channel_mappings_config or {}
         self.mapping_utils = ChannelMappingUtils(self.channel_mappings)
-        self._global_virtual_tags_map = self.mapping_utils.get_all_channel_virtual_tags_map()
+        self._global_virtual_tags_map = (
+            self.mapping_utils.get_all_channel_virtual_tags_map()
+        )
 
     def build(
         self,

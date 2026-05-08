@@ -29,7 +29,9 @@ class Booklist(SQLModel, table=True):
     is_public: bool = Field(default=True, index=True, description="是否公开")
     """是否公开"""
 
-    is_default: bool = Field(default=False, index=True, description="是否为用户的默认书单")
+    is_default: bool = Field(
+        default=False, index=True, description="是否为用户的默认书单"
+    )
     """是否为用户的默认书单"""
 
     display_type: int = Field(

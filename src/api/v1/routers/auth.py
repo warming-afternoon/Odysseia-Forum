@@ -162,9 +162,6 @@ async def callback(code: Optional[str] = None):
             )
 
             # 设置 Cookie
-            cookie_domain = _AUTH_CONFIG.get("cookie_domain", "")
-            cookie_domain_attr = f"; Domain={cookie_domain}" if cookie_domain else ""
-
             response = RedirectResponse(
                 url=f"{_AUTH_CONFIG['frontend_url']}#token={token}", status_code=302
             )
@@ -489,7 +486,9 @@ async def check_auth(request: Request):
         {
             "id": payload["id"],
             "username": payload.get("username", ""),
-            "roles": user_roles if 'user_roles' in locals() else payload.get("roles", []),
+            "roles": user_roles
+            if "user_roles" in locals()
+            else payload.get("roles", []),
         },
         _AUTH_CONFIG["jwt_secret"],
         7 * 24 * 60 * 60,

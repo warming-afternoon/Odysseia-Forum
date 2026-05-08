@@ -21,13 +21,17 @@ class ThreadDetail(BaseModel):
     title: str = Field(description="帖子标题")
     """帖子标题"""
 
-    author: Optional[AuthorDetail] = Field(default=None, description="帖子作者的详细信息")
+    author: Optional[AuthorDetail] = Field(
+        default=None, description="帖子作者的详细信息"
+    )
     """帖子作者的详细信息"""
 
     created_at: datetime = Field(description="帖子创建时间")
     """帖子创建时间"""
 
-    last_active_at: Optional[datetime] = Field(default=None, description="帖子最后活跃时间")
+    last_active_at: Optional[datetime] = Field(
+        default=None, description="帖子最后活跃时间"
+    )
     """帖子最后活跃时间"""
 
     reaction_count: int = Field(description="帖子点赞数")
@@ -42,7 +46,9 @@ class ThreadDetail(BaseModel):
     display_count: int = Field(default=0, description="在搜索结果中的展示次数")
     """在搜索结果中的展示次数"""
 
-    first_message_excerpt: Optional[str] = Field(default=None, description="帖子首条消息摘要")
+    first_message_excerpt: Optional[str] = Field(
+        default=None, description="帖子首条消息摘要"
+    )
     """帖子首条消息摘要"""
 
     thumbnail_urls: List[str] = Field(description="帖子首楼图片URL列表")
@@ -51,7 +57,9 @@ class ThreadDetail(BaseModel):
     tags: List[str] = Field(default_factory=list, description="帖子关联的标签列表")
     """帖子关联的标签列表"""
 
-    virtual_tags: List[str] = Field(default_factory=list, description="帖子匹配的虚拟映射标签名列表")
+    virtual_tags: List[str] = Field(
+        default_factory=list, description="帖子匹配的虚拟映射标签名列表"
+    )
     """帖子匹配的虚拟映射标签名列表"""
 
     collected_flag: bool = Field(default=False, description="当前用户是否收藏了该帖子")

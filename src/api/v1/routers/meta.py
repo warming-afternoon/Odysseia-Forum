@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union, Any
+from typing import Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -7,6 +7,7 @@ from dto.meta import ChannelDetail
 from core.cache_service import CacheService
 from meta.meta_service import MetaService
 from shared.database import AsyncSessionFactory
+
 # 导入配置类型枚举
 from shared.enum.search_config_type import SearchConfigType
 
@@ -43,7 +44,7 @@ async def get_indexed_channels_with_tags(
         except ValueError:
             raise HTTPException(
                 status_code=400, detail=f"无效的服务器ID格式: {guild_id}"
-                )
+            )
 
     effective_channel_ids = None
     if channel_ids:
@@ -52,9 +53,7 @@ async def get_indexed_channels_with_tags(
             try:
                 effective_channel_ids.append(int(cid))
             except ValueError:
-                raise HTTPException(
-                    status_code=400, detail=f"无效的频道ID格式: {cid}"
-                    )
+                raise HTTPException(status_code=400, detail=f"无效的频道ID格式: {cid}")
 
     async with AsyncSessionFactory() as session:
         meta_service = MetaService(
@@ -63,12 +62,12 @@ async def get_indexed_channels_with_tags(
             channel_mappings=channel_mappings_config,
         )
         # 传递转换后的 int 类型 ID
-        return await meta_service.get_channels_meta(effective_guild_id, effective_channel_ids)
+        return await meta_service.get_channels_meta(
+            effective_guild_id, effective_channel_ids
+        )
 
-@router.get(
-    "/main-guild",
-    summary="获取当前主服务器ID"
-)
+
+@router.get("/main-guild", summary="获取当前主服务器ID")
 async def get_main_guild_id():
     """返回配置文件中定义的主服务器 ID (Main Guild ID)"""
     if not cache_service_instance:

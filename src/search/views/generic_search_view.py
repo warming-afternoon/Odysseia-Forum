@@ -30,7 +30,7 @@ class GenericSearchView(discord.ui.View):
         search_state: SearchStateDTO,
         strategy: SearchStrategy,
     ):
-        super().__init__(timeout=14400) # 4 小时
+        super().__init__(timeout=14400)  # 4 小时
         self.cog = cog
         self.last_interaction = interaction
         self.search_state = search_state
@@ -40,7 +40,7 @@ class GenericSearchView(discord.ui.View):
         self.tags_per_page = 25
         self.last_search_results: dict | None = None
         self.custom_settings_message: Optional[discord.WebhookMessage] = None
-        
+
         # 临时桥接变量，用来填补“主搜索视图刚弹出来，却在子视图里做了操作”这段真空期
         self.view_message: Optional[discord.WebhookMessage] = None
 
@@ -117,7 +117,7 @@ class GenericSearchView(discord.ui.View):
                 else:
                     # 即使缓存中没有（可能是极端同步延迟），使用标准的 Discord 提及语法也能显示
                     channel_mentions.append(f"<#{cid}>")
-            
+
             if channel_mentions:
                 content = f"在 **{', '.join(channel_mentions)}** 中搜索"
 
@@ -269,7 +269,9 @@ class GenericSearchView(discord.ui.View):
         """由 CustomSearchSettingsView 回调，应用设置并刷新主视图"""
         self.search_state = updated_state
         self.search_state.page = 1
-        await self.update_view(self.last_interaction, rerun_search=True, from_subview=True)
+        await self.update_view(
+            self.last_interaction, rerun_search=True, from_subview=True
+        )
 
     async def on_tag_page_change(self, interaction: discord.Interaction, action: str):
         """处理标签翻页"""
@@ -423,7 +425,9 @@ class GenericSearchView(discord.ui.View):
     async def refresh_view(self):
         """提供给子视图的回调，用于在数据更新后刷新此主视图"""
         if self.last_interaction:
-            await self.update_view(self.last_interaction, rerun_search=True, from_subview=True)
+            await self.update_view(
+                self.last_interaction, rerun_search=True, from_subview=True
+            )
 
     async def on_timeout(self):
         """当视图超时时，由于是私密消息且交互 Token 必已过期，无需（也无法）进行编辑。"""

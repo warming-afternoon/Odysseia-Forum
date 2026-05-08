@@ -5,9 +5,9 @@ from dto.meta.mapped_source_channel_detail import MappedSourceChannelDetail
 from dto.meta.channel_detail import ChannelDetail
 
 __all__ = [
-    "TagDetail", 
-    "ChannelThreadCount", 
+    "TagDetail",
+    "ChannelThreadCount",
     "VirtualTagDetail",
     "MappedSourceChannelDetail",
-    "ChannelDetail"
+    "ChannelDetail",
 ]

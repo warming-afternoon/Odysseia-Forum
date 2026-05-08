@@ -173,14 +173,22 @@ def migrate_favorites_from_follow_bot():
                             (booklist_id,),
                         )
                         row = main_cursor.fetchone()
-                        booklist_max_order[booklist_id] = row[0] if row[0] is not None else 0
+                        booklist_max_order[booklist_id] = (
+                            row[0] if row[0] is not None else 0
+                        )
 
                     insert_data = []
                     for i, (thread_id, added_at) in enumerate(new_items):
                         booklist_max_order[booklist_id] += 1
                         insert_data.append(
-                            (booklist_id, thread_id, user_id,
-                             booklist_max_order[booklist_id], added_at, added_at)
+                            (
+                                booklist_id,
+                                thread_id,
+                                user_id,
+                                booklist_max_order[booklist_id],
+                                added_at,
+                                added_at,
+                            )
                         )
 
                     main_cursor.executemany(

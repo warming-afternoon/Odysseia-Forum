@@ -121,9 +121,7 @@ async def init_db():
         )
 
         # 重建 FTS 索引（使用当前分词器重新索引全部内容）并合并碎片段
-        await conn.execute(
-            text("INSERT INTO thread_fts(thread_fts) VALUES('rebuild')")
-        )
+        await conn.execute(text("INSERT INTO thread_fts(thread_fts) VALUES('rebuild')"))
         await conn.execute(
             text("INSERT INTO thread_fts(thread_fts) VALUES('optimize')")
         )

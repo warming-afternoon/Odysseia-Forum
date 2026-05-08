@@ -1,6 +1,7 @@
 from typing import Optional
 from pydantic import BaseModel, Field, field_serializer
 
+
 class ChannelTagInfo(BaseModel):
     """标签在某个频道下的统计信息"""
 
@@ -16,7 +17,9 @@ class ChannelTagInfo(BaseModel):
     channel_name: str = Field(default="未知频道", description="频道名称")
     """频道名称"""
 
-    category_id: Optional[int] = Field(default=None, description="频道所属类别的 Discord ID")
+    category_id: Optional[int] = Field(
+        default=None, description="频道所属类别的 Discord ID"
+    )
     """频道所属类别的 Discord ID"""
 
     category_name: Optional[str] = Field(default=None, description="频道所属类别名称")

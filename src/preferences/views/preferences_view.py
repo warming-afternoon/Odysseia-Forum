@@ -3,7 +3,6 @@ from typing import TYPE_CHECKING, Optional
 
 import discord
 
-from core.preferences_repository import PreferencesRepository
 from preferences.views.components.results_per_page_modal import ResultsPerPageModal
 from search.constants import SortMethod
 from dto.preferences import UserSearchPreferencesDTO
@@ -94,7 +93,7 @@ class PreferencesView(discord.ui.View):
             for channel_id in prefs.preferred_channels:
                 # 优先从全局已索引缓存中获取
                 channel = self.service.cache_service.indexed_channels.get(channel_id)
-                
+
                 if channel:
                     # 使用 频道名
                     channel_info_list.append(f"{channel.name}")
@@ -331,9 +330,7 @@ class PreferencesView(discord.ui.View):
         await self.fetch_preferences()
         self.update_components()
         embed = self.build_embed()
-        await interaction.edit_original_response(
-                embed=embed, view=self
-            )
+        await interaction.edit_original_response(embed=embed, view=self)
 
     async def button_callback(self, interaction: discord.Interaction):
         """统一处理所有按钮点击事件"""
@@ -446,9 +443,7 @@ class PreferencesView(discord.ui.View):
             if sort_method != "custom":
                 update_data["custom_base_sort"] = "comprehensive"
 
-            await self.service.save_user_preferences(
-                interaction.user.id, update_data
-            )
+            await self.service.save_user_preferences(interaction.user.id, update_data)
             await self.refresh(interaction)  # 刷新视图以显示或隐藏新行
         except Exception as e:
             logger.error(f"保存排序方式失败: {e}", exc_info=True)

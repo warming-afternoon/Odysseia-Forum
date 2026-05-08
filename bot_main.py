@@ -34,7 +34,7 @@ from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
 from shared.api_scheduler import APIScheduler
-from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigDefaultsInt
+from shared.enum.search_config_type import SearchConfigDefaultsInt
 from shared.enum.abyss_defaults import AbyssDefaults
 from api.v1.routers import (
     preferences as preferences_api,
@@ -222,10 +222,10 @@ class MyBot(commands.Bot):
 
     def _inject_api_dependencies(self):
         """向 API 路由模块注入运行期依赖"""
-        
+
         # 获取主服务器ID
         main_guild_id = self._get_main_guild_id_from_config()
-        
+
         # 注入服务实例到 API 路由
         preferences_api.async_session_factory = AsyncSessionFactory
         preferences_api.main_guild_id = main_guild_id
@@ -258,16 +258,22 @@ class MyBot(commands.Bot):
         booklists_api.channel_mappings_config = channel_mappings_config
 
         # 注入深渊区配置
-        raw_abyss = self.config.get("abyss", {}) if isinstance(self.config, dict) else {}
+        raw_abyss = (
+            self.config.get("abyss", {}) if isinstance(self.config, dict) else {}
+        )
         abyss_config = {
             "channel_ids": raw_abyss.get("channel_ids", AbyssDefaults.CHANNEL_IDS),
-            "required_role_id": raw_abyss.get("required_role_id", AbyssDefaults.REQUIRED_ROLE_ID),
+            "required_role_id": raw_abyss.get(
+                "required_role_id", AbyssDefaults.REQUIRED_ROLE_ID
+            ),
         }
 
         search_api.abyss_config = abyss_config
         discovery_api.abyss_config = abyss_config
 
-        auth_section = self.config.get("auth", {}) if isinstance(self.config, dict) else {}
+        auth_section = (
+            self.config.get("auth", {}) if isinstance(self.config, dict) else {}
+        )
         fetch_images_api.configure_fetch_images_router(
             session_factory=AsyncSessionFactory,
             bot_token=auth_section.get("bot_token"),
@@ -320,7 +326,6 @@ class MyBot(commands.Bot):
             return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
 
-
 async def main():
     # 配置日志记录
     logging.basicConfig(
@@ -338,7 +343,7 @@ async def main():
 
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
-        
+
     # 读取配置项并初始化全局Redis连接池
     redis_url = config.get("redis_url", "redis://odysseia-redis:6379/0")
     await RedisManager.init_redis(redis_url)
@@ -351,7 +356,6 @@ async def main():
             logger.info(f"机器人已登录: {bot.user} (ID: {bot.user.id})")
         else:
             logger.info("机器人已登录，但无法获取机器人信息。")
-
 
     # 初始化 API 安全配置和认证配置
     initialize_api_security()
@@ -375,7 +379,7 @@ async def main():
 
     async with bot:
         await asyncio.gather(bot.start(config["token"]), server.serve())
-        
+
     # 服务关闭时切断与Redis的连接
     await RedisManager.close_redis()
 

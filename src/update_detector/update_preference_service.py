@@ -47,9 +47,7 @@ class UpdatePreferenceService:
             self.session.add(pref)
         await self.session.commit()
 
-    async def get_user_preferences(
-        self, user_id: int
-    ) -> list[UserUpdatePreference]:
+    async def get_user_preferences(self, user_id: int) -> list[UserUpdatePreference]:
         """获取用户在所有帖子上的偏好设置"""
         stmt = select(UserUpdatePreference).where(
             UserUpdatePreference.user_id == user_id

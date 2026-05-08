@@ -355,7 +355,9 @@ class SyncService:
             tags = await tag_repo.get_or_create_tags(tags_data)
 
             repo = ThreadRepository(session=session)
-            await repo.add_or_update_thread_with_tags(thread_data=thread_data, tags=tags)
+            await repo.add_or_update_thread_with_tags(
+                thread_data=thread_data, tags=tags
+            )
 
         # 检查是否是首次被关注（检查关注表而不是帖子表）
         is_first_follow = False

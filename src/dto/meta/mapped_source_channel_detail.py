@@ -17,7 +17,9 @@ class MappedSourceChannelDetail(BaseModel):
     channel_name: str = Field(description="频道名称")
     """频道名称"""
 
-    available_tags: List[TagDetail] = Field(default_factory=list, description="该频道原生的可用标签")
+    available_tags: List[TagDetail] = Field(
+        default_factory=list, description="该频道原生的可用标签"
+    )
     """该频道原生的可用标签"""
 
     real_thread_count: int = Field(default=0, description="该频道的实际有效帖子数")

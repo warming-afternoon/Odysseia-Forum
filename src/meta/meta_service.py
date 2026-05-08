@@ -9,7 +9,7 @@ from dto.meta import (
     TagDetail,
     ChannelDetail,
     VirtualTagDetail,
-    MappedSourceChannelDetail
+    MappedSourceChannelDetail,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +32,7 @@ class MetaService:
         self, guild_id: Optional[int], channel_ids: Optional[List[int]]
     ) -> List[ChannelDetail]:
         """获取包含标签、虚拟标签及各项帖子数量的频道聚合数据"""
-        
+
         # 获取全量已索引频道用于建立查找字典
         full_channels_cache = self.cache_service.get_indexed_channels()
         all_channels_dict = {ch.id: ch for ch in full_channels_cache}
@@ -68,12 +68,15 @@ class MetaService:
         # 组装返回数据
         results: List[ChannelDetail] = []
         for channel in target_channels:
-            tags = [TagDetail(tag_id=tag.id, name=tag.name) for tag in channel.available_tags]
+            tags = [
+                TagDetail(tag_id=tag.id, name=tag.name)
+                for tag in channel.available_tags
+            ]
             mappings = self.channel_mappings.get(channel.id, [])
-            
+
             virtual_tags: List[VirtualTagDetail] = []
             mapped_source_ids: set[int] = set()
-            
+
             # 解析虚拟标签和提取所有的源频道 ID
             for mapping in mappings:
                 if "tag_name" not in mapping:
@@ -82,8 +85,7 @@ class MetaService:
                 src_ids = mapping.get("source_channel_ids", [])
                 virtual_tags.append(
                     VirtualTagDetail(
-                        tag_name=mapping["tag_name"],
-                        source_channel_ids=src_ids
+                        tag_name=mapping["tag_name"], source_channel_ids=src_ids
                     )
                 )
                 mapped_source_ids.update(src_ids)
@@ -92,7 +94,9 @@ class MetaService:
             real_count = counts_map.get(channel.id, 0)
 
             # 计算虚拟映射源频道的帖子总数
-            virtual_count = sum(counts_map.get(source_id, 0) for source_id in mapped_source_ids)
+            virtual_count = sum(
+                counts_map.get(source_id, 0) for source_id in mapped_source_ids
+            )
             total_count = real_count + virtual_count
 
             # 组装来源频道详细信息列表
@@ -101,15 +105,17 @@ class MetaService:
                 src_ch = all_channels_dict.get(src_id)
                 if not src_ch:  # 只有该频道已被系统索引且获取到缓存时才计入
                     continue
-                
-                src_tags = [TagDetail(tag_id=t.id, name=t.name) for t in src_ch.available_tags]
+
+                src_tags = [
+                    TagDetail(tag_id=t.id, name=t.name) for t in src_ch.available_tags
+                ]
                 mapped_source_channels.append(
                     MappedSourceChannelDetail(
                         guild_id=src_ch.guild.id,
                         channel_id=src_ch.id,
                         channel_name=src_ch.name,
                         available_tags=src_tags,
-                        real_thread_count=counts_map.get(src_id, 0)
+                        real_thread_count=counts_map.get(src_id, 0),
                     )
                 )
 

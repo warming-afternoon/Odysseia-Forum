@@ -92,7 +92,8 @@ class ApplicationFormModal(discord.ui.Modal, title="Banner申请"):
 
             if not thread:
                 await interaction.followup.send(
-                    "❌ 无法获取有效的帖子信息，请检查帖子ID或联系管理员。", ephemeral=True
+                    "❌ 无法获取有效的帖子信息，请检查帖子ID或联系管理员。",
+                    ephemeral=True,
                 )
                 return
 

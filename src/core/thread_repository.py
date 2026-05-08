@@ -27,9 +27,7 @@ class ThreadRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def add_or_update_thread_with_tags(
-        self, thread_data: dict, tags: list[Tag]
-    ):
+    async def add_or_update_thread_with_tags(self, thread_data: dict, tags: list[Tag]):
         """
         添加或更新一个帖子及其标签。
         """
@@ -420,7 +418,7 @@ class ThreadRepository:
         stmt = select(Thread).where(Thread.not_found_count == 0)
 
         # 只搜索 show_flag == True 的帖子，避免显示被隐藏的帖子
-        stmt = stmt.where(Thread.show_flag == True)
+        stmt = stmt.where(Thread.show_flag)
 
         # 频道筛选
         if channel_ids:
@@ -428,7 +426,9 @@ class ThreadRepository:
 
         # 必须排除的频道筛选
         if exclude_channel_ids:
-            stmt = stmt.where(~cast(ColumnElement, Thread.channel_id).in_(exclude_channel_ids))
+            stmt = stmt.where(
+                ~cast(ColumnElement, Thread.channel_id).in_(exclude_channel_ids)
+            )
 
         # 包含的标签筛选
         if include_tags:
@@ -453,7 +453,7 @@ class ThreadRepository:
 
         # 执行查询
         result = await self.session.execute(stmt)
-        
+
         # 返回结果列表
         return list(result.scalars().all())
 
@@ -491,7 +491,9 @@ class ThreadRepository:
         # ============ 反选关键词处理：找出所有包含排除词的帖子 ID ============
         if exclude_keywords:
             # 豁免标记：当排除词附近出现这些标记时，该排除词不生效
-            markers = exemption_markers if exemption_markers is not None else ["禁", "🈲"]
+            markers = (
+                exemption_markers if exemption_markers is not None else ["禁", "🈲"]
+            )
 
             # 将排除关键词字符串按逗号/顿号/斜杠/空白拆分成多个独立关键词
             exclude_keywords_list = [
@@ -510,12 +512,12 @@ class ThreadRepository:
                 # 清理 token 内部的双引号，防止破坏 FTS5 语法
                 tokens = []
                 for tok in raw_tokens:
-                    clean_tok = tok.strip().replace('"', '')
+                    clean_tok = tok.strip().replace('"', "")
                     if clean_tok:
                         tokens.append(clean_tok)
                 if not tokens:
                     continue
-    
+
                 # 构建 FTS5 MATCH 的匹配表达式：
                 # - 前面的分词用精确匹配（双引号包裹），例如 "搬运"
                 # - 最后一个分词用前缀匹配（* 在双引号外面），例如 "工"*
@@ -529,8 +531,7 @@ class ThreadRepository:
                     # 构建豁免子句：检查排除词的第一个分词是否在 4 个词范围内靠近豁免标记
                     first_token = tokens[0]
                     exemption_clauses = [
-                        f'NEAR("{first_token}" "{marker}", 4)'
-                        for marker in markers
+                        f'NEAR("{first_token}" "{marker}", 4)' for marker in markers
                     ]
                     exemption_match_str = f"({' OR '.join(exemption_clauses)})"
 
@@ -549,12 +550,10 @@ class ThreadRepository:
                 final_exclude_expr = " OR ".join(all_exclude_parts)
                 # 在 FTS 虚拟表中执行 MATCH 查询，获取所有命中排除词的帖子 rowid
                 from sqlmodel import select
-                
+
                 exc_result = await self.session.execute(
                     select(thread_fts_table.c.rowid).where(
-                        thread_fts_table.c.thread_fts.op("MATCH")(
-                            final_exclude_expr
-                        )
+                        thread_fts_table.c.thread_fts.op("MATCH")(final_exclude_expr)
                     )
                 )
                 fts_exclude_ids = set(exc_result.scalars().all())
@@ -565,9 +564,7 @@ class ThreadRepository:
             # 按逗号拆分为多个 AND 组，各关键词组之间取交集
             keywords_str = keywords.replace("，", ",").replace("／", "/")
             and_groups = [
-                group.strip()
-                for group in keywords_str.split(",")
-                if group.strip()
+                group.strip() for group in keywords_str.split(",") if group.strip()
             ]
 
             for group in and_groups:
@@ -582,7 +579,7 @@ class ThreadRepository:
                     # 例如 '"原神启动"' → FTS5 精确匹配 "原神启动"（不分词）
                     if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
                         # 清理用户输入的非法内嵌双引号，防止破坏 FTS5 语法
-                        exact_kw = kw[1:-1].strip().replace('"', '')
+                        exact_kw = kw[1:-1].strip().replace('"', "")
                         if exact_kw:
                             or_keywords.append(f'"{exact_kw}"')
                     else:
@@ -596,14 +593,12 @@ class ThreadRepository:
                         # 清理 token 内部的双引号，防止破坏 FTS5 语法
                         tokens = []
                         for tok in raw_tokens:
-                            clean_tok = tok.strip().replace('"', '')
+                            clean_tok = tok.strip().replace('"', "")
                             if clean_tok:
                                 tokens.append(clean_tok)
                         if tokens:
                             expr = " ".join(f'"{t}"*' for t in tokens)
-                            or_keywords.append(
-                                f"({expr})" if len(tokens) > 1 else expr
-                            )
+                            or_keywords.append(f"({expr})" if len(tokens) > 1 else expr)
 
                 # 同一组内的 OR 关键词用 OR 连接
                 # 例如 "搬运" 和 "转载" → '"搬运"* OR "转载"*'
@@ -612,6 +607,7 @@ class ThreadRepository:
                     match_str = " OR ".join(or_keywords)
                     # 执行 FTS MATCH 查询，获取当前组匹配的帖子 ID 集合
                     from sqlmodel import select
+
                     grp_result = await self.session.execute(
                         select(thread_fts_table.c.rowid).where(
                             thread_fts_table.c.thread_fts.op("MATCH")(match_str)

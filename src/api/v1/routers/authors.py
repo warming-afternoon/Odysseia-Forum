@@ -23,7 +23,7 @@ async def get_author_profile(
     try:
         async with AsyncSessionFactory() as session:
             service = AuthorRepository(session)
-            
+
             author = await service.get_author(author_id)
             if not author:
                 raise HTTPException(

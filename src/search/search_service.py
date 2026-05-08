@@ -1,21 +1,15 @@
-import asyncio
 import logging
-import re
-from functools import partial
 from typing import Sequence
 
-import rjieba
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
 from core.thread_repository import ThreadRepository
-from models import Author, Tag, Thread, ThreadTagLink, UserCollection, BooklistItem
+from models import Author, Tag, Thread, ThreadTagLink, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
-from shared.database import thread_fts_table
-from shared.enum.collection_type import CollectionType
 from shared.enum.default_preferences import DefaultPreferences
 from shared.range_parser import parse_range_string
 from shared.time_parser import parse_time_string
@@ -77,7 +71,9 @@ class SearchService:
         )
 
         # 规范化作者名
-        normalized_author_name = query.author_name.strip() if query.author_name else None
+        normalized_author_name = (
+            query.author_name.strip() if query.author_name else None
+        )
         if normalized_author_name == "":
             normalized_author_name = None
 
@@ -165,21 +161,23 @@ class SearchService:
             filters.append(Thread.not_found_count == 0)
 
             # 只搜索 show_flag == True 的帖子，避免显示被隐藏的帖子
-            filters.append(Thread.show_flag == True)
+            filters.append(Thread.show_flag)
 
             # 当指定了 guild_id 且没有指定具体 channel_ids 时，按服务器过滤
             if query.guild_id and not query.channel_ids:
                 filters.append(Thread.guild_id == query.guild_id)
             if query.channel_ids:
-                filters.append(Thread.channel_id.in_(query.channel_ids)) # type: ignore
+                filters.append(Thread.channel_id.in_(query.channel_ids))  # type: ignore
 
             # 处理屏蔽的频道 ID
             if query.exclude_channel_ids:
-                filters.append(~Thread.channel_id.in_(query.exclude_channel_ids)) # type: ignore
+                filters.append(~Thread.channel_id.in_(query.exclude_channel_ids))  # type: ignore
 
             # 处理排除的帖子 ID
             if CleanedQo.normalized_exclude_thread_ids:
-                filters.append(~Thread.thread_id.in_(CleanedQo.normalized_exclude_thread_ids)) # type: ignore
+                filters.append(
+                    ~Thread.thread_id.in_(CleanedQo.normalized_exclude_thread_ids)
+                )  # type: ignore
 
             # 处理作者名搜索
             if CleanedQo.normalized_author_name:
@@ -187,28 +185,33 @@ class SearchService:
                 search_pattern = f"%{CleanedQo.normalized_author_name}%"
 
                 author_subquery = select(Author.id).where(
-                    (func.lower(Author.name) == CleanedQo.normalized_author_name.lower())
-                    | (Author.global_name.like(search_pattern)) # type: ignore
-                    | (Author.display_name.like(search_pattern)) # type: ignore
-                ) # type: ignore
+                    (
+                        func.lower(Author.name)
+                        == CleanedQo.normalized_author_name.lower()
+                    )
+                    | (Author.global_name.like(search_pattern))  # type: ignore
+                    | (Author.display_name.like(search_pattern))  # type: ignore
+                )  # type: ignore
 
                 author_result = await self.session.execute(author_subquery)
                 matched_author_ids = set(author_result.scalars().all())
 
                 if query.include_authors:
                     # 如果同时指定了ID和名称，则取交集
-                    CleanedQo.final_include_author_ids.intersection_update(matched_author_ids)
+                    CleanedQo.final_include_author_ids.intersection_update(
+                        matched_author_ids
+                    )
                 else:
                     CleanedQo.final_include_author_ids = matched_author_ids
 
             # 应用作者过滤器
             if CleanedQo.final_include_author_ids:
                 filters.append(
-                    Thread.author_id.in_(list(CleanedQo.final_include_author_ids)) # type: ignore
+                    Thread.author_id.in_(list(CleanedQo.final_include_author_ids))  # type: ignore
                 )
             if query.exclude_authors:
                 filters.append(
-                    Thread.author_id.notin_(query.exclude_authors) # type: ignore
+                    Thread.author_id.notin_(query.exclude_authors)  # type: ignore
                 )
 
             # 反应数范围过滤
@@ -236,11 +239,15 @@ class SearchService:
             # 活跃时间范围过滤
             if CleanedQo.active_after_dt or CleanedQo.active_before_dt:
                 # 对可能为 None 的 last_active_at 进行安全处理
-                conditions = [Thread.last_active_at != None] # noqa: E711
+                conditions = [Thread.last_active_at != None]  # noqa: E711
                 if CleanedQo.active_after_dt:
-                    conditions.append(Thread.last_active_at >= CleanedQo.active_after_dt) # type: ignore
+                    conditions.append(
+                        Thread.last_active_at >= CleanedQo.active_after_dt
+                    )  # type: ignore
                 if CleanedQo.active_before_dt:
-                    conditions.append(Thread.last_active_at <= CleanedQo.active_before_dt) # type: ignore
+                    conditions.append(
+                        Thread.last_active_at <= CleanedQo.active_before_dt
+                    )  # type: ignore
                 filters.append(and_(*conditions))
 
             # 标签过滤
@@ -248,17 +255,19 @@ class SearchService:
                 if query.tag_logic == "and":
                     # TODO : 考虑精简
                     for tag_name in query.include_tags:
-                        ids_for_name = self.tag_cache_service.get_ids_by_tag_name(tag_name)
+                        ids_for_name = self.tag_cache_service.get_ids_by_tag_name(
+                            tag_name
+                        )
                         if ids_for_name:
-                            filters.append(Thread.tags.any(Tag.id.in_(ids_for_name))) # type: ignore
+                            filters.append(Thread.tags.any(Tag.id.in_(ids_for_name)))  # type: ignore
                 else:
                     filters.append(
-                        Thread.tags.any(Tag.id.in_(CleanedQo.resolved_include_tag_ids)) # type: ignore
+                        Thread.tags.any(Tag.id.in_(CleanedQo.resolved_include_tag_ids))  # type: ignore
                     )
 
             if CleanedQo.resolved_exclude_tag_ids:
                 filters.append(
-                    ~Thread.tags.any(Tag.id.in_(CleanedQo.resolved_exclude_tag_ids)) # type: ignore
+                    ~Thread.tags.any(Tag.id.in_(CleanedQo.resolved_exclude_tag_ids))  # type: ignore
                 )
 
             # 关键词匹配过滤
@@ -268,7 +277,7 @@ class SearchService:
             fts_result = await thread_repo.get_fts_matched_thread_ids(
                 keywords=query.keywords,
                 exclude_keywords=query.exclude_keywords,
-                exemption_markers=query.exclude_keyword_exemption_markers
+                exemption_markers=query.exclude_keyword_exemption_markers,
             )
 
             if fts_result.has_include_ids:
@@ -286,16 +295,18 @@ class SearchService:
             # 收藏搜索过滤器
             if query.user_id_for_collection_search:
                 # 查询用户的帖子收藏记录，获取该用户收藏过的所有 thread_id
-                collected_stmt = select(BooklistItem.thread_id).where(
-                    BooklistItem.owner_id == query.user_id_for_collection_search
-                ).distinct()
+                collected_stmt = (
+                    select(BooklistItem.thread_id)
+                    .where(BooklistItem.owner_id == query.user_id_for_collection_search)
+                    .distinct()
+                )
 
                 collected_result = await self.session.execute(collected_stmt)
                 collected_thread_ids = list(collected_result.scalars().all())
 
                 if not collected_thread_ids:
                     return [], 0
-    
+
                 # 添加过滤条件：帖子 thread_id 必须在该用户的收藏列表中
                 filters.append(
                     Thread.thread_id.in_(collected_thread_ids)  # type: ignore
@@ -372,10 +383,10 @@ class SearchService:
                         Thread.thread_id == BooklistItem.thread_id,
                         BooklistItem.owner_id == query.user_id_for_collection_search,
                     ),
-                ).group_by(Thread.id) # type: ignore
+                ).group_by(Thread.id)  # type: ignore
 
                 # 取最新的收藏时间
-                sort_col = func.max(BooklistItem.created_at) 
+                sort_col = func.max(BooklistItem.created_at)
                 order_by = (
                     sort_col.desc() if query.sort_order == "desc" else sort_col.asc()
                 )

@@ -2,6 +2,7 @@ from typing import List
 from pydantic import BaseModel, Field
 from api.v1.schemas.tags.channel_tag_info import ChannelTagInfo
 
+
 class TagStatItem(BaseModel):
     """标签维度的聚合统计项"""
 

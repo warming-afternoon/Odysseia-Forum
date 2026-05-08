@@ -1,26 +1,22 @@
-import asyncio
-import datetime
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Dict, List
 import discord
 
 from core.config_repository import ConfigRepository
-from core.follow_repository import ThreadFollowRepository
 from core.tag_repository import TagRepository
 from core.thread_repository import ThreadRepository
-from core.redis_trend_service import RedisTrendService
 from shared.enum.search_config_type import SearchConfigType
-from ThreadManager.views.visibility_view import ThreadVisibilityView
 
 if TYPE_CHECKING:
     from bot_main import MyBot
 
 logger = logging.getLogger(__name__)
 
+
 class ThreadLogic:
     """ThreadManager 的核心业务逻辑处理器"""
-    
+
     def __init__(self, bot: "MyBot", session_factory, config: dict, sync_service):
         self.bot = bot
         self.session_factory = session_factory
@@ -43,7 +39,7 @@ class ThreadLogic:
             repo = ThreadRepository(session)
             # 逻辑隐藏 (show_flag=False)
             success = await repo.update_thread_visibility(thread.id, show_flag=False)
-            
+
         if not success:
             return
 
@@ -74,7 +70,12 @@ class ThreadLogic:
     async def apply_mutex_tag_rules(self, thread: discord.Thread) -> bool:
         """检查并应用互斥标签规则。如果进行了修改，则返回 True。"""
         applied_tags = thread.applied_tags
-        if not applied_tags or len(applied_tags) < 2 or not thread.parent or not isinstance(thread.parent, discord.ForumChannel):
+        if (
+            not applied_tags
+            or len(applied_tags) < 2
+            or not thread.parent
+            or not isinstance(thread.parent, discord.ForumChannel)
+        ):
             return False
 
         post_tag_name_to_obj = {tag.name: tag for tag in applied_tags}
@@ -83,7 +84,9 @@ class ThreadLogic:
         async with self.session_factory() as session:
             repo = ConfigRepository(session)
             groups = await repo.get_all_mutex_groups_with_rules()
-            notify_config = await repo.get_search_config(SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT)
+            notify_config = await repo.get_search_config(
+                SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT
+            )
             should_notify_management = notify_config and notify_config.value_int == 1
 
             tags_to_remove, tags_to_add = set(), set()
@@ -97,30 +100,53 @@ class ThreadLogic:
                 if len(conflicting_names) > 1:
                     override_tag_obj = None
                     if group.override_tag_name:
-                        override_tag_obj = discord.utils.get(thread.parent.available_tags, name=group.override_tag_name)
+                        override_tag_obj = discord.utils.get(
+                            thread.parent.available_tags, name=group.override_tag_name
+                        )
 
                     if override_tag_obj:
                         for name in conflicting_names:
                             tags_to_remove.add(post_tag_name_to_obj[name])
                         tags_to_add.add(override_tag_obj)
-                        all_conflicts.append({"group": group, "removed": conflicting_names, "added": override_tag_obj.name})
+                        all_conflicts.append(
+                            {
+                                "group": group,
+                                "removed": conflicting_names,
+                                "added": override_tag_obj.name,
+                            }
+                        )
                     else:
                         highest_priority_tag_name = next(
-                            (rule.tag_name for rule in sorted_rules if rule.tag_name in conflicting_names), ""
+                            (
+                                rule.tag_name
+                                for rule in sorted_rules
+                                if rule.tag_name in conflicting_names
+                            ),
+                            "",
                         )
                         tags_to_remove_from_group = {
-                            post_tag_name_to_obj[name] for name in conflicting_names if name != highest_priority_tag_name
+                            post_tag_name_to_obj[name]
+                            for name in conflicting_names
+                            if name != highest_priority_tag_name
                         }
                         tags_to_remove.update(tags_to_remove_from_group)
-                        all_conflicts.append({
-                            "group": group, "removed": {t.name for t in tags_to_remove_from_group}, "added": None
-                        })
+                        all_conflicts.append(
+                            {
+                                "group": group,
+                                "removed": {t.name for t in tags_to_remove_from_group},
+                                "added": None,
+                            }
+                        )
 
             if tags_to_remove or tags_to_add:
                 if all_conflicts:
-                    user_notified_publicly = await self._notify_user_of_mutex_removal(thread, all_conflicts)
+                    user_notified_publicly = await self._notify_user_of_mutex_removal(
+                        thread, all_conflicts
+                    )
                     if should_notify_management:
-                        await self._notify_management_of_mutex_conflict(thread, all_conflicts, user_notified_publicly)
+                        await self._notify_management_of_mutex_conflict(
+                            thread, all_conflicts, user_notified_publicly
+                        )
 
                 final_tags = list((set(applied_tags) - tags_to_remove) | tags_to_add)
                 try:
@@ -129,12 +155,16 @@ class ThreadLogic:
                         priority=2,
                     )
                     return True
-                except Exception as e:
-                    logger.error(f"自动修改帖子 {thread.id} 的标签时失败", exc_info=True)
+                except Exception:
+                    logger.error(
+                        f"自动修改帖子 {thread.id} 的标签时失败", exc_info=True
+                    )
                     return False
         return False
 
-    async def _notify_user_of_mutex_removal(self, thread: discord.Thread, conflicts: List[Dict[str, Any]]) -> bool:
+    async def _notify_user_of_mutex_removal(
+        self, thread: discord.Thread, conflicts: List[Dict[str, Any]]
+    ) -> bool:
         """通知用户他们的帖子因为互斥规则被修改了。如果发送了公开通知，则返回 True。"""
         if not thread.owner:
             logger.warning(f"无法获取帖子 {thread.id} 的作者，无法发送通知。")
@@ -217,7 +247,12 @@ class ThreadLogic:
             logger.error(f"向用户 {author.id} 发送私信时发生未知错误。", exc_info=e)
             return False
 
-    async def _notify_management_of_mutex_conflict(self, thread: discord.Thread, conflicts: List[Dict[str, Any]], user_notified_publicly: bool):
+    async def _notify_management_of_mutex_conflict(
+        self,
+        thread: discord.Thread,
+        conflicts: List[Dict[str, Any]],
+        user_notified_publicly: bool,
+    ):
         """在帖子中通知管理组发生了互斥标签冲突。"""
         management_role_id = self.bot.config.get("management_role_id")
         if not management_role_id:
@@ -289,7 +324,8 @@ class ThreadLogic:
     # ---------------------------------------------------------
     async def pre_sync_forum_tags(self, channel: discord.ForumChannel):
         """预同步一个论坛频道的所有可用标签"""
-        if not channel.available_tags: return
+        if not channel.available_tags:
+            return
         tags_data = {tag.id: tag.name for tag in channel.available_tags}
         async with self.session_factory() as session:
             tag_service = TagRepository(session)
@@ -299,20 +335,33 @@ class ThreadLogic:
         """(协程) 更新帖子的反应数。如果记录不存在，则触发一次完整的同步进行补录。"""
         try:
             first_msg = await thread.get_partial_message(thread.id).fetch()
-            reaction_count = max([r.count for r in first_msg.reactions]) if first_msg.reactions else 0
+            reaction_count = (
+                max([r.count for r in first_msg.reactions])
+                if first_msg.reactions
+                else 0
+            )
             async with self.session_factory() as session:
                 repo = ThreadRepository(session)
-                update_succeeded = await repo.update_thread_reaction_count(thread.id, reaction_count)
-                
+                update_succeeded = await repo.update_thread_reaction_count(
+                    thread.id, reaction_count
+                )
+
                 if not update_succeeded:
                     logger.warning(f"帖子 {thread.id} 反应数更新失败，触发同步补录。")
                     await self.sync_service.sync_thread(thread=thread)
         except discord.NotFound:
             pass
         except Exception:
-            logger.warning(f"更新或补录反应数时失败 (帖子ID: {thread.id})", exc_info=True)
+            logger.warning(
+                f"更新或补录反应数时失败 (帖子ID: {thread.id})", exc_info=True
+            )
 
-    async def process_publish_update(self, interaction: discord.Interaction, thread: discord.Thread, message_link: str):
+    async def process_publish_update(
+        self,
+        interaction: discord.Interaction,
+        thread: discord.Thread,
+        message_link: str,
+    ):
         """处理发布更新的指令逻辑"""
         link_pattern = r"https://discord\.com/channels/(\d+)/(\d+)/(\d+)"
         if not re.match(link_pattern, message_link):
@@ -324,9 +373,17 @@ class ThreadLogic:
             success = await repo.update_thread_update_info(thread.id, message_link)
 
             if success:
-                embed = discord.Embed(title="📢 帖子有新更新！", description=f"作者发布了新内容：\n{message_link}", color=discord.Color.green())
-                if isinstance(interaction.channel, (discord.TextChannel, discord.Thread)):
+                embed = discord.Embed(
+                    title="📢 帖子有新更新！",
+                    description=f"作者发布了新内容：\n{message_link}",
+                    color=discord.Color.green(),
+                )
+                if isinstance(
+                    interaction.channel, (discord.TextChannel, discord.Thread)
+                ):
                     await interaction.channel.send(embed=embed)
                 await interaction.followup.send("✅ 更新发布成功！", ephemeral=True)
             else:
-                await interaction.followup.send("❌ 发布失败，可能是帖子尚未被系统索引", ephemeral=True)
+                await interaction.followup.send(
+                    "❌ 发布失败，可能是帖子尚未被系统索引", ephemeral=True
+                )

@@ -103,7 +103,8 @@ class CollectionCog(commands.Cog, name="CollectionCog"):
 
         if success:
             await interaction.followup.send(
-                f"✅ 「 **{message.channel.name}** 」已成功添加至您的收藏！", ephemeral=True
+                f"✅ 「 **{message.channel.name}** 」已成功添加至您的收藏！",
+                ephemeral=True,
             )
         else:
             await interaction.followup.send(

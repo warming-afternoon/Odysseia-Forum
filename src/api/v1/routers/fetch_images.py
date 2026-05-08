@@ -30,9 +30,12 @@ _guild_id: Optional[str] = None
 
 
 class FetchImageItem(BaseModel):
-    thread_id: Union[int, str] = Field(..., description="Discord Thread ID (也是首楼消息ID)")
+    thread_id: Union[int, str] = Field(
+        ..., description="Discord Thread ID (也是首楼消息ID)"
+    )
     channel_id: Optional[Union[int, str]] = Field(
-        default=None, description="帖子所属频道ID，可选，仅用于调试记录，支持数字或字符串"
+        default=None,
+        description="帖子所属频道ID，可选，仅用于调试记录，支持数字或字符串",
     )
 
     @field_validator("thread_id", "channel_id", mode="before")
@@ -43,10 +46,10 @@ class FetchImageItem(BaseModel):
         """
         if v is None:
             return v
-        
+
         if isinstance(v, str) and v.isdigit():
             return int(v)
-            
+
         return v
 
 

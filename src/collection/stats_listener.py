@@ -33,6 +33,8 @@ class StatsListenerCog(commands.Cog):
                 thread_repo = ThreadRepository(session)
                 await thread_repo.update_collection_counts(thread_ids, delta)
 
-            logger.debug(f"已异步更新 {len(thread_ids)} 个帖子的收藏数，变化量: {delta}")
+            logger.debug(
+                f"已异步更新 {len(thread_ids)} 个帖子的收藏数，变化量: {delta}"
+            )
         except Exception as e:
             logger.error(f"异步更新帖子收藏数失败: {e}", exc_info=True)

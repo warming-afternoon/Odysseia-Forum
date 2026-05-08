@@ -54,9 +54,7 @@ class UpdateDetector(commands.Cog):
                 base_url=gemini_base_url,
             )
 
-        logger.info(
-            f"UpdateDetector 已加载 (enabled={self.enabled})"
-        )
+        logger.info(f"UpdateDetector 已加载 (enabled={self.enabled})")
 
     async def cog_unload(self):
         if self.gemini_service:
@@ -143,9 +141,7 @@ class UpdateDetector(commands.Cog):
         if pref and pref.auto_sync:
             success = await self.do_sync_update(thread.id, message_link)
             if success:
-                logger.info(
-                    f"帖子 {thread.id} 自动同步更新: {message_link}"
-                )
+                logger.info(f"帖子 {thread.id} 自动同步更新: {message_link}")
             return
 
         # 发送提醒 embed
@@ -167,9 +163,7 @@ class UpdateDetector(commands.Cog):
             )
             view.set_message(sent_message)
         except Exception:
-            logger.error(
-                f"发送更新检测提醒失败 (帖子 {thread.id})", exc_info=True
-            )
+            logger.error(f"发送更新检测提醒失败 (帖子 {thread.id})", exc_info=True)
 
     async def do_sync_update(self, thread_id: int, message_link: str) -> bool:
         """执行同步更新操作"""
@@ -215,9 +209,7 @@ class UpdateDetector(commands.Cog):
         thread = interaction.channel
         async with self.session_factory() as session:
             pref_service = UpdatePreferenceService(session)
-            pref = await pref_service.get_preference(
-                interaction.user.id, thread.id
-            )
+            pref = await pref_service.get_preference(interaction.user.id, thread.id)
 
         auto_sync = pref.auto_sync if pref else False
         no_remind = pref.no_remind if pref else False
@@ -237,14 +229,10 @@ class UpdateDetector(commands.Cog):
             value="🔕 已关闭" if no_remind else "🔔 已开启",
             inline=True,
         )
-        embed.set_footer(
-            text="使用 /更新提醒设置 修改 来更改这些设置"
-        )
+        embed.set_footer(text="使用 /更新提醒设置 修改 来更改这些设置")
 
         await self.bot.api_scheduler.submit(
-            coro_factory=lambda: interaction.followup.send(
-                embed=embed, ephemeral=True
-            ),
+            coro_factory=lambda: interaction.followup.send(embed=embed, ephemeral=True),
             priority=1,
         )
 
@@ -302,18 +290,14 @@ class UpdateDetector(commands.Cog):
                 await pref_service.set_auto_sync(
                     interaction.user.id, thread.id, enabled
                 )
-                changes.append(
-                    f"自动同步: {'✅ 已开启' if enabled else '❌ 已关闭'}"
-                )
+                changes.append(f"自动同步: {'✅ 已开启' if enabled else '❌ 已关闭'}")
 
             if 不再提醒 is not None:
                 enabled = 不再提醒.value == 1
                 await pref_service.set_no_remind(
                     interaction.user.id, thread.id, enabled
                 )
-                changes.append(
-                    f"更新提醒: {'🔕 已关闭' if enabled else '🔔 已恢复'}"
-                )
+                changes.append(f"更新提醒: {'🔕 已关闭' if enabled else '🔔 已恢复'}")
 
         result_text = "\n".join(changes)
         await self.bot.api_scheduler.submit(

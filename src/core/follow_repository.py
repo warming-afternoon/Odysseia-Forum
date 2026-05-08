@@ -35,8 +35,8 @@ class ThreadFollowRepository:
             # 检查是否已关注
             statement = select(ThreadFollow).where(
                 and_(
-                    ThreadFollow.user_id == user_id, # type: ignore
-                    ThreadFollow.thread_id == thread_id # type: ignore
+                    ThreadFollow.user_id == user_id,  # type: ignore
+                    ThreadFollow.thread_id == thread_id,  # type: ignore
                 )
             )
             result = await self.session.execute(statement)
@@ -135,8 +135,8 @@ class ThreadFollowRepository:
         try:
             statement = delete(ThreadFollow).where(
                 and_(
-                    ThreadFollow.user_id == user_id, # type: ignore
-                    ThreadFollow.thread_id == thread_id # type: ignore
+                    ThreadFollow.user_id == user_id,  # type: ignore
+                    ThreadFollow.thread_id == thread_id,  # type: ignore
                 )
             )
             result = await self.session.execute(statement)
@@ -174,8 +174,8 @@ class ThreadFollowRepository:
                 # 更新单个帖子
                 statement = select(ThreadFollow).where(
                     and_(
-                        ThreadFollow.user_id == user_id, # type: ignore
-                        ThreadFollow.thread_id == thread_id, # type: ignore
+                        ThreadFollow.user_id == user_id,  # type: ignore
+                        ThreadFollow.thread_id == thread_id,  # type: ignore
                     )
                 )
                 result = await self.session.execute(statement)
@@ -192,7 +192,7 @@ class ThreadFollowRepository:
                     return False
             else:
                 # 更新所有关注
-                statement = select(ThreadFollow).where(ThreadFollow.user_id == user_id) # type: ignore
+                statement = select(ThreadFollow).where(ThreadFollow.user_id == user_id)  # type: ignore
                 result = await self.session.execute(statement)
                 follows = result.scalars().all()
 

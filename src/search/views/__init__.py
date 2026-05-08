@@ -22,6 +22,7 @@ from search.views.results_view import (
 from search.views.thread_embed_builder import (
     ThreadEmbedBuilder,
 )
+
 __all__ = [
     "ChannelSelectionView",
     "CombinedSearchView",

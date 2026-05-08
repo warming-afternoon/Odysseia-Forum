@@ -52,7 +52,9 @@ class CacheService:
             self.indexed_channel_ids = set(indexed_channel_ids)
 
         new_channel_cache: dict[int, discord.ForumChannel] = {}
-        new_guild_channels: dict[int, dict[int, discord.ForumChannel]] = defaultdict(dict)
+        new_guild_channels: dict[int, dict[int, discord.ForumChannel]] = defaultdict(
+            dict
+        )
 
         for channel_id in self.indexed_channel_ids:
             # 优先从缓存获取频道，失败则从 API 获取
@@ -84,7 +86,9 @@ class CacheService:
         if config is not None:
             return config
 
-        logger.info(f"配置缓存未命中: {config_type.name}. 正在尝试刷新 CacheService 配置缓存...")
+        logger.info(
+            f"配置缓存未命中: {config_type.name}. 正在尝试刷新 CacheService 配置缓存..."
+        )
         await self.refresh_bot_config_cache()
         config = self.bot_configs.get(config_type)
         if config is None:
@@ -106,9 +110,7 @@ class CacheService:
         ucb_factor_conf = await self.get_bot_config(
             SearchConfigType.UCB1_EXPLORATION_FACTOR
         )
-        strength_conf = await self.get_bot_config(
-            SearchConfigType.STRENGTH_WEIGHT
-        )
+        strength_conf = await self.get_bot_config(SearchConfigType.STRENGTH_WEIGHT)
 
         total_display_count = (
             total_disp_conf.value_int
@@ -136,7 +138,9 @@ class CacheService:
         """检查频道ID是否已索引。"""
         return channel_id in self.indexed_channel_ids
 
-    def get_indexed_channels(self, guild_id: int | None = None) -> list[discord.ForumChannel]:
+    def get_indexed_channels(
+        self, guild_id: int | None = None
+    ) -> list[discord.ForumChannel]:
         """获取已索引的频道对象列表。可选按 guild_id 过滤。"""
         if guild_id is not None:
             guild_data = self.guild_channels.get(guild_id, {})

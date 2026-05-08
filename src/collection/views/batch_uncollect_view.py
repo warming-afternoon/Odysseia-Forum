@@ -51,7 +51,9 @@ class BatchUncollectView(BaseManagementView):
 
             # 事件派发：此处的 removed_ids 净减量
             if result.removed_count > 0:
-                self.cog.bot.dispatch("thread_collection_updated", result.removed_ids, -1)
+                self.cog.bot.dispatch(
+                    "thread_collection_updated", result.removed_ids, -1
+                )
 
         await interaction.response.edit_message(
             content=f"操作完成！成功取消收藏 {result.removed_count} 个帖子。",
@@ -105,7 +107,9 @@ class BatchUncollectView(BaseManagementView):
 
             # 事件派发
             if result.removed_count > 0:
-                self.cog.bot.dispatch("thread_collection_updated", result.removed_ids, -1)
+                self.cog.bot.dispatch(
+                    "thread_collection_updated", result.removed_ids, -1
+                )
 
         await interaction.response.send_message(
             f"操作完成！成功取消收藏 {result.removed_count} 个帖子。",

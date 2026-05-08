@@ -15,7 +15,7 @@ from preferences.views.tag_preferences_view import TagPreferencesView
 from dto.preferences import UserSearchPreferencesDTO
 from shared.safe_defer import safe_defer
 from shared.utils import process_string_to_set
-from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigDefaultsInt
+from shared.enum.search_config_type import SearchConfigDefaultsInt
 
 if TYPE_CHECKING:
     from preferences.views.preferences_view import PreferencesView
@@ -45,7 +45,9 @@ class PreferencesLogic:
         self.config = config
         # 从配置获取主服务器 ID，用于偏好设置
         raw_id = config.get("main_guild_id")
-        self.main_guild_id = int(raw_id) if raw_id else int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
+        self.main_guild_id = (
+            int(raw_id) if raw_id else int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
+        )
 
     def _resolve_guild_id(self, guild_id: int = 0) -> int:
         """辅助方法：如果 guild_id 为 0 或 None，则回退到配置的主服务器 ID"""
@@ -57,7 +59,9 @@ class PreferencesLogic:
         """获取并返回用户在指定服务器的搜索偏好 DTO"""
         async with self.session_factory() as session:
             repo = PreferencesRepository(session)
-            return await repo.get_user_preferences(user_id, self._resolve_guild_id(guild_id))
+            return await repo.get_user_preferences(
+                user_id, self._resolve_guild_id(guild_id)
+            )
 
     async def save_user_preferences(
         self, user_id: int, prefs_data: dict, guild_id: int = 0
@@ -65,7 +69,9 @@ class PreferencesLogic:
         """创建或更新用户在指定服务器的搜索偏好设置"""
         async with self.session_factory() as session:
             repo = PreferencesRepository(session)
-            return await repo.save_user_preferences(user_id, prefs_data, self._resolve_guild_id(guild_id))
+            return await repo.save_user_preferences(
+                user_id, prefs_data, self._resolve_guild_id(guild_id)
+            )
 
     async def save_user_keywords(
         self,
@@ -183,11 +189,15 @@ class PreferencesLogic:
             resolved_guild_id = self._resolve_guild_id()
             async with self.session_factory() as session:
                 repo = PreferencesRepository(session)
-                prefs_dto = await repo.get_user_preferences(interaction.user.id, resolved_guild_id)
+                prefs_dto = await repo.get_user_preferences(
+                    interaction.user.id, resolved_guild_id
+                )
                 if not prefs_dto:
                     prefs_dto = UserSearchPreferencesDTO(user_id=interaction.user.id)
 
-            indexed_channels = self.cache_service.get_indexed_channels(resolved_guild_id)
+            indexed_channels = self.cache_service.get_indexed_channels(
+                resolved_guild_id
+            )
 
             view = ChannelPreferencesView(
                 self, interaction, parent_view, prefs_dto, indexed_channels
@@ -243,7 +253,9 @@ class PreferencesLogic:
                 all_tags = self.tag_service.get_unique_tag_names()
 
                 # 获取用户当前偏好
-                prefs_dto = await repo.get_user_preferences(interaction.user.id, resolved_guild_id)
+                prefs_dto = await repo.get_user_preferences(
+                    interaction.user.id, resolved_guild_id
+                )
                 if not prefs_dto:
                     # 创建一个新的DTO，但暂时不保存到数据库
                     # 直到用户点击保存时，才会通过 save_tag_preferences 创建记录

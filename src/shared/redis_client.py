@@ -4,9 +4,10 @@ from redis.asyncio import Redis, from_url
 
 logger = logging.getLogger(__name__)
 
+
 class RedisManager:
     """管理全局Redis连接池"""
-    
+
     _client: Optional[Redis] = None
 
     @classmethod

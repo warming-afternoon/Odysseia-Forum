@@ -52,9 +52,7 @@ class Search(commands.Cog):
 
         # 初始化频道映射工具
         self.channel_mappings_config = self._build_channel_mappings_config()
-        self.channel_mappings_utils = ChannelMappingUtils(
-            self.channel_mappings_config
-        )
+        self.channel_mappings_utils = ChannelMappingUtils(self.channel_mappings_config)
 
         logger.info("Search 模块已加载")
 
@@ -107,9 +105,7 @@ class Search(commands.Cog):
             )
             return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
-    def get_merged_tags_separated(
-        self, channel_ids: list[int]
-    ) -> SeparatedTagsDTO:
+    def get_merged_tags_separated(self, channel_ids: list[int]) -> SeparatedTagsDTO:
         """获取分离的虚拟标签和所有可用标签，确保虚拟标签排在最前"""
         real_tags_set = set()
         virtual_tags_set = set()
@@ -127,7 +123,9 @@ class Search(commands.Cog):
                 if channel:
                     real_tags_set.update(tag.name for tag in channel.available_tags)
 
-                mappings = self.channel_mappings_utils.channel_mappings.get(channel_id, [])
+                mappings = self.channel_mappings_utils.channel_mappings.get(
+                    channel_id, []
+                )
                 for mapping in mappings:
                     virtual_tags_set.add(mapping["tag_name"])
 
@@ -506,7 +504,7 @@ class Search(commands.Cog):
                 include_tags=search_qo.include_tags,
                 exclude_tags=search_qo.exclude_tags,
                 tag_logic=search_qo.tag_logic,
-                all_indexed_channels=all_indexed_channels
+                all_indexed_channels=all_indexed_channels,
             )
             original_channel_ids = search_qo.channel_ids
 

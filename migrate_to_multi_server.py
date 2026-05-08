@@ -103,7 +103,9 @@ def main():
     print_info(f"正在备份数据库 '{DB_PATH.name}'...")
     try:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"{DB_PATH.stem}.multi_server_backup_{timestamp}{DB_PATH.suffix}"
+        backup_filename = (
+            f"{DB_PATH.stem}.multi_server_backup_{timestamp}{DB_PATH.suffix}"
+        )
         backup_path = DATA_DIR / backup_filename
         shutil.copy2(DB_PATH, backup_path)
         print_success(f"数据库已备份到: {backup_path}")

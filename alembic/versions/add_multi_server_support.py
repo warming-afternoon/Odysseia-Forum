@@ -35,7 +35,8 @@ def upgrade() -> None:
     # 2. 重建 usersearchpreferences 表：用原始 SQL 手动处理
     #    SQLite 不支持 ALTER 主键，且 Alembic batch 模式在新增 NOT NULL 自增列时
     #    无法自动填充已有行，所以直接用 SQL 重建。
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         CREATE TABLE _new_usersearchpreferences (
             id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
             user_id BIGINT NOT NULL,
@@ -57,9 +58,11 @@ def upgrade() -> None:
             sort_method VARCHAR NOT NULL DEFAULT 'comprehensive',
             custom_base_sort VARCHAR NOT NULL DEFAULT 'comprehensive'
         )
-    """))
+    """)
+    )
 
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         INSERT INTO _new_usersearchpreferences (
             user_id, guild_id, preferred_channels,
             include_authors, exclude_authors,
@@ -79,12 +82,15 @@ def upgrade() -> None:
             COALESCE(preview_image_mode, 'thumbnail'), COALESCE(results_per_page, 5),
             COALESCE(sort_method, 'comprehensive'), COALESCE(custom_base_sort, 'comprehensive')
         FROM usersearchpreferences
-    """))
+    """)
+    )
 
     op.execute(sa.text("DROP TABLE usersearchpreferences"))
-    op.execute(sa.text(
-        "ALTER TABLE _new_usersearchpreferences RENAME TO usersearchpreferences"
-    ))
+    op.execute(
+        sa.text(
+            "ALTER TABLE _new_usersearchpreferences RENAME TO usersearchpreferences"
+        )
+    )
 
     # 创建索引和唯一约束
     op.create_index(
@@ -108,10 +114,15 @@ def upgrade() -> None:
 def downgrade() -> None:
     # 重建 usersearchpreferences 恢复旧结构（user_id 做主键）
     op.drop_index("uq_user_guild_preferences", table_name="usersearchpreferences")
-    op.drop_index("ix_usersearchpreferences_guild_id", table_name="usersearchpreferences")
-    op.drop_index("ix_usersearchpreferences_user_id", table_name="usersearchpreferences")
+    op.drop_index(
+        "ix_usersearchpreferences_guild_id", table_name="usersearchpreferences"
+    )
+    op.drop_index(
+        "ix_usersearchpreferences_user_id", table_name="usersearchpreferences"
+    )
 
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         CREATE TABLE _old_usersearchpreferences (
             user_id BIGINT NOT NULL PRIMARY KEY,
             preferred_channels JSON,
@@ -131,9 +142,11 @@ def downgrade() -> None:
             sort_method VARCHAR NOT NULL DEFAULT 'comprehensive',
             custom_base_sort VARCHAR NOT NULL DEFAULT 'comprehensive'
         )
-    """))
+    """)
+    )
 
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         INSERT OR IGNORE INTO _old_usersearchpreferences
         SELECT user_id, preferred_channels,
             include_authors, exclude_authors,
@@ -143,12 +156,15 @@ def downgrade() -> None:
             preview_image_mode, results_per_page,
             sort_method, custom_base_sort
         FROM usersearchpreferences
-    """))
+    """)
+    )
 
     op.execute(sa.text("DROP TABLE usersearchpreferences"))
-    op.execute(sa.text(
-        "ALTER TABLE _old_usersearchpreferences RENAME TO usersearchpreferences"
-    ))
+    op.execute(
+        sa.text(
+            "ALTER TABLE _old_usersearchpreferences RENAME TO usersearchpreferences"
+        )
+    )
 
     # 移除 thread 表的 guild_id 列
     with op.batch_alter_table("thread", schema=None) as batch_op:

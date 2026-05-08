@@ -14,7 +14,7 @@ class BooklistItemsDeleteRequest(BaseModel):
         """
         if v is None:
             return v
-        
+
         if isinstance(v, list):
             processed = []
             for item in v:
@@ -23,5 +23,5 @@ class BooklistItemsDeleteRequest(BaseModel):
                 else:
                     processed.append(item)
             return processed
-            
+
         return v

@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Set
 from dto.search import ChannelMappingResolutionDTO
 
+
 class ChannelMappingUtils:
     """处理频道与虚拟标签映射逻辑的工具类"""
 
@@ -63,7 +64,7 @@ class ChannelMappingUtils:
         if channel_ids:
             # --- 情况 A: 选择了具体频道 ---
             real_channels_set = set(channel_ids)
-            
+
             # 构建“选中频道对应的虚拟标签字典”
             selected_tag_to_channels: Dict[str, Set[int]] = {}
             all_sources_for_selected: Set[int] = set()
@@ -79,27 +80,35 @@ class ChannelMappingUtils:
                 # 仅在选中频道定义的范围内计算虚拟标签对应的频道
                 virtual_channels = set()
                 if tag_logic == "and":
-                    virtual_channels = set(selected_tag_to_channels.get(included_virtual_tags[0], []))
+                    virtual_channels = set(
+                        selected_tag_to_channels.get(included_virtual_tags[0], [])
+                    )
                     for tag in included_virtual_tags[1:]:
                         virtual_channels &= selected_tag_to_channels.get(tag, set())
                 else:
                     for tag in included_virtual_tags:
-                        virtual_channels.update(selected_tag_to_channels.get(tag, set()))
-                
+                        virtual_channels.update(
+                            selected_tag_to_channels.get(tag, set())
+                        )
+
                 # 搜索频道 = 虚拟标签对应频道 - 反选频道 (此时不再包含 real_channels)
                 final_channels = virtual_channels - excluded_channels
             else:
                 # --- 分支: 选择了频道，但没有正选虚拟标签 ---
                 # 搜索频道 = 选中的真实频道 + 选中频道下所有可能的虚拟源频道 - 反选频道
-                final_channels = (real_channels_set | all_sources_for_selected) - excluded_channels
-        
+                final_channels = (
+                    real_channels_set | all_sources_for_selected
+                ) - excluded_channels
+
         else:
             # --- 情况 B: 未选择频道（全局搜索） ---
             if included_virtual_tags:
                 # 选择了虚拟标签
                 virtual_channels = set()
                 if tag_logic == "and":
-                    virtual_channels = set(global_virtual_tag_to_channels[included_virtual_tags[0]])
+                    virtual_channels = set(
+                        global_virtual_tag_to_channels[included_virtual_tags[0]]
+                    )
                     for tag in included_virtual_tags[1:]:
                         virtual_channels &= global_virtual_tag_to_channels[tag]
                 else:

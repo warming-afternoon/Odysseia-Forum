@@ -42,9 +42,7 @@ class UpdateDetectorView(discord.ui.View):
                 pass
             self._message = None
 
-    async def _handle_interaction_check(
-        self, interaction: discord.Interaction
-    ) -> bool:
+    async def _handle_interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.author_id:
             await interaction.response.send_message(
                 "此操作仅帖子作者可用。", ephemeral=True

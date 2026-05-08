@@ -37,7 +37,8 @@ class AuthorRepository:
             await self.session.commit()
         except Exception as e:
             logger.error(
-                f"更新作者 {author_data.get('id')} 信息到数据库时失败: {e}", exc_info=True
+                f"更新作者 {author_data.get('id')} 信息到数据库时失败: {e}",
+                exc_info=True,
             )
             raise  # 重新抛出异常
 

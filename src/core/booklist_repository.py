@@ -21,7 +21,7 @@ class BooklistRepository:
     async def get_or_create_default_booklist(self, owner_id: int) -> Booklist:
         """获取用户的默认书单，如果不存在则自动创建"""
         statement = select(Booklist).where(
-            and_(Booklist.owner_id == owner_id, Booklist.is_default == True)
+            and_(Booklist.owner_id == owner_id, Booklist.is_default)
         )
         result = await self.session.execute(statement)
         booklist = result.scalar_one_or_none()
@@ -31,7 +31,7 @@ class BooklistRepository:
                 owner_id=owner_id,
                 title="默认收藏",
                 description="默认收藏夹",
-                is_public=False, # 默认书单设定为私有
+                is_public=False,  # 默认书单设定为私有
                 is_default=True,
                 display_type=1,
                 item_count=0,
@@ -42,7 +42,7 @@ class BooklistRepository:
             await self.session.commit()
             await self.session.refresh(booklist)
             logger.debug(f"为用户 {owner_id} 创建了默认书单 {booklist.id}")
-            
+
         return booklist
 
     async def create_booklist(
@@ -339,7 +339,9 @@ class BooklistRepository:
 
         return deleted_count
 
-    async def get_threads_in_users_booklists(self, owner_id: int, thread_ids: List[int]) -> Set[int]:
+    async def get_threads_in_users_booklists(
+        self, owner_id: int, thread_ids: List[int]
+    ) -> Set[int]:
         """
         查询指定的一批帖子中，有哪些已经被该用户加入过任何书单。
         """

@@ -69,11 +69,7 @@ async def execute_search(
             detail="Search 服务尚未初始化",
         )
 
-    user_id = (
-        int(current_user["id"])
-        if current_user and "id" in current_user
-        else None
-    )
+    user_id = int(current_user["id"]) if current_user and "id" in current_user else None
 
     # [深渊区权限判断] 读取用户身份组，判断是否需要屏蔽深渊区频道
     user_roles = current_user.get("roles", []) if current_user else []
@@ -160,12 +156,18 @@ async def execute_search(
         async with async_session_factory() as session:
             # 执行搜索查询并更新展示计数
             threads, total_threads = await _perform_search_and_update_counts(
-                session, query_object, ucb1_config, request.limit, exclude_thread_ids  # type: ignore
+                session,
+                query_object,
+                ucb1_config,
+                request.limit,
+                exclude_thread_ids,  # type: ignore
             )
 
             # 获取当前用户ID用于后续收藏状态和未读数查询
             user_id = (
-                int(current_user["id"]) if current_user and "id" in current_user else None
+                int(current_user["id"])
+                if current_user and "id" in current_user
+                else None
             )
 
             # 检查用户的收藏状态
@@ -173,8 +175,10 @@ async def execute_search(
             if user_id and threads:
                 thread_ids = [t.thread_id for t in threads]
                 collection_service = CollectionRepository(session)
-                collected_thread_ids = await collection_service.get_collected_target_ids(
-                    user_id, CollectionType.THREAD, thread_ids
+                collected_thread_ids = (
+                    await collection_service.get_collected_target_ids(
+                        user_id, CollectionType.THREAD, thread_ids
+                    )
                 )
 
             # 使用 ThreadDetailBuilder 转换搜索结果为响应格式
@@ -188,19 +192,27 @@ async def execute_search(
                     channel_to_virtual = {}
                     for m in channel_mappings_config.get(origin_ch, []):
                         for src_id in m.get("source_channel_ids", []):
-                            channel_to_virtual.setdefault(src_id, []).append(m["tag_name"])
+                            channel_to_virtual.setdefault(src_id, []).append(
+                                m["tag_name"]
+                            )
 
             # 全站搜索时 channel_to_virtual 为 None，Builder 自动使用全局虚拟标签映射
-            results = builder.build_list(threads, collected_thread_ids, channel_to_virtual=channel_to_virtual)
+            results = builder.build_list(
+                threads, collected_thread_ids, channel_to_virtual=channel_to_virtual
+            )
 
             # 构建可用的标签列表：虚拟标签置顶 + 实际被搜索频道的真实标签
             available_tags, virtual_tags = _build_available_tags(
-                request.channel_ids, searched_channel_ids, has_mapping  # type: ignore
+                request.channel_ids,
+                searched_channel_ids,
+                has_mapping,  # type: ignore
             )
 
             # 获取Banner轮播列表和未读更新数量
             banner_carousel, unread_count = await _get_banner_and_unread(
-                session, request.channel_ids, user_id  # type: ignore
+                session,
+                request.channel_ids,
+                user_id,  # type: ignore
             )
 
         return SearchResponse(
@@ -219,6 +231,7 @@ async def execute_search(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="执行搜索时发生内部错误",
         )
+
 
 @router.get(
     "/thread/{thread_id}",
@@ -255,14 +268,13 @@ async def get_thread_detail(
         builder = ThreadDetailBuilder(channel_mappings_config)
         return builder.build(thread, collected_thread_ids)
 
+
 # -------------------------
 # 辅助方法
 # -------------------------
 
 
-def _merge_user_preferences(
-    request: SearchRequest, prefs: UserSearchPreferencesDTO
-):
+def _merge_user_preferences(request: SearchRequest, prefs: UserSearchPreferencesDTO):
     """
     将用户偏好合并到搜索请求中。
     原则：仅当前端未显示传递（未出现在 unset 列表中）
@@ -280,9 +292,7 @@ def _merge_user_preferences(
         "exclude_tags": "exclude_tags",
         "include_keywords": "keywords",
         "exclude_keywords": "exclude_keywords",
-        "exclude_keyword_exemption_markers": (
-            "exclude_keyword_exemption_markers"
-        ),
+        "exclude_keyword_exemption_markers": ("exclude_keyword_exemption_markers"),
         "sort_method": "sort_method",
         "custom_base_sort": "custom_base_sort",
         "created_after": "created_after",
@@ -420,7 +430,9 @@ def _build_available_tags(
     # 从实际搜索的频道集合聚合真实标签（去重处理）
     real_tag_names: list[str] = []
     seen_tag_names: set[str] = set()
-    channels_to_scan = searched_channel_ids if searched_channel_ids else {target_channel_id}
+    channels_to_scan = (
+        searched_channel_ids if searched_channel_ids else {target_channel_id}
+    )
 
     all_channels_cache = cache_service_instance.get_indexed_channels()
     for ch in all_channels_cache:
@@ -464,7 +476,7 @@ async def _get_banner_and_unread(
             )
         )
         guild_by_thread = {tid: gid for tid, gid in guild_rows.all()}
-    
+
     banner_carousel = [
         BannerItem(
             thread_id=banner.thread_id,

@@ -24,27 +24,27 @@ from api.v1.routers import (
 try:
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
-    
+
     api_config = config.get("api", {})
     auth_config = config.get("auth", {})
-    
+
     enable_docs = api_config.get("enable_docs", True)
-    
+
     # 优先读取 api.cors_origins
     cors_origins = api_config.get("cors_origins", [])
-    if isinstance(cors_origins, str): # 防止有人填错成字符串
+    if isinstance(cors_origins, str):  # 防止有人填错成字符串
         cors_origins = [cors_origins]
-        
+
     # 如果没配 cors_origins，尝试读取 auth.frontend_url
     frontend_url = auth_config.get("frontend_url")
-    
+
     # 汇总允许的源
     allowed_origins = []
     if cors_origins:
         allowed_origins.extend(cors_origins)
     if frontend_url and frontend_url not in allowed_origins:
         allowed_origins.append(frontend_url)
-        
+
     # 如果汇总后依然为空，则允许所有源
     if not allowed_origins:
         allowed_origins = ["*"]

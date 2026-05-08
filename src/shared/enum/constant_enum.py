@@ -1,5 +1,6 @@
 from enum import IntEnum
 
+
 class ConstantEnum(IntEnum):
     """趋势统计相关常量"""
 

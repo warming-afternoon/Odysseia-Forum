@@ -112,18 +112,20 @@ class UserPreferencesResponse(BaseModel):
     )
     """活跃时间早于"""
 
-    @field_serializer("user_id", "preferred_channels", "include_authors", "exclude_authors")
+    @field_serializer(
+        "user_id", "preferred_channels", "include_authors", "exclude_authors"
+    )
     def serialize_snowflake_ids(self, value, _info):
         """
         序列化 Discord 雪花 ID 为字符串，防止前端 JavaScript 精度丢失
         """
         if value is None:
             return None
-        
+
         # 处理列表类型的字段
         if isinstance(value, list):
             return [str(item) if item is not None else None for item in value]
-        
+
         # 处理单个值
         return str(value)
 

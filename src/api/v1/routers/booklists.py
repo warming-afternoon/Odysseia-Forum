@@ -570,8 +570,10 @@ async def get_booklist_items(
             if user_id and items:
                 thread_ids = [item.thread_id for item in items]
                 collection_service = CollectionRepository(session)
-                collected_thread_ids = await collection_service.get_collected_target_ids(
-                    user_id, CollectionType.THREAD, thread_ids
+                collected_thread_ids = (
+                    await collection_service.get_collected_target_ids(
+                        user_id, CollectionType.THREAD, thread_ids
+                    )
                 )
 
             # 预计算全量反向映射 channel_id -> virtual_tags
@@ -662,10 +664,12 @@ async def update_booklist_item(
             if channel_mappings_config:
                 mapping_utils = ChannelMappingUtils(channel_mappings_config)
                 channel_to_virtual = mapping_utils.get_all_channel_virtual_tags_map()
-            
+
             if item_detail.channel_id in channel_to_virtual:
-                item_detail.virtual_tags = list(set(channel_to_virtual[item_detail.channel_id]))
-                
+                item_detail.virtual_tags = list(
+                    set(channel_to_virtual[item_detail.channel_id])
+                )
+
             return item_detail
 
     except HTTPException:

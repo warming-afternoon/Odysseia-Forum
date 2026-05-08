@@ -30,7 +30,9 @@ class BooklistItemDetail(BaseModel):
     created_at: datetime = Field(description="帖子创建时间")
     """帖子创建时间"""
 
-    last_active_at: Optional[datetime] = Field(default=None, description="帖子最后活跃时间")
+    last_active_at: Optional[datetime] = Field(
+        default=None, description="帖子最后活跃时间"
+    )
     """帖子最后活跃时间"""
 
     reaction_count: int = Field(description="帖子点赞数")
@@ -42,13 +44,19 @@ class BooklistItemDetail(BaseModel):
     display_count: int = Field(default=0, description="在搜索结果中的展示次数")
     """在搜索结果中的展示次数"""
 
-    first_message_excerpt: Optional[str] = Field(default=None, description="帖子首条消息摘要")
+    first_message_excerpt: Optional[str] = Field(
+        default=None, description="帖子首条消息摘要"
+    )
     """帖子首条消息摘要"""
 
-    latest_update_at: Optional[datetime] = Field(default=None, description="最新更新时间")
+    latest_update_at: Optional[datetime] = Field(
+        default=None, description="最新更新时间"
+    )
     """最新更新时间"""
 
-    latest_update_link: Optional[str] = Field(default=None, description="最新版消息链接")
+    latest_update_link: Optional[str] = Field(
+        default=None, description="最新版消息链接"
+    )
     """最新版消息链接"""
 
     collection_count: int = Field(default=0, description="帖子被收藏的总次数")
@@ -60,7 +68,9 @@ class BooklistItemDetail(BaseModel):
     tags: List[str] = Field(default_factory=list, description="帖子关联的标签列表")
     """帖子关联的标签列表"""
 
-    virtual_tags: List[str] = Field(default_factory=list, description="帖子匹配的虚拟映射标签名列表")
+    virtual_tags: List[str] = Field(
+        default_factory=list, description="帖子匹配的虚拟映射标签名列表"
+    )
     """帖子匹配的虚拟映射标签名列表"""
 
     comment: Optional[str] = Field(None, description="书单主对该帖子的推荐语")

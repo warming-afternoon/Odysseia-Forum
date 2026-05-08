@@ -94,10 +94,11 @@ class DiscordUtils:
         try:
             return await bot.fetch_channel(channel_id)  # type: ignore[return-value]
         except discord.NotFound:
-            logger.warning(f"无法找到频道 (ID: {channel_id})，机器人可能不在该服务器中。")
+            logger.warning(
+                f"无法找到频道 (ID: {channel_id})，机器人可能不在该服务器中。"
+            )
         except discord.Forbidden:
             logger.warning(f"没有权限访问频道 (ID: {channel_id})。")
         except Exception as e:
             logger.error(f"获取频道 (ID: {channel_id}) 时发生未知错误: {e}")
         return None
-

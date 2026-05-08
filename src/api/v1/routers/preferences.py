@@ -1,5 +1,3 @@
-from typing import Optional
-
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -36,7 +34,7 @@ async def get_user_preferences(user_id: int):
 
     async with async_session_factory() as session:
         repo = PreferencesRepository(session)
-        # 使用注入的 main_guild_id 
+        # 使用注入的 main_guild_id
         prefs_dto = await repo.get_user_preferences(user_id, main_guild_id)
         if not prefs_dto:
             raise HTTPException(
@@ -51,9 +49,7 @@ async def get_user_preferences(user_id: int):
     response_model=UserPreferencesResponse,
     summary="创建或更新用户搜索偏好",
 )
-async def update_user_preferences(
-    user_id: int, request: UserPreferencesUpdateRequest
-):
+async def update_user_preferences(user_id: int, request: UserPreferencesUpdateRequest):
     """
     创建或更新用户的搜索偏好设置。固定使用配置的主服务器 ID。
     """

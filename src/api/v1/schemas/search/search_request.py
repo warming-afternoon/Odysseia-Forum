@@ -52,9 +52,9 @@ class SearchRequest(BaseModel):
     )
 
     apply_preferences: bool = Field(
-        default=False, 
+        default=False,
         description="是否应用当前用户的搜索偏好。"
-        "若为True，前端未传的字段将使用用户偏好补全"
+        "若为True，前端未传的字段将使用用户偏好补全",
     )
 
     created_after: Optional[str] = Field(
@@ -123,7 +123,7 @@ class SearchRequest(BaseModel):
         "include_authors",
         "exclude_authors",
         "exclude_thread_ids",
-        mode="before"
+        mode="before",
     )
     @classmethod
     def convert_ids_to_int(cls, v: Any) -> Any:
@@ -132,11 +132,11 @@ class SearchRequest(BaseModel):
         """
         if v is None:
             return v
-        
+
         # 处理单值 (如 guild_id)
         if isinstance(v, str):
             return int(v) if v.isdigit() else v
-            
+
         # 处理列表 (如 channel_ids, exclude_thread_ids)
         if isinstance(v, list):
             processed = []
@@ -146,5 +146,5 @@ class SearchRequest(BaseModel):
                 else:
                     processed.append(item)
             return processed
-            
+
         return v
