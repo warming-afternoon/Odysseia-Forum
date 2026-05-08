@@ -9,7 +9,7 @@ from core.thread_repository import ThreadRepository
 from dto.search import UCB1ConfigDTO
 from models import BotConfig
 from shared.discord_utils import DiscordUtils
-from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigType
+from shared.enum import SearchConfigDefaults, SearchConfigType
 
 logger = logging.getLogger(__name__)
 

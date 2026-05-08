@@ -9,7 +9,7 @@ from meta.meta_service import MetaService
 from shared.database import AsyncSessionFactory
 
 # 导入配置类型枚举
-from shared.enum.search_config_type import SearchConfigType
+from shared.enum import SearchConfigType
 
 # 全局依赖，将在 bot_main.py 中被注入
 cache_service_instance: Optional[CacheService] = None

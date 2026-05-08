@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, cast
 import discord
 from discord.ui import Label
 
-from shared.enum.default_preferences import DefaultPreferences
+from shared.enum import DefaultPreferences
 from shared.range_parser import InvalidRangeFormat, parse_range_string
 from shared.safe_defer import safe_defer
 

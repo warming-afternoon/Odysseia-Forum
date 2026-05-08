@@ -11,7 +11,7 @@ from collection.listeners import CollectionListenerCog
 from collection.stats_listener import StatsListenerCog
 from core.collection_repository import CollectionRepository
 from core.thread_repository import ThreadRepository
-from shared.enum.collection_type import CollectionType
+from shared.enum import CollectionType
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:

@@ -11,7 +11,7 @@ from core.booklist_repository import BooklistRepository
 from core.redis_trend_service import RedisTrendService
 from core.thread_repository import ThreadRepository
 from models import BooklistItem, Thread
-from shared.enum.constant_enum import ConstantEnum
+from shared.enum import ConstantEnum
 
 logger = logging.getLogger(__name__)
 

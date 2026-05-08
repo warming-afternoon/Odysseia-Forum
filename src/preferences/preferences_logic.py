@@ -15,7 +15,7 @@ from preferences.views.tag_preferences_view import TagPreferencesView
 from dto.preferences import UserSearchPreferencesDTO
 from shared.safe_defer import safe_defer
 from shared.utils import process_string_to_set
-from shared.enum.search_config_type import SearchConfigDefaultsInt
+from shared.enum import SearchConfigDefaultsInt
 
 if TYPE_CHECKING:
     from preferences.views.preferences_view import PreferencesView

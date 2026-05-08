@@ -9,7 +9,7 @@ from sqlmodel import select
 from core.sync_service import SyncService
 from core.thread_repository import ThreadRepository
 from models import Thread
-from shared.enum.constant_enum import ConstantEnum
+from shared.enum import ConstantEnum
 from ThreadManager.update_data_dto import UpdateData
 from core.redis_trend_service import RedisTrendService
 

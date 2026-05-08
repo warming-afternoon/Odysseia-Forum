@@ -1,7 +1,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from shared.redis_client import RedisManager
-from shared.enum.constant_enum import ConstantEnum
+from shared.enum import ConstantEnum
 
 
 class RedisTrendService:

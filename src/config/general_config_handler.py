@@ -9,7 +9,7 @@ from config.embed_builder import ConfigEmbedBuilder
 from config.views.components.edit_config_modal import EditConfigModal
 from config.views.config_panel_view import ConfigPanelView
 from models import BotConfig
-from shared.enum.search_config_type import SearchConfigType
+from shared.enum import SearchConfigType
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:

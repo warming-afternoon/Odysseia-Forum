@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 from sqlmodel import select, update
 
 from models import BotConfig, MutexTagGroup, MutexTagRule
-from shared.enum.search_config_type import SearchConfigDefaults, SearchConfigType
+from shared.enum import SearchConfigDefaults, SearchConfigType
 
 logger = logging.getLogger(__name__)
 

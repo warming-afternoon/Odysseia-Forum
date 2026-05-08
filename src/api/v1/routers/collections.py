@@ -10,7 +10,7 @@ from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
 from core.thread_repository import ThreadRepository
 from shared.database import AsyncSessionFactory
-from shared.enum.collection_type import CollectionType
+from shared.enum import CollectionType
 
 logger = logging.getLogger(__name__)
 

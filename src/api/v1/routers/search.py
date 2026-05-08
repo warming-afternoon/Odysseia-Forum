@@ -20,8 +20,7 @@ from dto.search import UCB1ConfigDTO
 from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
-from shared.enum.abyss_defaults import AbyssDefaults
-from shared.enum.collection_type import CollectionType
+from shared.enum import AbyssDefaults, CollectionType
 from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.keyword_parser import KeywordParser
 

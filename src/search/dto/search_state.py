@@ -2,7 +2,7 @@ from typing import List, Optional, Set
 
 from pydantic import BaseModel
 
-from shared.enum.default_preferences import DefaultPreferences
+from shared.enum import DefaultPreferences
 
 
 class SearchStateDTO(BaseModel):

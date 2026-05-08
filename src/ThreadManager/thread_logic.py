@@ -6,7 +6,7 @@ import discord
 from core.config_repository import ConfigRepository
 from core.tag_repository import TagRepository
 from core.thread_repository import ThreadRepository
-from shared.enum.search_config_type import SearchConfigType
+from shared.enum import SearchConfigType
 
 if TYPE_CHECKING:
     from bot_main import MyBot

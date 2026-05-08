@@ -3,7 +3,7 @@ from typing import Optional
 
 from sqlmodel import BigInteger, Column, Field, SQLModel, UniqueConstraint
 
-from shared.enum.collection_type import CollectionType
+from shared.enum import CollectionType
 
 
 class UserCollection(SQLModel, table=True):

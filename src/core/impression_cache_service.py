@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import update
 
 from models import BotConfig, Thread
-from shared.enum.search_config_type import SearchConfigType
+from shared.enum import SearchConfigType
 
 if TYPE_CHECKING:
     from bot_main import MyBot

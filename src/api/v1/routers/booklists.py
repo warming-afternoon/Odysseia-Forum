@@ -24,7 +24,7 @@ from core.booklist_item_repository import BooklistItemRepository
 from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
 from shared.database import AsyncSessionFactory
-from shared.enum.collection_type import CollectionType
+from shared.enum import CollectionType
 
 # 频道映射配置
 channel_mappings_config: Dict[int, List[Dict]] = {}

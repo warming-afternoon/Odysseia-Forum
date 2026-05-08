@@ -34,8 +34,7 @@ from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
 from shared.api_scheduler import APIScheduler
-from shared.enum.search_config_type import SearchConfigDefaultsInt
-from shared.enum.abyss_defaults import AbyssDefaults
+from shared.enum import AbyssDefaults, SearchConfigDefaultsInt
 from api.v1.routers import (
     preferences as preferences_api,
     search as search_api,

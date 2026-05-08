@@ -10,7 +10,7 @@ from core.thread_repository import ThreadRepository
 from models import Author, Tag, Thread, ThreadTagLink, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
-from shared.enum.default_preferences import DefaultPreferences
+from shared.enum import DefaultPreferences
 from shared.range_parser import parse_range_string
 from shared.time_parser import parse_time_string
 

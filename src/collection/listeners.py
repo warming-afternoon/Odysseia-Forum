@@ -7,7 +7,7 @@ from discord.ext import commands
 from collection.views.batch_collect_view import BatchCollectView
 from collection.views.batch_uncollect_view import BatchUncollectView
 from models import Thread
-from shared.enum.collection_type import CollectionType
+from shared.enum import CollectionType
 
 if TYPE_CHECKING:
     from bot_main import MyBot

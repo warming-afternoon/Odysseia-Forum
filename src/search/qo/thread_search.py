@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from shared.enum.default_preferences import DefaultPreferences
+from shared.enum import DefaultPreferences
 
 
 @dataclass

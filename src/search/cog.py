@@ -22,7 +22,7 @@ from search.views import (
     PersistentChannelSearchView,
     ThreadEmbedBuilder,
 )
-from shared.enum.search_config_type import SearchConfigDefaultsInt, SearchConfigType
+from shared.enum import SearchConfigDefaultsInt, SearchConfigType
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:

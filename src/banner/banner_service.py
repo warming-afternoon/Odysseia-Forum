@@ -14,7 +14,7 @@ from models import (
     BannerWaitlist,
     Thread,
 )
-from shared.enum.application_status import ApplicationStatus
+from shared.enum import ApplicationStatus
 
 if TYPE_CHECKING:
     from bot_main import MyBot

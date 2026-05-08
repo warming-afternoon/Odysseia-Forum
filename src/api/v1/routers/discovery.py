@@ -14,8 +14,7 @@ from core.preferences_repository import PreferencesRepository
 from core.thread_repository import ThreadRepository
 from discovery.discovery_service import DiscoveryService
 from shared.channel_mapping_utils import ChannelMappingUtils
-from shared.enum.abyss_defaults import AbyssDefaults
-from shared.enum.collection_type import CollectionType
+from shared.enum import AbyssDefaults, CollectionType
 
 logger = logging.getLogger(__name__)
 

@@ -5,7 +5,7 @@ import discord
 from collection.views.base_management_view import BaseManagementView
 from collection.views.thread_select import ThreadSelect
 from core.collection_repository import CollectionRepository
-from shared.enum.collection_type import CollectionType
+from shared.enum import CollectionType
 
 if TYPE_CHECKING:
     pass

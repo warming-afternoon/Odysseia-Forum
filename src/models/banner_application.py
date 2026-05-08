@@ -3,7 +3,7 @@ from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
-from shared.enum.application_status import ApplicationStatus
+from shared.enum import ApplicationStatus
 
 
 class BannerApplication(SQLModel, table=True):

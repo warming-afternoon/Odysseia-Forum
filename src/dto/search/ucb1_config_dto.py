@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from shared.enum.search_config_type import SearchConfigDefaults
+from shared.enum import SearchConfigDefaults
 
 
 class UCB1ConfigDTO(BaseModel):

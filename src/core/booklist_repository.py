@@ -7,7 +7,7 @@ from sqlmodel import and_, asc, delete, desc, func, or_, select
 
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 from models import Booklist, BooklistItem, UserCollection
-from shared.enum.collection_type import CollectionType
+from shared.enum import CollectionType
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@ from typing import List, Optional, Union, Any
 
 from pydantic import BaseModel, Field, field_validator
 
-from shared.enum.default_preferences import DefaultPreferences
+from shared.enum import DefaultPreferences
 
 
 class SearchRequest(BaseModel):

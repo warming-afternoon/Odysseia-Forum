@@ -8,7 +8,7 @@ from search.constants import SortMethod
 from dto.preferences import UserSearchPreferencesDTO
 from search.components.keyword_modal import KeywordModal
 from search.components.sort_method_select import SortMethodSelect
-from shared.enum.default_preferences import DefaultPreferences
+from shared.enum import DefaultPreferences
 from shared.safe_defer import safe_defer
 from shared.views.components.time_range_modal import TimeRangeModal
 

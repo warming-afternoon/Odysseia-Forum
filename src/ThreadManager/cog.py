@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from core.follow_repository import ThreadFollowRepository
 from core.thread_repository import ThreadRepository
 from shared.safe_defer import safe_defer
-from shared.enum.constant_enum import ConstantEnum
+from shared.enum import ConstantEnum
 from ThreadManager.batch_update_service import BatchUpdateService
 from ThreadManager.thread_logic import ThreadLogic
 from ThreadManager.views.visibility_view import ThreadVisibilityView

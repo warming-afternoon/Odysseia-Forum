@@ -14,8 +14,7 @@ from dto.collection.batch_remove_result import BatchRemoveResult
 from core.booklist_repository import BooklistRepository
 from core.redis_trend_service import RedisTrendService
 from models import Booklist, BooklistItem, Thread, ThreadFollow, UserCollection
-from shared.enum.collection_type import CollectionType
-from shared.enum.constant_enum import ConstantEnum
+from shared.enum import CollectionType, ConstantEnum
 
 logger = logging.getLogger(__name__)
 
