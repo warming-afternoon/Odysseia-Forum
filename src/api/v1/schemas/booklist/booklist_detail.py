@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field, field_serializer
+from api.v1.schemas.search.author_detail import AuthorDetail
 
 
 class BooklistDetail(BaseModel):
@@ -16,6 +17,8 @@ class BooklistDetail(BaseModel):
     description: Optional[str] = Field(None, description="书单简介")
 
     cover_image_url: Optional[str] = Field(None, description="书单封面图URL")
+
+    author: Optional[AuthorDetail] = Field(None, description="创建者信息")
 
     is_public: bool = Field(description="是否公开")
 

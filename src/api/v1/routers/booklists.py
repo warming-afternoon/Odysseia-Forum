@@ -9,6 +9,8 @@ from api.v1.dependencies.security import require_auth
 from api.v1.schemas.base import PaginatedResponse
 from shared.channel_mapping_utils import ChannelMappingUtils
 
+from datetime import datetime, timezone
+
 from api.v1.schemas.booklist import (
     BooklistCreateResponse,
     BooklistDetail,
@@ -19,17 +21,57 @@ from api.v1.schemas.booklist import (
     BooklistItemUpdateRequest,
     BooklistUpdateResponse,
 )
+from api.v1.schemas.search.author_detail import AuthorDetail
 from booklist.booklist_service import BooklistService
+from core.author_repository import AuthorRepository
 from core.booklist_item_repository import BooklistItemRepository
 from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
 from shared.database import AsyncSessionFactory
 from shared.enum import CollectionType
+from shared.redis_client import RedisManager
 
 # 频道映射配置
 channel_mappings_config: Dict[int, List[Dict]] = {}
 
 logger = logging.getLogger(__name__)
+
+
+async def _fill_authors_for_booklists(
+    session: Any, booklists: List[Any]
+) -> Dict[int, Any]:
+    """获取书单的作者映射，并在不存在或过期时将其加入到 Redis 待拉取队列"""
+    owner_ids = list(set(b.owner_id for b in booklists if getattr(b, "owner_id", None)))
+    if not owner_ids:
+        return {}
+
+    author_repo = AuthorRepository(session)
+    authors = await author_repo.get_authors_by_ids(owner_ids)
+    author_map = {a.id: a for a in authors}
+
+    client = RedisManager.get_client()
+    now = datetime.now(timezone.utc)
+
+    for owner_id in owner_ids:
+        author = author_map.get(owner_id)
+        needs_fetch = False
+        if not author:
+            needs_fetch = True
+        else:
+            last_updated = getattr(author, "last_updated", None)
+            if last_updated:
+                if last_updated.tzinfo is None:
+                    last_updated = last_updated.replace(tzinfo=timezone.utc)
+                if (now - last_updated).days >= 7:
+                    needs_fetch = True
+            else:
+                needs_fetch = True
+
+        if needs_fetch:
+            await client.sadd("author_fetch_queue", str(owner_id))  # type: ignore
+
+    return author_map
+
 
 router = APIRouter(prefix="/booklist", tags=["书单"])
 
@@ -157,9 +199,16 @@ async def list_public_booklists(
                     )
                 )
 
+            # 获取书单创建者信息
+            author_map = await _fill_authors_for_booklists(session, booklists)
+
         results = []
         for b in booklists:
             detail = BooklistDetail.model_validate(b, from_attributes=True)
+            if b.owner_id in author_map:
+                detail.author = AuthorDetail.model_validate(
+                    author_map[b.owner_id], from_attributes=True
+                )
             if b.id in collected_booklist_ids:
                 detail.collected_flag = True
             results.append(detail)
@@ -238,12 +287,11 @@ async def list_my_booklists(
                 offset=offset,
             )
 
-        # 检查收藏状态
-        collected_booklist_ids = set()
-        user_id = int(current_user["id"])
-        if user_id and booklists:
-            booklist_ids = [b.id for b in booklists if b.id is not None]
-            async with AsyncSessionFactory() as session:
+            # 检查收藏状态
+            collected_booklist_ids = set()
+            user_id = int(current_user["id"])
+            if user_id and booklists:
+                booklist_ids = [b.id for b in booklists if b.id is not None]
                 collection_service = CollectionRepository(session)
                 collected_booklist_ids = (
                     await collection_service.get_collected_target_ids(
@@ -251,9 +299,16 @@ async def list_my_booklists(
                     )
                 )
 
+            # 获取书单创建者信息
+            author_map = await _fill_authors_for_booklists(session, booklists)
+
         results = []
         for b in booklists:
             detail = BooklistDetail.model_validate(b, from_attributes=True)
+            if b.owner_id in author_map:
+                detail.author = AuthorDetail.model_validate(
+                    author_map[b.owner_id], from_attributes=True
+                )
             if b.id in collected_booklist_ids:
                 detail.collected_flag = True
             results.append(detail)
@@ -305,9 +360,15 @@ async def get_booklist(
                 )
                 collected_flag = booklist.id in collected_ids
 
-        detail = BooklistDetail.model_validate(booklist, from_attributes=True)
-        detail.collected_flag = collected_flag
-        return detail
+            # 获取书单创建者信息
+            author_map = await _fill_authors_for_booklists(session, [booklist])
+            detail = BooklistDetail.model_validate(booklist, from_attributes=True)
+            detail.collected_flag = collected_flag
+            if booklist.owner_id in author_map:
+                detail.author = AuthorDetail.model_validate(
+                    author_map[booklist.owner_id], from_attributes=True
+                )
+            return detail
 
     except HTTPException:
         raise

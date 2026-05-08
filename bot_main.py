@@ -33,6 +33,7 @@ from banner.cog import BannerManagement
 from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
+from author.cog import AuthorCog
 from shared.api_scheduler import APIScheduler
 from shared.enum import AbyssDefaults, SearchConfigDefaultsInt
 from api.v1.routers import (
@@ -188,6 +189,10 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
                 config=self.config,
+            ),
+            AuthorCog(
+                bot=self,
+                session_factory=AsyncSessionFactory,
             ),
         ]
         await asyncio.gather(

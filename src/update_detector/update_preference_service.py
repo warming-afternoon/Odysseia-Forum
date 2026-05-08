@@ -4,7 +4,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
-from models.user_update_preference import UserUpdatePreference
+from models import UserUpdatePreference
 
 logger = logging.getLogger(__name__)
 

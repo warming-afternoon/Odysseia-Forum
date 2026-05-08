@@ -1,12 +1,11 @@
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional, Sequence
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Author
-from models.thread import Thread
+from models import Author, Thread
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +46,14 @@ class AuthorRepository:
         statement = select(Author).where(Author.id == author_id)  # type: ignore
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
+
+    async def get_authors_by_ids(self, author_ids: List[int]) -> Sequence[Author]:
+        """批量获取作者信息"""
+        if not author_ids:
+            return []
+        statement = select(Author).where(Author.id.in_(author_ids))  # type: ignore
+        result = await self.session.execute(statement)
+        return result.scalars().all()
 
     async def get_author_stats(self, author_id: int) -> dict:
         """获取指定作者的发帖数、总反应数和总回复数统计。"""
