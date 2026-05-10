@@ -382,7 +382,9 @@ async def logout(response: Response):
     redirect_response = RedirectResponse(
         url=_AUTH_CONFIG["frontend_url"], status_code=302
     )
-    redirect_response.delete_cookie(key="session", path="/")
+    redirect_response.delete_cookie(
+        key="session", path="/", secure=True, samesite="none"
+    )
 
     return redirect_response
 
@@ -435,7 +437,9 @@ async def check_auth(request: Request):
                     response = JSONResponse(
                         content={"loggedIn": False}, status_code=200
                     )
-                    response.delete_cookie(key="session", path="/")
+                    response.delete_cookie(
+                        key="session", path="/", secure=True, samesite="none"
+                    )
                     return response
 
                 member = member_response.json()
@@ -449,7 +453,9 @@ async def check_auth(request: Request):
                     response = JSONResponse(
                         content={"loggedIn": False}, status_code=200
                     )
-                    response.delete_cookie(key="session", path="/")
+                    response.delete_cookie(
+                        key="session", path="/", secure=True, samesite="none"
+                    )
                     return response
 
                 # 获取完整的用户信息
