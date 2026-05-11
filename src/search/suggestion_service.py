@@ -1,4 +1,3 @@
-import asyncio
 import re
 from typing import List, Optional
 
@@ -105,11 +104,9 @@ class SuggestionService:
             booklist_stmt = booklist_stmt.where(Booklist.title.like(search_pattern))  # type: ignore[attr-defined]
         booklist_stmt = booklist_stmt.order_by(Booklist.view_count.desc()).limit(limit)  # type: ignore[attr-defined]
 
-        author_res, thread_res, booklist_res = await asyncio.gather(
-            self.session.execute(author_stmt),
-            self.session.execute(thread_stmt),
-            self.session.execute(booklist_stmt),
-        )
+        author_res = await self.session.execute(author_stmt)
+        thread_res = await self.session.execute(thread_stmt)
+        booklist_res = await self.session.execute(booklist_stmt)
 
         return SuggestionResultDTO(
             authors=list(author_res.scalars().all()),

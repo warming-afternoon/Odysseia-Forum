@@ -36,6 +36,9 @@ async def get_follows(
     }
     ```
     """
+    if not current_user:
+        return {"total": 0, "threads": [], "limit": limit, "offset": offset}
+
     try:
         user_id = int(current_user["id"])
 
@@ -92,6 +95,9 @@ async def get_unread_count(current_user: Dict[str, Any] = Depends(get_current_us
     """
     获取用户未读更新的数量
     """
+    if not current_user:
+        return {"unread_count": 0}
+
     try:
         user_id = int(current_user["id"])
 
