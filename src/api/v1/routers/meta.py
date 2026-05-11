@@ -1,16 +1,17 @@
 import logging
 from typing import Dict, List, Optional, Union
 
+import orjson
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 
 from api.v1.dependencies.security import get_current_user
 from dto.meta import ChannelDetail
 from core.cache_service import CacheService
 from meta.meta_service import MetaService
 from shared.database import AsyncSessionFactory
-
-# 导入配置类型枚举
-from shared.enum import SearchConfigType
+from shared.redis_client import RedisManager
+from shared.enum import ConstantEnum, SearchConfigType
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,14 @@ channel_mappings_config: Dict[int, List[Dict]] = {}
 router = APIRouter(
     prefix="/meta", tags=["元数据"], dependencies=[Depends(get_current_user)]
 )
+
+
+def _build_channel_meta_cache_key(
+    guild_id: Optional[int], channel_ids: Optional[list[int]]
+) -> str:
+    gid = str(guild_id) if guild_id else "all"
+    cids = "-".join(str(c) for c in sorted(channel_ids)) if channel_ids else "all"
+    return f"cache:meta:channels:{gid}:{cids}"
 
 
 @router.get(
@@ -58,6 +67,19 @@ async def get_indexed_channels_with_tags(
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"无效的频道ID格式: {cid}")
 
+    cache_key = _build_channel_meta_cache_key(
+        effective_guild_id, effective_channel_ids
+    )
+
+    # 尝试从 Redis 读取缓存
+    try:
+        redis = RedisManager.get_client()
+        cached = await redis.get(cache_key)
+        if cached is not None:
+            return Response(content=cached, media_type="application/json")
+    except Exception:
+        logger.warning("读取 Redis 频道元数据缓存失败，回退到数据库查询", exc_info=True)
+
     try:
         async with AsyncSessionFactory() as session:
             meta_service = MetaService(
@@ -65,10 +87,24 @@ async def get_indexed_channels_with_tags(
                 cache_service=cache_service_instance,
                 channel_mappings=channel_mappings_config,
             )
-            # 传递转换后的 int 类型 ID
-            return await meta_service.get_channels_meta(
+            result = await meta_service.get_channels_meta(
                 effective_guild_id, effective_channel_ids
             )
+
+        # 写入 Redis 缓存
+        try:
+            serialized = orjson.dumps(
+                [item.model_dump(mode="json", by_alias=True) for item in result]
+            )
+            await redis.setex(
+                cache_key,
+                ConstantEnum.CHANNELS_CACHE_EXPIRE_SECONDS.value,
+                serialized,
+            )
+        except Exception:
+            logger.warning("写入 Redis 频道元数据缓存失败", exc_info=True)
+
+        return Response(content=serialized, media_type="application/json")
     except HTTPException:
         raise
     except Exception as e:
