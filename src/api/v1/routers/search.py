@@ -1,12 +1,22 @@
+import logging
+import traceback
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.schemas.banner import BannerItem
-from api.v1.schemas.search import SearchRequest, SearchResponse, ThreadDetail
+from api.v1.schemas.search import (
+    AuthorSuggestion,
+    BooklistSuggestion,
+    SearchRequest,
+    SearchResponse,
+    SearchSuggestionResponse,
+    ThreadDetail,
+    ThreadSuggestion,
+)
 from api.v1.utils import ThreadDetailBuilder
 from banner.banner_service import BannerService
 from core.cache_service import CacheService
@@ -20,9 +30,12 @@ from dto.search import UCB1ConfigDTO
 from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
+from search.suggestion_service import SuggestionService
 from shared.enum import AbyssDefaults, CollectionType
 from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.keyword_parser import KeywordParser
+
+logger = logging.getLogger(__name__)
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
 async_session_factory: async_sessionmaker | None = None
@@ -268,6 +281,89 @@ async def get_thread_detail(
         return builder.build(thread, collected_thread_ids)
 
 
+@router.get(
+    "/suggestions",
+    response_model=SearchSuggestionResponse,
+    summary="获取全局搜索建议 (联想词)",
+)
+async def get_search_suggestions(
+    keyword: str = Query(..., min_length=1, description="搜索关键词或部分 Discord ID"),
+    apply_preferences: bool = Query(
+        default=True, description="是否应用当前用户的过滤偏好"
+    ),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    if not async_session_factory:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="服务尚未初始化",
+        )
+
+    user_id = int(current_user["id"]) if current_user and "id" in current_user else None
+
+    exclude_authors = None
+    exclude_keywords = None
+    exclude_tags = None
+
+    if apply_preferences and user_id:
+        async with async_session_factory() as session:
+            pref_repo = PreferencesRepository(session)
+            prefs = await pref_repo.get_user_preferences(user_id, main_guild_id)
+            if prefs:
+                exclude_authors = prefs.exclude_authors
+                exclude_keywords = prefs.exclude_keywords or None
+                exclude_tags = prefs.exclude_tags
+
+    try:
+        async with async_session_factory() as session:
+            service = SuggestionService(session)
+            raw_data = await service.get_suggestions(
+                keyword=keyword,
+                limit=3,
+                current_user_id=user_id,
+                exclude_authors=exclude_authors,
+                exclude_keywords=exclude_keywords,
+                exclude_tags=exclude_tags,
+            )
+
+            return SearchSuggestionResponse(
+                authors=[
+                    AuthorSuggestion(
+                        id=a.id,
+                        name=a.name,
+                        display_name=a.display_name,
+                        avatar_url=a.avatar_url,
+                    )
+                    for a in raw_data.authors
+                ],
+                threads=[
+                    ThreadSuggestion(
+                        thread_id=t.thread_id,
+                        title=t.title,
+                        channel_id=t.channel_id,
+                        guild_id=t.guild_id,
+                    )
+                    for t in raw_data.threads
+                ],
+                booklists=[
+                    BooklistSuggestion(
+                        id=b.id,  # type: ignore[arg-type]
+                        title=b.title,
+                        item_count=b.item_count,
+                    )
+                    for b in raw_data.booklists
+                ],
+            )
+    except Exception as e:
+        logger.error(
+            f"获取搜索建议时发生内部错误: {e}\n{traceback.format_exc()}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取搜索建议时发生内部错误: {e}",
+        )
+
+
 # -------------------------
 # 辅助方法
 # -------------------------
@@ -397,7 +493,7 @@ async def _perform_search_and_update_counts(
 
 
 def _build_available_tags(
-    request_channel_ids: List[int] | None,
+    request_channel_ids: List[int | str] | None,
     searched_channel_ids: set[int],
     has_mapping: bool,
 ) -> tuple[List[str], List[str]]:
@@ -417,7 +513,7 @@ def _build_available_tags(
     if not request_channel_ids or len(request_channel_ids) != 1:
         return available_tags, virtual_tags
 
-    target_channel_id = request_channel_ids[0]
+    target_channel_id: int = request_channel_ids[0]  # type: ignore[assignment]
     if not cache_service_instance:
         return available_tags, virtual_tags
 
@@ -449,7 +545,7 @@ def _build_available_tags(
 
 async def _get_banner_and_unread(
     session: Any,
-    request_channel_ids: List[int] | None,
+    request_channel_ids: List[int | str] | None,
     user_id: int | None,
 ) -> tuple[List[BannerItem], int]:
     """
@@ -461,7 +557,9 @@ async def _get_banner_and_unread(
     Returns:
         tuple: (Banner列表, 未读数量)
     """
-    target_channel_id = request_channel_ids[0] if request_channel_ids else None
+    target_channel_id: int | None = (
+        request_channel_ids[0] if request_channel_ids else None
+    )  # type: ignore[assignment]
 
     # 获取Banner轮播列表
     banner_service = BannerService(session)
