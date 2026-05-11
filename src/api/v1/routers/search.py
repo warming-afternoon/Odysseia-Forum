@@ -238,7 +238,7 @@ async def execute_search(
             unread_count=unread_count,
         )
     except Exception as e:
-        print(f"搜索时发生内部错误: {e}")
+        logger.error(f"搜索时发生内部错误: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="执行搜索时发生内部错误",
@@ -262,29 +262,38 @@ async def get_thread_detail(
 
     user_id = int(current_user["id"]) if current_user and "id" in current_user else None
 
-    async with async_session_factory() as session:
-        repo = SearchService(session, tag_cache_service_instance)
-        thread = await repo.get_thread_by_discord_id(thread_id)
-        if not thread:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="帖子不存在或不可查看"
-            )
+    try:
+        async with async_session_factory() as session:
+            repo = SearchService(session, tag_cache_service_instance)
+            thread = await repo.get_thread_by_discord_id(thread_id)
+            if not thread:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="帖子不存在或不可查看"
+                )
 
-        collected_thread_ids: set[int] = set()
-        if user_id:
-            collection_service = CollectionRepository(session)
-            collected_thread_ids = await collection_service.get_collected_target_ids(
-                user_id, CollectionType.THREAD, [thread.thread_id]
-            )
+            collected_thread_ids: set[int] = set()
+            if user_id:
+                collection_service = CollectionRepository(session)
+                collected_thread_ids = await collection_service.get_collected_target_ids(
+                    user_id, CollectionType.THREAD, [thread.thread_id]
+                )
 
-        builder = ThreadDetailBuilder(channel_mappings_config)
-        return builder.build(thread, collected_thread_ids)
+            builder = ThreadDetailBuilder(channel_mappings_config)
+            return builder.build(thread, collected_thread_ids)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取帖子详情时发生内部错误: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取帖子详情时发生内部错误",
+        )
 
 
 @router.get(
     "/suggestions",
     response_model=SearchSuggestionResponse,
-    summary="获取全局搜索建议 (联想词)",
+    summary="获取搜索建议",
 )
 async def get_search_suggestions(
     keyword: str = Query(..., min_length=1, description="搜索关键词或部分 Discord ID"),

@@ -1,22 +1,24 @@
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any, List, Optional, Union
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import require_auth
-from models import Thread
+from core.thread_repository import ThreadRepository
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 IMAGE_URL_REGEX = re.compile(
     r"https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp)", re.IGNORECASE
 )
 IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/fetch-images",
@@ -125,6 +127,7 @@ async def _process_single_item(
     try:
         resp = await client.get(url)
     except httpx.HTTPError as exc:  # pragma: no cover - 网络错误情况下的日志
+        logger.error(f"获取 Discord 消息失败 (thread_id={item.thread_id}): {exc}")
         response_item.error = f"httpx_error: {exc}"
         return response_item
 
@@ -133,6 +136,9 @@ async def _process_single_item(
         return response_item
 
     if resp.status_code != status.HTTP_200_OK:
+        logger.debug(
+            f"Discord API 返回非 200 状态码 (thread_id={item.thread_id}): {resp.status_code}"
+        )
         response_item.error = f"http_status_{resp.status_code}"
         return response_item
 
@@ -188,12 +194,10 @@ def _extract_thumbnail_urls(message_payload: dict[str, Any]) -> List[str]:
 
 async def _persist_thumbnail(thread_id: int, thumbnail_urls: List[str]) -> bool:
     assert _async_session_factory is not None  # 为类型检查器准备
-    async with _async_session_factory() as session:
-        stmt = (
-            update(Thread)
-            .where(Thread.thread_id == thread_id)  # type: ignore[arg-type]
-            .values(thumbnail_urls=thumbnail_urls)
-        )
-        result = await session.execute(stmt)
-        await session.commit()
-        return bool(result.rowcount)
+    try:
+        async with _async_session_factory() as session:
+            repo = ThreadRepository(session)
+            return await repo.update_thread_thumbnail_urls(thread_id, thumbnail_urls)
+    except Exception as e:
+        logger.error(f"持久化缩略图失败 (thread_id={thread_id}): {e}", exc_info=True)
+        return False

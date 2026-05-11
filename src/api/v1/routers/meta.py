@@ -1,6 +1,7 @@
+import logging
 from typing import Dict, List, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.v1.dependencies.security import get_current_user
 from dto.meta import ChannelDetail
@@ -10,6 +11,8 @@ from shared.database import AsyncSessionFactory
 
 # 导入配置类型枚举
 from shared.enum import SearchConfigType
+
+logger = logging.getLogger(__name__)
 
 # 全局依赖，将在 bot_main.py 中被注入
 cache_service_instance: Optional[CacheService] = None
@@ -55,15 +58,24 @@ async def get_indexed_channels_with_tags(
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"无效的频道ID格式: {cid}")
 
-    async with AsyncSessionFactory() as session:
-        meta_service = MetaService(
-            session=session,
-            cache_service=cache_service_instance,
-            channel_mappings=channel_mappings_config,
-        )
-        # 传递转换后的 int 类型 ID
-        return await meta_service.get_channels_meta(
-            effective_guild_id, effective_channel_ids
+    try:
+        async with AsyncSessionFactory() as session:
+            meta_service = MetaService(
+                session=session,
+                cache_service=cache_service_instance,
+                channel_mappings=channel_mappings_config,
+            )
+            # 传递转换后的 int 类型 ID
+            return await meta_service.get_channels_meta(
+                effective_guild_id, effective_channel_ids
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取频道目录时发生内部错误: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取频道目录时发生内部错误",
         )
 
 
@@ -73,12 +85,21 @@ async def get_main_guild_id():
     if not cache_service_instance:
         raise HTTPException(status_code=503, detail="Cache 服务尚未初始化")
 
-    # 从缓存中获取主服务器配置
-    config = await cache_service_instance.get_bot_config(SearchConfigType.MAIN_GUILD_ID)
+    try:
+        # 从缓存中获取主服务器配置
+        config = await cache_service_instance.get_bot_config(SearchConfigType.MAIN_GUILD_ID)
 
-    if not config or config.value_int is None:
-        # 如果数据库中没找到，理论上不应该发生，因为 bot_main 会初始化它
-        return {"main_guild_id": "0"}
+        if not config or config.value_int is None:
+            # 如果数据库中没找到，理论上不应该发生，因为 bot_main 会初始化它
+            return {"main_guild_id": "0"}
 
-    # 将 ID 转换为字符串返回，防止前端 JavaScript 丢失大整数精度
-    return {"main_guild_id": str(config.value_int)}
+        # 将 ID 转换为字符串返回，防止前端 JavaScript 丢失大整数精度
+        return {"main_guild_id": str(config.value_int)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取主服务器ID时发生内部错误: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取主服务器ID时发生内部错误",
+        )

@@ -468,6 +468,19 @@ class ThreadRepository:
         await self.session.commit()
         return result.rowcount > 0
 
+    async def update_thread_thumbnail_urls(
+        self, thread_id: int, thumbnail_urls: List[str]
+    ) -> bool:
+        """更新帖子的缩略图 URL 列表"""
+        stmt = (
+            update(Thread)
+            .where(Thread.thread_id == thread_id)  # type: ignore
+            .values(thumbnail_urls=thumbnail_urls)
+        )
+        result = await self.session.execute(stmt)
+        await self.session.commit()
+        return bool(result.rowcount)
+
     async def get_thread_visibility(self, thread_id: int) -> Optional[bool]:
         """获取帖子的可见性状态"""
         stmt = select(Thread.show_flag).where(Thread.thread_id == thread_id)

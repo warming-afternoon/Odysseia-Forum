@@ -1,3 +1,5 @@
+import logging
+
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -7,6 +9,8 @@ from api.v1.schemas.preferences import (
     UserPreferencesUpdateRequest,
 )
 from core.preferences_repository import PreferencesRepository
+
+logger = logging.getLogger(__name__)
 
 # 全局变量，将在应用启动时由 bot_main.py 注入
 async_session_factory: async_sessionmaker | None = None
@@ -32,16 +36,25 @@ async def get_user_preferences(user_id: int):
             detail="Preferences 服务尚未初始化",
         )
 
-    async with async_session_factory() as session:
-        repo = PreferencesRepository(session)
-        # 使用注入的 main_guild_id
-        prefs_dto = await repo.get_user_preferences(user_id, main_guild_id)
-        if not prefs_dto:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"未找到用户ID {user_id} 的偏好设置",
-            )
-        return prefs_dto
+    try:
+        async with async_session_factory() as session:
+            repo = PreferencesRepository(session)
+            # 使用注入的 main_guild_id
+            prefs_dto = await repo.get_user_preferences(user_id, main_guild_id)
+            if not prefs_dto:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"未找到用户ID {user_id} 的偏好设置",
+                )
+            return prefs_dto
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取用户偏好时发生内部错误: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取用户偏好时发生内部错误",
+        )
 
 
 @router.put(
@@ -65,10 +78,19 @@ async def update_user_preferences(user_id: int, request: UserPreferencesUpdateRe
             status_code=status.HTTP_400_BAD_REQUEST, detail="请求体不能为空"
         )
 
-    async with async_session_factory() as session:
-        repo = PreferencesRepository(session)
-        # 使用注入的 main_guild_id
-        updated_prefs = await repo.save_user_preferences(
-            user_id, update_data, main_guild_id
+    try:
+        async with async_session_factory() as session:
+            repo = PreferencesRepository(session)
+            # 使用注入的 main_guild_id
+            updated_prefs = await repo.save_user_preferences(
+                user_id, update_data, main_guild_id
+            )
+            return updated_prefs
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新用户偏好时发生内部错误: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="更新用户偏好时发生内部错误",
         )
-        return updated_prefs
