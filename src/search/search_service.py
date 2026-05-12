@@ -150,17 +150,20 @@ class SearchService:
         """
         # SQLite 不内置 log10，用 ln/ln(10) 转换确保跨后端兼容
         ln10 = 2.302585092994046
-        reaction_score = func.log(
-            case(
-                (Thread.reaction_count > 1, cast(Thread.reaction_count, Float)),
-                else_=1.0,
+        reaction_score = (
+            func.log(
+                case(
+                    (Thread.reaction_count > 1, cast(Thread.reaction_count, Float)),
+                    else_=1.0,
+                )
             )
-        ) / ln10
+            / ln10
+        )
 
         # created_at 是 UTC datetime，在 SQLite 下用 strftime('%s') 转 Unix 秒
-        time_score = cast(
-            func.strftime("%s", Thread.created_at), Float
-        ) / float(time_decay)
+        time_score = cast(func.strftime("%s", Thread.created_at), Float) / float(
+            time_decay
+        )
 
         final_score = (reaction_score + time_score).label("final_score")
         return statement, final_score
@@ -554,7 +557,9 @@ class SearchService:
             return [], 0
 
         # 按 tag_id 查流行度，再按流行度降序排列 tag_name
-        tag_id_to_name: dict[int, str] = {t.id: t.name for t in source_tags if t.id is not None}
+        tag_id_to_name: dict[int, str] = {
+            t.id: t.name for t in source_tags if t.id is not None
+        }
         usage_counts = await self.get_tag_usage_counts(list(tag_id_to_name.keys()))
 
         # 同名 tag 可能有多个 ID，合并使用数；并去重 name

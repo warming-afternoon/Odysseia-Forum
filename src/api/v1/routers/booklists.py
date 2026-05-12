@@ -73,17 +73,14 @@ async def _fill_authors_for_booklists(
     return author_map
 
 
-async def _fill_fallback_covers(
-    session: Any, booklists: List[Any]
-) -> Dict[int, str]:
+async def _fill_fallback_covers(session: Any, booklists: List[Any]) -> Dict[int, str]:
     """为无自定义封面的书单批量获取 fallback 封面
 
     取书单内最近加入的帖子的第一张 thumbnail；避免前端为每个无封面书单
     单独调用 /item/list/page/{booklist_id} 的 N+1 模式。
     """
     missing_ids = [
-        b.id for b in booklists
-        if b.id is not None and not b.cover_image_url
+        b.id for b in booklists if b.id is not None and not b.cover_image_url
     ]
     if not missing_ids:
         return {}

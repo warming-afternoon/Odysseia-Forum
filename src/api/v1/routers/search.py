@@ -276,8 +276,10 @@ async def get_thread_detail(
             collected_thread_ids: set[int] = set()
             if user_id:
                 collection_service = CollectionRepository(session)
-                collected_thread_ids = await collection_service.get_collected_target_ids(
-                    user_id, CollectionType.THREAD, [thread.thread_id]
+                collected_thread_ids = (
+                    await collection_service.get_collected_target_ids(
+                        user_id, CollectionType.THREAD, [thread.thread_id]
+                    )
                 )
 
             builder = ThreadDetailBuilder(channel_mappings_config)
@@ -364,8 +366,10 @@ async def get_similar_threads(
             if user_id and threads:
                 thread_ids = [t.thread_id for t in threads]
                 collection_service = CollectionRepository(session)
-                collected_thread_ids = await collection_service.get_collected_target_ids(
-                    user_id, CollectionType.THREAD, thread_ids
+                collected_thread_ids = (
+                    await collection_service.get_collected_target_ids(
+                        user_id, CollectionType.THREAD, thread_ids
+                    )
                 )
 
             builder = ThreadDetailBuilder(channel_mappings_config)
@@ -460,9 +464,7 @@ async def get_search_suggestions(
                 ],
             )
     except Exception as e:
-        logger.error(
-            f"获取搜索建议时发生内部错误: {e}\n{traceback.format_exc()}"
-        )
+        logger.error(f"获取搜索建议时发生内部错误: {e}\n{traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取搜索建议时发生内部错误: {e}",

@@ -105,9 +105,7 @@ class BooklistItemRepository:
         )
         return item_detail
 
-    async def get_fallback_covers(
-        self, booklist_ids: List[int]
-    ) -> Dict[int, str]:
+    async def get_fallback_covers(self, booklist_ids: List[int]) -> Dict[int, str]:
         """
         为无封面书单批量取“最近加入的 item”所属 Thread 的第一张 thumbnail。
 

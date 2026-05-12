@@ -67,9 +67,7 @@ async def get_indexed_channels_with_tags(
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"无效的频道ID格式: {cid}")
 
-    cache_key = _build_channel_meta_cache_key(
-        effective_guild_id, effective_channel_ids
-    )
+    cache_key = _build_channel_meta_cache_key(effective_guild_id, effective_channel_ids)
 
     # 尝试从 Redis 读取缓存
     try:
@@ -123,7 +121,9 @@ async def get_main_guild_id():
 
     try:
         # 从缓存中获取主服务器配置
-        config = await cache_service_instance.get_bot_config(SearchConfigType.MAIN_GUILD_ID)
+        config = await cache_service_instance.get_bot_config(
+            SearchConfigType.MAIN_GUILD_ID
+        )
 
         if not config or config.value_int is None:
             # 如果数据库中没找到，理论上不应该发生，因为 bot_main 会初始化它
