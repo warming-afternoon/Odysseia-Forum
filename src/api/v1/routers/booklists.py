@@ -73,6 +73,24 @@ async def _fill_authors_for_booklists(
     return author_map
 
 
+async def _fill_fallback_covers(
+    session: Any, booklists: List[Any]
+) -> Dict[int, str]:
+    """为无自定义封面的书单批量获取 fallback 封面
+
+    取书单内最近加入的帖子的第一张 thumbnail；避免前端为每个无封面书单
+    单独调用 /item/list/page/{booklist_id} 的 N+1 模式。
+    """
+    missing_ids = [
+        b.id for b in booklists
+        if b.id is not None and not b.cover_image_url
+    ]
+    if not missing_ids:
+        return {}
+    item_repo = BooklistItemRepository(session)
+    return await item_repo.get_fallback_covers(missing_ids)
+
+
 router = APIRouter(prefix="/booklist", tags=["书单"])
 
 
@@ -202,6 +220,9 @@ async def list_public_booklists(
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, booklists)
 
+            # 为无自定义封面的书单批量获取 fallback 封面
+            fallback_covers = await _fill_fallback_covers(session, booklists)
+
         results = []
         for b in booklists:
             detail = BooklistDetail.model_validate(b, from_attributes=True)
@@ -211,6 +232,8 @@ async def list_public_booklists(
                 )
             if b.id in collected_booklist_ids:
                 detail.collected_flag = True
+            if not detail.cover_image_url and b.id in fallback_covers:
+                detail.cover_image_url = fallback_covers[b.id]
             results.append(detail)
 
         return PaginatedResponse(
@@ -302,6 +325,9 @@ async def list_my_booklists(
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, booklists)
 
+            # 为无自定义封面的书单批量获取 fallback 封面
+            fallback_covers = await _fill_fallback_covers(session, booklists)
+
         results = []
         for b in booklists:
             detail = BooklistDetail.model_validate(b, from_attributes=True)
@@ -311,6 +337,8 @@ async def list_my_booklists(
                 )
             if b.id in collected_booklist_ids:
                 detail.collected_flag = True
+            if not detail.cover_image_url and b.id in fallback_covers:
+                detail.cover_image_url = fallback_covers[b.id]
             results.append(detail)
 
         return PaginatedResponse(

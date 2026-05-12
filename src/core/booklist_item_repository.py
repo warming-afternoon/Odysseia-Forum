@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -104,6 +104,68 @@ class BooklistItemRepository:
             collected_flag=False,
         )
         return item_detail
+
+    async def get_fallback_covers(
+        self, booklist_ids: List[int]
+    ) -> Dict[int, str]:
+        """
+        为无封面书单批量取“最近加入的 item”所属 Thread 的第一张 thumbnail。
+
+        统一按 BooklistItem.display_order DESC 取首条（等价加入时间倒序），不按 display_type 分支。
+        当首条 item 的 thumbnail_urls 为空时，按排序顺序回退到下一条候选，
+        直至找到带非空 thumbnail_urls 的 item 或候选耗尽。
+        返回 {booklist_id: thumbnail_url}，找不到候选的书单不出现。
+        """
+        if not booklist_ids:
+            return {}
+
+        # 取每个书单前 N 条候选，首条无缩略图时可在 Python 端顺序回退
+        FALLBACK_CANDIDATE_LIMIT = 10
+
+        rn = (
+            func.row_number()
+            .over(
+                partition_by=BooklistItem.booklist_id,
+                order_by=(desc(BooklistItem.display_order), desc(BooklistItem.id)),
+            )
+            .label("rn")
+        )
+
+        ranked_subq = (
+            select(
+                BooklistItem.booklist_id.label("booklist_id"),
+                Thread.thumbnail_urls.label("thumbnail_urls"),
+                rn,
+            )
+            .join(Thread, BooklistItem.thread_id == Thread.thread_id)  # type: ignore
+            .where(BooklistItem.booklist_id.in_(booklist_ids))  # type: ignore
+            .subquery()
+        )
+
+        stmt = (
+            select(
+                ranked_subq.c.booklist_id,
+                ranked_subq.c.thumbnail_urls,
+                ranked_subq.c.rn,
+            )
+            .where(ranked_subq.c.rn <= FALLBACK_CANDIDATE_LIMIT)
+            .order_by(ranked_subq.c.booklist_id, ranked_subq.c.rn)
+        )
+
+        result = await self.session.execute(stmt)
+        rows = result.all()
+
+        covers: Dict[int, str] = {}
+        for booklist_id, thumbnail_urls, _ in rows:
+            bid = int(booklist_id)
+            if bid in covers:
+                # 已经选定更靠前的候选，后续行跳过
+                continue
+            if not thumbnail_urls:
+                continue
+            if isinstance(thumbnail_urls, list) and thumbnail_urls:
+                covers[bid] = thumbnail_urls[0]
+        return covers
 
     async def get_booklist_items_with_details(
         self,
