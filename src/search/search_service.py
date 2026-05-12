@@ -7,12 +7,17 @@ from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
 from core.thread_repository import ThreadRepository
+from dto.search import UCB1ConfigDTO
 from models import Author, Tag, Thread, ThreadTagLink, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
 from shared.enum import DefaultPreferences
 from shared.range_parser import parse_range_string
 from shared.time_parser import parse_time_string
+
+# Reddit Hot 算法的时间衰减常量：125h 前的帖子比新帖少 1 分
+# score = log10(max(1, reaction_count)) + created_at_unix / REDDIT_HOT_TIME_DECAY
+REDDIT_HOT_TIME_DECAY: float = 450000.0
 
 
 class SearchService:
@@ -134,6 +139,30 @@ class SearchService:
 
         final_score = (exploitation_term + exploration_term).label("final_score")
 
+        return statement, final_score
+
+    def _apply_reddit_hot_ranking(self, statement, time_decay: float):
+        """
+        应用 Reddit Hot 算法对帖子排序。
+        Score = log10(max(1, reaction_count)) + (created_at_unix / time_decay)
+
+        时间部分线性对新帖加成；分数部分高票帖不会获得不成比例的巨大优势。
+        """
+        # SQLite 不内置 log10，用 ln/ln(10) 转换确保跨后端兼容
+        ln10 = 2.302585092994046
+        reaction_score = func.log(
+            case(
+                (Thread.reaction_count > 1, cast(Thread.reaction_count, Float)),
+                else_=1.0,
+            )
+        ) / ln10
+
+        # created_at 是 UTC datetime，在 SQLite 下用 strftime('%s') 转 Unix 秒
+        time_score = cast(
+            func.strftime("%s", Thread.created_at), Float
+        ) / float(time_decay)
+
+        final_score = (reaction_score + time_score).label("final_score")
         return statement, final_score
 
     async def search_threads_with_count(
@@ -372,6 +401,16 @@ class SearchService:
                     if query.sort_order == "desc"
                     else final_score_expr.asc()
                 )
+            elif effective_sort_method == "reddit_hot":
+                # 按 Reddit Hot 热门排序
+                final_select_stmt, final_score_expr = self._apply_reddit_hot_ranking(
+                    final_select_stmt, REDDIT_HOT_TIME_DECAY
+                )
+                order_by = (
+                    final_score_expr.desc()
+                    if query.sort_order == "desc"
+                    else final_score_expr.asc()
+                )
             elif (
                 effective_sort_method == "collected_at"
                 and query.user_id_for_collection_search
@@ -440,6 +479,7 @@ class SearchService:
             .where(
                 Thread.thread_id == discord_thread_id,  # type: ignore[arg-type]
                 Thread.not_found_count == 0,
+                Thread.show_flag,
             )
             .options(
                 selectinload(Thread.tags),  # type: ignore
@@ -465,3 +505,113 @@ class SearchService:
         )
         result = await self.session.execute(statement)
         return result.scalars().all()
+
+    async def get_tag_usage_counts(self, tag_ids: list[int]) -> dict[int, int]:
+        """批量查询每个 tag_id 关联的帖子数量，用于评估标签流行度。
+
+        缺失的 tag_id 不在返回字典中（调用方自行视为 0）。
+        """
+        if not tag_ids:
+            return {}
+
+        stmt = (
+            select(ThreadTagLink.tag_id, func.count(ThreadTagLink.thread_id))
+            .where(ThreadTagLink.tag_id.in_(tag_ids))  # type: ignore[arg-type]
+            .group_by(ThreadTagLink.tag_id)
+        )
+        result = await self.session.execute(stmt)
+        return {tag_id: count for tag_id, count in result.all()}
+
+    async def find_similar_threads(
+        self,
+        source_thread: Thread,
+        *,
+        limit: int = 5,
+        exclude_channel_ids: list[int] | None = None,
+        ucb1_config: UCB1ConfigDTO,
+    ) -> tuple[list[Thread], int]:
+        """基于 TAG 匹配度的相似帖子推荐。
+
+        降级策略：
+          1. 按 source_thread.tags 流行度（关联帖子数）降序，得到 ordered_tags。
+          2. k 从 len(ordered_tags) 递减到 1：
+             - 取流行度最高的前 k 个 tag（即丢弃末尾流行度最低的 n-k 个）；
+             - 用 tag_logic='and' 调用 search_threads_with_count；
+             - 跨级累计去重（exclude_thread_ids）；
+             - 排序用 reddit_hot。
+          3. 命中累计等于 limit 时立即返回；若所有级别跑完仍不足，返回已有结果。
+
+        Returns:
+            (threads, matched_tag_count)
+            matched_tag_count 为最后一次命中贡献结果时使用的 TAG 个数；
+            若没有任何命中则为 0。
+        """
+        if limit <= 0 or source_thread is None:
+            return [], 0
+
+        source_tags: list[Tag] = list(getattr(source_thread, "tags", []) or [])
+        if not source_tags:
+            return [], 0
+
+        # 按 tag_id 查流行度，再按流行度降序排列 tag_name
+        tag_id_to_name: dict[int, str] = {t.id: t.name for t in source_tags if t.id is not None}
+        usage_counts = await self.get_tag_usage_counts(list(tag_id_to_name.keys()))
+
+        # 同名 tag 可能有多个 ID，合并使用数；并去重 name
+        name_to_count: dict[str, int] = {}
+        for tid, name in tag_id_to_name.items():
+            name_to_count[name] = name_to_count.get(name, 0) + usage_counts.get(tid, 0)
+
+        if not name_to_count:
+            return [], 0
+
+        # 流行度降序；同流行度时按 name 稳定排序以保证幂等性
+        ordered_tag_names: list[str] = sorted(
+            name_to_count.keys(), key=lambda n: (-name_to_count[n], n)
+        )
+
+        source_discord_id = source_thread.thread_id
+        collected: list[Thread] = []
+        seen_discord_ids: set[int] = {source_discord_id}
+        matched_tag_count = 0
+
+        # k 从全量降到 1，每次取流行度最高的 k 个 tag
+        for k in range(len(ordered_tag_names), 0, -1):
+            current_tags = ordered_tag_names[:k]
+            query = ThreadSearchQuery(
+                guild_id=None,
+                channel_ids=None,
+                exclude_channel_ids=list(exclude_channel_ids or []) or None,
+                include_tags=current_tags,
+                exclude_tags=[],
+                tag_logic="and",
+                sort_method="reddit_hot",
+                sort_order="desc",
+            )
+
+            remaining = limit - len(collected)
+            if remaining <= 0:
+                break
+
+            threads, _total = await self.search_threads_with_count(
+                query,
+                limit=remaining,
+                total_display_count=ucb1_config.total_display_count,
+                exploration_factor=ucb1_config.exploration_factor,
+                strength_weight=ucb1_config.strength_weight,
+                exclude_thread_ids=list(seen_discord_ids),
+            )
+
+            new_threads = [t for t in threads if t.thread_id not in seen_discord_ids]
+            if new_threads:
+                matched_tag_count = k
+                for t in new_threads:
+                    collected.append(t)
+                    seen_discord_ids.add(t.thread_id)
+                    if len(collected) >= limit:
+                        break
+
+            if len(collected) >= limit:
+                break
+
+        return collected, matched_tag_count

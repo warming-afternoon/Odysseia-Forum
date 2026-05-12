@@ -14,6 +14,7 @@ from api.v1.schemas.search import (
     SearchRequest,
     SearchResponse,
     SearchSuggestionResponse,
+    SimilarThreadsResponse,
     ThreadDetail,
     ThreadSuggestion,
 )
@@ -287,6 +288,100 @@ async def get_thread_detail(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取帖子详情时发生内部错误",
+        )
+
+
+@router.get(
+    "/thread/{thread_id}/similar",
+    response_model=SimilarThreadsResponse,
+    summary="按 TAG 相似度推荐帖子",
+)
+async def get_similar_threads(
+    thread_id: int | str,
+    limit: int = Query(default=5, ge=1, le=20, description="最大返回结果数量"),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """根据指定帖子的 TAG 打末匹配相似帖子。
+
+    降级策略：先全 TAG 匹配，不足时按流行度从低到高逐个丢弃 TAG 继续匹配，
+    直到凑足 limit 条或仅剩最热门的一个 TAG。结果按 Reddit Hot 热门算法排序。
+    """
+    # 统一解析 thread_id（路径参数是 str，但同时兼容 int 调用）
+    try:
+        thread_id_int = int(thread_id)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="thread_id 必须为数字",
+        )
+
+    # 检查服务是否初始化完成
+    if (
+        not async_session_factory
+        or not cache_service_instance
+        or not tag_cache_service_instance
+        or not impression_cache_service_instance
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Search 服务尚未初始化",
+        )
+
+    user_id = int(current_user["id"]) if current_user and "id" in current_user else None
+
+    # [深渊区权限判断] 读取用户身份组，屏蔽无权限查看的深渊区频道
+    user_roles = current_user.get("roles", []) if current_user else []
+    exclude_channel_ids: list[int] = []
+    if abyss_config:
+        required_role = str(abyss_config.get("required_role_id", ""))
+        abyss_channels: list[int] = abyss_config.get("channel_ids", [])
+        if not user_roles or required_role not in [str(r) for r in user_roles]:
+            exclude_channel_ids.extend(abyss_channels)
+    exclude_channel_ids = list(set(exclude_channel_ids))
+
+    try:
+        async with async_session_factory() as session:
+            service = SearchService(session, tag_cache_service_instance)
+            source_thread = await service.get_thread_by_discord_id(thread_id_int)
+            if not source_thread:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="帖子不存在或不可查看",
+                )
+
+            ucb1_config = await cache_service_instance.get_ucb1_config()
+
+            threads, matched_tag_count = await service.find_similar_threads(
+                source_thread,
+                limit=limit,
+                exclude_channel_ids=exclude_channel_ids or None,
+                ucb1_config=ucb1_config,
+            )
+
+            # 查当前用户的收藏状态
+            collected_thread_ids: set[int] = set()
+            if user_id and threads:
+                thread_ids = [t.thread_id for t in threads]
+                collection_service = CollectionRepository(session)
+                collected_thread_ids = await collection_service.get_collected_target_ids(
+                    user_id, CollectionType.THREAD, thread_ids
+                )
+
+            builder = ThreadDetailBuilder(channel_mappings_config)
+            results = builder.build_list(threads, collected_thread_ids)
+
+            return SimilarThreadsResponse(
+                source_thread_id=source_thread.thread_id,
+                matched_tag_count=matched_tag_count,
+                results=results,
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取相似帖子推荐时发生内部错误: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取相似帖子推荐时发生内部错误",
         )
 
 
