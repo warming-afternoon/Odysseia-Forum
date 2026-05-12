@@ -174,6 +174,7 @@ async def execute_search(
                 ucb1_config,
                 request.limit,
                 exclude_thread_ids,  # type: ignore
+                request.offset,
             )
 
             # 获取当前用户ID用于后续收藏状态和未读数查询
@@ -231,7 +232,7 @@ async def execute_search(
         return SearchResponse(
             total=total_threads,
             limit=request.limit,
-            offset=len(exclude_thread_ids),
+            offset=request.offset + len(exclude_thread_ids),
             results=results,
             available_tags=available_tags,
             virtual_tags=virtual_tags,
@@ -562,6 +563,7 @@ async def _perform_search_and_update_counts(
     ucb1_config: UCB1ConfigDTO,
     limit: int,
     exclude_thread_ids: List[int],
+    offset: int = 0,
 ) -> tuple[Any, int]:
     """
     执行搜索查询并更新帖子展示次数计数。
@@ -576,6 +578,7 @@ async def _perform_search_and_update_counts(
         total_display_count=ucb1_config.total_display_count,
         exploration_factor=ucb1_config.exploration_factor,
         strength_weight=ucb1_config.strength_weight,
+        offset=offset,
         exclude_thread_ids=exclude_thread_ids,
     )
 
