@@ -512,7 +512,7 @@ async def check_auth(request: Request):
         path="/",
         httponly=True,
         secure=True,
-        samesite="strict",
+        samesite="none",
     )
 
     return response

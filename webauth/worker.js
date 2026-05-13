@@ -92,31 +92,33 @@ export default {
       if (!payload) {
         return new Response(JSON.stringify({ loggedIn: false }), { status: 200, headers: corsHeaders(env) });
       }
+
+      const cookieDomainAttr = env.COOKIE_DOMAIN ? `; Domain=${env.COOKIE_DOMAIN}` : "";
       try {
           // 验证 token
           const secret = new TextEncoder().encode(env.JWT_SECRET);
-  
+
           // 再次检查 Discord 身份（Bot Token）
           const roleCheck = await validateGuildRole(env, payload.id);
           if (!roleCheck.ok) {
-            return new Response(JSON.stringify({ loggedIn: false }), { status: 200, headers: {
-              'Set-Cookie': `token=; Path=/; HttpOnly; Secure; Max-Age=0; SameSite=Strict`
-            }});
+            const errHeaders = corsHeaders(env);
+            errHeaders.append('Set-Cookie', `session=; Path=/; HttpOnly; Secure; Max-Age=0; SameSite=None${cookieDomainAttr}`);
+            return new Response(JSON.stringify({ loggedIn: false }), { status: 200, headers: errHeaders });
           }
-  
+
           // 刷新 token 时带上最新的 roles
           payload.roles = roleCheck.roles;
           const newToken = await signJWT(payload, secret, 7 * 24 * 60 * 60);
-  
+
           const headers = new Headers();
           headers.append(
             'Set-Cookie',
-            `token=${newToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${7 * 24 * 60 * 60}`
+            `session=${newToken}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=${7 * 24 * 60 * 60}${cookieDomainAttr}`
           );
-  
+
           const h = corsHeaders(env);
           for (const [k, v] of headers.entries()) h.set(k, v);
-          return new Response(JSON.stringify({ ok: true, id: payload.id }), { headers: h, status: 200 });
+          return new Response(JSON.stringify({ loggedIn: true, user: { id: payload.id, username: payload.username } }), { headers: h, status: 200 });
   
         } catch (e) {
           return new Response(JSON.stringify({ loggedIn: false }), { status: 200, headers: corsHeaders(env) });

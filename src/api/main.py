@@ -84,7 +84,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],  # 允许所有headers
     expose_headers=["*"],  # 暴露所有headers
-    max_age=3600,  # 预检请求缓存1小时
+    max_age=10800,  # 预检请求缓存3小时
 )
 
 # 启用 GZip 压缩
