@@ -88,6 +88,23 @@ async def _fill_fallback_covers(session: Any, booklists: List[Any]) -> Dict[int,
     return await item_repo.get_fallback_covers(missing_ids)
 
 
+def _apply_anonymous_author(detail: BooklistDetail, booklist: Any, current_user_id: int, author_map: dict):
+    if getattr(booklist, "is_anonymous", False):
+        if current_user_id != booklist.owner_id:
+            detail.owner_id = 0
+        detail.author = AuthorDetail(
+            id=0,
+            name="匿名用户",
+            global_name=None,
+            display_name="匿名用户",
+            avatar_url="https://cdn.discordapp.com/embed/avatars/0.png"
+        )
+    elif booklist.owner_id in author_map:
+        detail.author = AuthorDetail.model_validate(
+            author_map[booklist.owner_id], from_attributes=True
+        )
+
+
 router = APIRouter(prefix="/booklist", tags=["书单"])
 
 
@@ -97,6 +114,7 @@ async def create_booklist(
     description: Optional[str] = None,
     cover_image_url: Optional[str] = None,
     is_public: bool = True,
+    is_anonymous: bool = False,
     display_type: int = 1,
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
@@ -107,6 +125,7 @@ async def create_booklist(
     - description: 书单简介（可选）
     - cover_image_url: 封面图 URL（可选）
     - is_public: 是否公开，默认为 True
+    - is_anonymous: 是否匿名，默认为 False
     - display_type: 展示方式，1=加入时间倒序，2=display_order，默认为1
     """
     try:
@@ -120,6 +139,7 @@ async def create_booklist(
                 description=description,
                 cover_image_url=cover_image_url,
                 is_public=is_public,
+                is_anonymous=is_anonymous,
                 display_type=display_type,
             )
 
@@ -223,10 +243,8 @@ async def list_public_booklists(
         results = []
         for b in booklists:
             detail = BooklistDetail.model_validate(b, from_attributes=True)
-            if b.owner_id in author_map:
-                detail.author = AuthorDetail.model_validate(
-                    author_map[b.owner_id], from_attributes=True
-                )
+            _apply_anonymous_author(detail, b, user_id, author_map)
+
             if b.id in collected_booklist_ids:
                 detail.collected_flag = True
             if not detail.cover_image_url and b.id in fallback_covers:
@@ -328,10 +346,8 @@ async def list_my_booklists(
         results = []
         for b in booklists:
             detail = BooklistDetail.model_validate(b, from_attributes=True)
-            if b.owner_id in author_map:
-                detail.author = AuthorDetail.model_validate(
-                    author_map[b.owner_id], from_attributes=True
-                )
+            _apply_anonymous_author(detail, b, user_id, author_map)
+
             if b.id in collected_booklist_ids:
                 detail.collected_flag = True
             if not detail.cover_image_url and b.id in fallback_covers:
@@ -389,10 +405,7 @@ async def get_booklist(
             author_map = await _fill_authors_for_booklists(session, [booklist])
             detail = BooklistDetail.model_validate(booklist, from_attributes=True)
             detail.collected_flag = collected_flag
-            if booklist.owner_id in author_map:
-                detail.author = AuthorDetail.model_validate(
-                    author_map[booklist.owner_id], from_attributes=True
-                )
+            _apply_anonymous_author(detail, booklist, user_id, author_map)
             return detail
 
     except HTTPException:
@@ -413,6 +426,7 @@ async def update_booklist(
     description: Optional[str] = None,
     cover_image_url: Optional[str] = None,
     is_public: Optional[bool] = None,
+    is_anonymous: Optional[bool] = None,
     display_type: Optional[int] = None,
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
@@ -424,6 +438,7 @@ async def update_booklist(
     - description: 新简介（可选）
     - cover_image_url: 新封面图URL（可选）
     - is_public: 是否公开（可选）
+    - is_anonymous: 是否匿名（可选）
     - display_type: 展示方式（可选）
     """
     try:
@@ -447,6 +462,7 @@ async def update_booklist(
                 description=description,
                 cover_image_url=cover_image_url,
                 is_public=is_public,
+                is_anonymous=is_anonymous,
                 display_type=display_type,
             )
             if not updated:

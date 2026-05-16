@@ -22,6 +22,8 @@ class BooklistDetail(BaseModel):
 
     is_public: bool = Field(description="是否公开")
 
+    is_anonymous: bool = Field(description="是否匿名")
+
     is_default: bool = Field(description="是否为用户的默认书单")
 
     display_type: int = Field(

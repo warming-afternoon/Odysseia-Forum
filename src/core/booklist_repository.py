@@ -32,6 +32,7 @@ class BooklistRepository:
                 title="默认收藏",
                 description="默认收藏夹",
                 is_public=False,  # 默认书单设定为私有
+                is_anonymous=False,
                 is_default=True,
                 display_type=1,
                 item_count=0,
@@ -52,6 +53,7 @@ class BooklistRepository:
         description: Optional[str] = None,
         cover_image_url: Optional[str] = None,
         is_public: bool = True,
+        is_anonymous: bool = False,
         display_type: int = 1,
     ) -> Booklist:
         """
@@ -63,6 +65,7 @@ class BooklistRepository:
             description=description,
             cover_image_url=cover_image_url,
             is_public=is_public,
+            is_anonymous=is_anonymous,
             display_type=display_type,
             item_count=0,
             collection_count=0,
@@ -94,6 +97,7 @@ class BooklistRepository:
         description: Optional[str] = None,
         cover_image_url: Optional[str] = None,
         is_public: Optional[bool] = None,
+        is_anonymous: Optional[bool] = None,
         display_type: Optional[int] = None,
         display_thread_id: Optional[int] = None,
         display_channel_id: Optional[int] = None,
@@ -107,6 +111,7 @@ class BooklistRepository:
             "description": description,
             "cover_image_url": cover_image_url,
             "is_public": is_public,
+            "is_anonymous": is_anonymous,
             "display_type": display_type,
             "display_thread_id": display_thread_id,
             "display_channel_id": display_channel_id,
