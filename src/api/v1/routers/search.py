@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import traceback
 from typing import Any, Dict, List
@@ -32,7 +33,7 @@ from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
 from search.suggestion_service import SuggestionService
-from shared.enum import AbyssDefaults, CollectionType
+from shared.enum import AbyssDefaults, CollectionType, SearchTimeout
 from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.keyword_parser import KeywordParser
 
@@ -167,14 +168,17 @@ async def execute_search(
         exclude_thread_ids = request.exclude_thread_ids or []
 
         async with async_session_factory() as session:
-            # 执行搜索查询并更新展示计数
-            threads, total_threads = await _perform_search_and_update_counts(
-                session,
-                query_object,
-                ucb1_config,
-                request.limit,
-                exclude_thread_ids,  # type: ignore
-                request.offset,
+            # 执行搜索查询并更新展示计数（带超时保护）
+            threads, total_threads = await asyncio.wait_for(
+                _perform_search_and_update_counts(
+                    session,
+                    query_object,
+                    ucb1_config,
+                    request.limit,
+                    exclude_thread_ids,  # type: ignore
+                    request.offset,
+                ),
+                timeout=SearchTimeout.SEARCH.value,
             )
 
             # 获取当前用户ID用于后续收藏状态和未读数查询
@@ -239,6 +243,12 @@ async def execute_search(
             banner_carousel=banner_carousel,
             unread_count=unread_count,
         )
+    except asyncio.TimeoutError:
+        logger.warning(f"搜索超时（{SearchTimeout.SEARCH.value}s），请求参数: {request.model_dump()}")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"搜索请求超时，请尝试缩小搜索范围或稍后重试",
+        )
     except Exception as e:
         logger.error(f"搜索时发生内部错误: {e}", exc_info=True)
         raise HTTPException(
@@ -267,7 +277,10 @@ async def get_thread_detail(
     try:
         async with async_session_factory() as session:
             repo = SearchService(session, tag_cache_service_instance)
-            thread = await repo.get_thread_by_discord_id(thread_id)
+            thread = await asyncio.wait_for(
+                repo.get_thread_by_discord_id(thread_id),
+                timeout=SearchTimeout.THREAD_DETAIL.value,
+            )
             if not thread:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="帖子不存在或不可查看"
@@ -284,6 +297,12 @@ async def get_thread_detail(
 
             builder = ThreadDetailBuilder(channel_mappings_config)
             return builder.build(thread, collected_thread_ids)
+    except asyncio.TimeoutError:
+        logger.warning(f"获取帖子详情超时: thread_id={thread_id}")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="获取帖子详情超时，请稍后重试",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -345,7 +364,10 @@ async def get_similar_threads(
     try:
         async with async_session_factory() as session:
             service = SearchService(session, tag_cache_service_instance)
-            source_thread = await service.get_thread_by_discord_id(thread_id_int)
+            source_thread = await asyncio.wait_for(
+                service.get_thread_by_discord_id(thread_id_int),
+                timeout=SearchTimeout.THREAD_DETAIL.value,
+            )
             if not source_thread:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -354,11 +376,14 @@ async def get_similar_threads(
 
             ucb1_config = await cache_service_instance.get_ucb1_config()
 
-            threads, matched_tag_count = await service.find_similar_threads(
-                source_thread,
-                limit=limit,
-                exclude_channel_ids=exclude_channel_ids or None,
-                ucb1_config=ucb1_config,
+            threads, matched_tag_count = await asyncio.wait_for(
+                service.find_similar_threads(
+                    source_thread,
+                    limit=limit,
+                    exclude_channel_ids=exclude_channel_ids or None,
+                    ucb1_config=ucb1_config,
+                ),
+                timeout=SearchTimeout.SIMILAR_THREADS.value,
             )
 
             # 查当前用户的收藏状态
@@ -380,6 +405,12 @@ async def get_similar_threads(
                 matched_tag_count=matched_tag_count,
                 results=results,
             )
+    except asyncio.TimeoutError:
+        logger.warning(f"获取相似帖子超时: thread_id={thread_id}")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="获取相似帖子推荐超时，请稍后重试",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -426,13 +457,16 @@ async def get_search_suggestions(
     try:
         async with async_session_factory() as session:
             service = SuggestionService(session)
-            raw_data = await service.get_suggestions(
-                keyword=keyword,
-                limit=3,
-                current_user_id=user_id,
-                exclude_authors=exclude_authors,
-                exclude_keywords=exclude_keywords,
-                exclude_tags=exclude_tags,
+            raw_data = await asyncio.wait_for(
+                service.get_suggestions(
+                    keyword=keyword,
+                    limit=3,
+                    current_user_id=user_id,
+                    exclude_authors=exclude_authors,
+                    exclude_keywords=exclude_keywords,
+                    exclude_tags=exclude_tags,
+                ),
+                timeout=SearchTimeout.SUGGESTION.value,
             )
 
             return SearchSuggestionResponse(
@@ -463,6 +497,12 @@ async def get_search_suggestions(
                     for b in raw_data.booklists
                 ],
             )
+    except asyncio.TimeoutError:
+        logger.warning(f"获取搜索建议超时: keyword={keyword[:50]}")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="获取搜索建议超时，请稍后重试",
+        )
     except Exception as e:
         logger.error(f"获取搜索建议时发生内部错误: {e}\n{traceback.format_exc()}")
         raise HTTPException(

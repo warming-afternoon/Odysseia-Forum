@@ -8,6 +8,7 @@ from shared.enum.search_config_type import (
     SearchConfigDefaultsInt,
     SearchConfigType,
 )
+from shared.enum.search_timeout import SearchTimeout
 
 __all__ = [
     "CollectionType",
@@ -18,4 +19,5 @@ __all__ = [
     "SearchConfigDefaults",
     "SearchConfigDefaultsInt",
     "SearchConfigType",
+    "SearchTimeout",
 ]

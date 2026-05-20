@@ -17,6 +17,7 @@ from functools import partial
 import rjieba
 import re
 from shared.database import thread_fts_table
+from shared.enum import SearchTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -518,10 +519,15 @@ class ThreadRepository:
             # 逐个关键词构建 FTS5 MATCH 表达式
             all_exclude_parts = []
             for keyword in exclude_keywords_list:
-                # 使用 jieba 对排除关键词进行中文分词
-                raw_tokens = await loop.run_in_executor(
-                    None, partial(rjieba.cut, keyword)
-                )
+                # 使用 jieba 对排除关键词进行中文分词（带超时保护，防止线程池阻塞）
+                try:
+                    raw_tokens = await asyncio.wait_for(
+                        loop.run_in_executor(None, partial(rjieba.cut, keyword)),
+                        timeout=SearchTimeout.FTS_TOKENIZE.value,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"jieba 分词超时（排除关键词）: {keyword[:50]}")
+                    continue
                 # 清理 token 内部的双引号，防止破坏 FTS5 语法
                 tokens = []
                 for tok in raw_tokens:
@@ -600,9 +606,14 @@ class ThreadRepository:
                         # 例如 "原神启动" 分词为 ["原神", "启动"] → "原神"* "启动"*
                         # 多个分词时用括号包裹，FTS5 隐式 AND 连接
                         # 即 "原神"* AND "启动"*（帖子必须同时包含"原神*"和"启动*"）
-                        raw_tokens = await loop.run_in_executor(
-                            None, partial(rjieba.cut, kw)
-                        )
+                        try:
+                            raw_tokens = await asyncio.wait_for(
+                                loop.run_in_executor(None, partial(rjieba.cut, kw)),
+                                timeout=SearchTimeout.FTS_TOKENIZE.value,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(f"jieba 分词超时（正选关键词）: {kw[:50]}")
+                            continue
                         # 清理 token 内部的双引号，防止破坏 FTS5 语法
                         tokens = []
                         for tok in raw_tokens:
