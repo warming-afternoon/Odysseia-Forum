@@ -15,7 +15,6 @@ import discord
 import logging
 from discord.ext import commands
 import asyncio
-import uvicorn
 
 from shared.database import AsyncSessionFactory, init_db, close_db
 from shared.redis_client import RedisManager
@@ -30,25 +29,13 @@ from preferences.cog import Preferences
 from auditor.cog import Auditor
 from config.cog import Configuration
 from banner.cog import BannerManagement
+from banner.banner_service import send_review_message
 from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
 from author.cog import AuthorCog
 from shared.api_scheduler import APIScheduler
-from shared.enum import AbyssDefaults, SearchConfigDefaultsInt
-from api.v1.routers import (
-    preferences as preferences_api,
-    search as search_api,
-    meta as meta_api,
-    fetch_images as fetch_images_api,
-    banner as banner_api,
-    tags as tags_api,
-    discovery as discovery_api,
-    booklists as booklists_api,
-)
-from api.main import app as fastapi_app
-from api.v1.dependencies.security import initialize_api_security
-from api.v1.routers.auth import initialize_auth_config
+from shared.enum import SearchConfigDefaultsInt
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +79,12 @@ class MyBot(commands.Bot):
 
         if tasks:
             await asyncio.gather(*tasks)
+
+        # 刷新后重新发布频道元数据到 Redis
+        if self.cache_service:
+            await self.cache_service.publish_channel_metadata(
+                RedisManager.get_client()
+            )
         logger.info("核心缓存刷新完毕")
 
     def reload_config(self):
@@ -137,7 +130,7 @@ class MyBot(commands.Bot):
             session_factory=AsyncSessionFactory,
         )
         self.impression_cache_service = ImpressionCacheService(
-            bot=self, session_factory=AsyncSessionFactory
+            session_factory=AsyncSessionFactory, bot=self
         )
         self.impression_cache_service.start()
 
@@ -146,6 +139,9 @@ class MyBot(commands.Bot):
             self.tag_cache_service.build_cache(),
             self.cache_service.build_or_refresh_cache(),
         )
+
+        # 将频道元数据发布到 Redis，供 API 进程读取
+        await self.cache_service.publish_channel_metadata(RedisManager.get_client())
 
         # 2. 加载 Cogs
         cogs_to_load = [
@@ -203,8 +199,8 @@ class MyBot(commands.Bot):
         # 3. 注册全局事件监听器
         self.add_listener(self.on_index_updated_global, "on_index_updated")
 
-        # 4. 注入 API 路由依赖
-        self._inject_api_dependencies()
+        # 4. 启动 Banner 审核消息队列消费者
+        asyncio.create_task(self._consume_banner_review_queue())
 
         # --- 同步应用程序命令 ---
         try:
@@ -224,97 +220,6 @@ class MyBot(commands.Bot):
     # 辅助方法
     # -------------------------
 
-    def _inject_api_dependencies(self):
-        """向 API 路由模块注入运行期依赖"""
-
-        # 获取主服务器ID
-        main_guild_id = self._get_main_guild_id_from_config()
-
-        # 注入服务实例到 API 路由
-        preferences_api.async_session_factory = AsyncSessionFactory
-        preferences_api.main_guild_id = main_guild_id
-
-        meta_api.cache_service_instance = self.cache_service
-
-        search_api.async_session_factory = AsyncSessionFactory
-        search_api.cache_service_instance = self.cache_service
-        search_api.tag_cache_service_instance = self.tag_cache_service
-        search_api.impression_cache_service_instance = self.impression_cache_service
-        search_api.main_guild_id = main_guild_id
-
-        tags_api.async_session_factory = AsyncSessionFactory
-        tags_api.cache_service_instance = self.cache_service
-
-        discovery_api.async_session_factory = AsyncSessionFactory
-        discovery_api.main_guild_id = main_guild_id
-        discovery_api.cache_service_instance = self.cache_service
-
-        banner_api.async_session_factory = AsyncSessionFactory
-        banner_api.banner_config = self.config.get("banner", {})
-        banner_api.bot_instance = self
-
-        # 注入频道映射配置
-        channel_mappings_config = self._build_channel_mappings_config()
-        search_api.channel_mappings_config = channel_mappings_config
-        meta_api.channel_mappings_config = channel_mappings_config
-        tags_api.channel_mappings_config = channel_mappings_config
-        discovery_api.channel_mappings_config = channel_mappings_config
-        booklists_api.channel_mappings_config = channel_mappings_config
-
-        # 注入深渊区配置
-        raw_abyss = (
-            self.config.get("abyss", {}) if isinstance(self.config, dict) else {}
-        )
-        abyss_config = {
-            "channel_ids": raw_abyss.get("channel_ids", AbyssDefaults.CHANNEL_IDS),
-            "required_role_id": raw_abyss.get(
-                "required_role_id", AbyssDefaults.REQUIRED_ROLE_ID
-            ),
-        }
-
-        search_api.abyss_config = abyss_config
-        discovery_api.abyss_config = abyss_config
-
-        auth_section = (
-            self.config.get("auth", {}) if isinstance(self.config, dict) else {}
-        )
-        fetch_images_api.configure_fetch_images_router(
-            session_factory=AsyncSessionFactory,
-            bot_token=auth_section.get("bot_token"),
-            guild_id=auth_section.get("guild_id"),
-        )
-
-        logger.info("API 路由服务注入完成")
-
-    def _build_channel_mappings_config(self) -> dict[int, list[dict]]:
-        """将配置中的频道映射转换为 API 路由可直接使用的结构"""
-        raw_mappings = self.config.get("channel_mappings", {})
-        parsed_mappings = {}
-        for key, val in raw_mappings.items():
-            if key.startswith("_"):
-                continue
-
-            if not isinstance(val, list):
-                continue
-
-            try:
-                ch_id = int(key)
-            except (ValueError, TypeError):
-                continue
-
-            parsed_mappings[ch_id] = [
-                {
-                    "tag_name": mapping["tag_name"],
-                    "source_channel_ids": [
-                        int(channel_id)
-                        for channel_id in mapping.get("source_channel_ids", [])
-                    ],
-                }
-                for mapping in val
-                if isinstance(mapping, dict) and "tag_name" in mapping
-            ]
-        return parsed_mappings
-
     def _get_main_guild_id_from_config(self) -> int:
         """从配置文件读取主服务器 ID；为空时回退到默认值。"""
         raw_main_guild_id = self.config.get("main_guild_id")
@@ -328,6 +233,49 @@ class MyBot(commands.Bot):
                 "config.json 中的 main_guild_id 无法解析，已回退到默认主服务器 ID。"
             )
             return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
+
+    async def _consume_banner_review_queue(self):
+        """后台任务：消费 banner 审核消息队列，将审核消息发送到 Discord。"""
+        import json
+
+        from sqlmodel import select as sm_select
+        from models.banner_application import BannerApplication
+
+        redis = RedisManager.get_client()
+        banner_conf = self.config.get("banner", {})
+        logger.info("Banner 审核队列消费者已启动")
+        while not self.is_closed():
+            try:
+                result = await redis.brpop("banner:review:queue", timeout=5)
+                if result is None:
+                    continue
+                _, payload = result
+                data = json.loads(payload)
+                application_id = data["application_id"]
+
+                async with AsyncSessionFactory() as session:
+                    stmt = sm_select(BannerApplication).where(
+                        BannerApplication.id == application_id
+                    )
+                    r = await session.execute(stmt)
+                    application = r.scalar_one_or_none()
+                    if application is None:
+                        logger.warning(
+                            f"审核队列中的申请已不存在: {application_id}"
+                        )
+                        continue
+
+                    await send_review_message(
+                        bot=self,
+                        session_factory=AsyncSessionFactory,
+                        application=application,
+                        config=banner_conf,
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.error("消费 Banner 审核队列时出错", exc_info=True)
+                await asyncio.sleep(5)
 
 
 async def main():
@@ -352,6 +300,12 @@ async def main():
     redis_url = config.get("redis_url", "redis://odysseia-redis:6379/0")
     await RedisManager.init_redis(redis_url)
 
+    # 清除上一次运行残留的就绪标志，确保 API 不会在 Bot 重启期间读到过期状态
+    try:
+        await RedisManager.get_client().delete("cache:forum-ready")
+    except Exception:
+        pass
+
     bot = MyBot(intents=intents, config=config)
 
     @bot.event
@@ -361,31 +315,12 @@ async def main():
         else:
             logger.info("机器人已登录，但无法获取机器人信息。")
 
-    # 初始化 API 安全配置和认证配置
-    initialize_api_security()
-    initialize_auth_config()
-
-    # 配置并并行运行 Bot 和 API 服务器
-    api_config = config.get("api", {})
-    uvicorn_config = uvicorn.Config(
-        app=fastapi_app,
-        host=api_config.get("host", "0.0.0.0"),
-        port=api_config.get("port", 10810),
-        log_level="warning",
-        ssl_keyfile=api_config.get("ssl_key_path", None)
-        if api_config.get("enable_ssl", False)
-        else None,
-        ssl_certfile=api_config.get("ssl_cert_path", None)
-        if api_config.get("enable_ssl", False)
-        else None,
-    )
-    server = uvicorn.Server(uvicorn_config)
-
-    async with bot:
-        await asyncio.gather(bot.start(config["token"]), server.serve())
-
-    # 服务关闭时切断与Redis的连接
-    await RedisManager.close_redis()
+    try:
+        async with bot:
+            await bot.start(config["token"])
+    finally:
+        # 服务关闭时切断与Redis的连接
+        await RedisManager.close_redis()
 
 
 if __name__ == "__main__":

@@ -1,14 +1,12 @@
 services:
-  odysseia-forum:
+  odysseia-forum-bot:
     build:
       context: .
       dockerfile: Dockerfile
       target: base
-    container_name: odysseia-forum
+    container_name: odysseia-forum-bot
     restart: unless-stopped
     working_dir: /app
-    ports:
-      - "10810:10810"
     volumes:
       - ./config.json:/app/config.json:ro
       - ./data:/app/data
@@ -18,6 +16,41 @@ services:
     environment:
       PYTHONPATH: /app/src
       REDIS_URL: redis://odysseia-redis:6379/0
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f bot_main.py"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  odysseia-forum-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: base
+    container_name: odysseia-forum-api
+    restart: unless-stopped
+    working_dir: /app
+    ports:
+      - "10810:10810"
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./data:/app/data
+    environment:
+      PYTHONPATH: /app/src
+      REDIS_URL: redis://odysseia-redis:6379/0
+    depends_on:
+      odysseia-redis:
+        condition: service_healthy
+      odysseia-forum-bot:
+        condition: service_healthy
+    command: ["uv", "run", "api_main.py"]
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:10810/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
 
   odysseia-forum-migrate:
     build:

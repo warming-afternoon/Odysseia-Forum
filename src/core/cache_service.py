@@ -1,3 +1,4 @@
+import json
 import logging
 from collections import defaultdict
 
@@ -67,6 +68,39 @@ class CacheService:
 
         self.indexed_channels = new_channel_cache
         self.guild_channels = dict(new_guild_channels)
+
+    async def publish_channel_metadata(self, redis_client):
+        """将频道元数据序列化到 Redis，供 API 进程读取。"""
+        channels_data = []
+        for channel_id, channel in self.indexed_channels.items():
+            entry = {
+                "id": channel_id,
+                "name": channel.name,
+                "guild": {
+                    "id": channel.guild.id,
+                    "name": channel.guild.name,
+                },
+                "category_id": channel.category_id,
+                "category": {
+                    "id": channel.category.id,
+                    "name": channel.category.name,
+                }
+                if channel.category
+                else None,
+                "available_tags": [
+                    {"id": tag.id, "name": tag.name}
+                    for tag in channel.available_tags
+                ],
+            }
+            channels_data.append(entry)
+
+        await redis_client.set(
+            "cache:forum-channels", json.dumps(channels_data, ensure_ascii=False)
+        )
+        await redis_client.set("cache:forum-ready", "1")
+        logger.debug(
+            f"已将 {len(channels_data)} 个频道的元数据发布到 Redis（含 ready 信号）"
+        )
 
     async def refresh_bot_config_cache(self):
         """刷新 BotConfig 缓存。"""

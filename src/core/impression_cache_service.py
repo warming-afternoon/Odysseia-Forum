@@ -23,8 +23,8 @@ class ImpressionCacheService:
 
     def __init__(
         self,
-        bot: "MyBot",
         session_factory: async_sessionmaker,
+        bot: "MyBot | None" = None,
         flush_interval: int = 180,
     ):
         self.bot = bot
@@ -116,8 +116,9 @@ class ImpressionCacheService:
 
                 await session.commit()
 
-                # 发布配置更新事件
-                self.bot.dispatch("config_updated")
+                # 发布配置更新事件（仅 Bot 进程）
+                if self.bot is not None:
+                    self.bot.dispatch("config_updated")
 
                 logger.debug(
                     f"成功回写 {len(data_to_flush)} 个帖子的展示次数，总增量为 {total_increment}。"

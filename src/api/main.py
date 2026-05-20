@@ -1,9 +1,16 @@
 import json
+import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import ORJSONResponse
+from fastapi.responses import JSONResponse, ORJSONResponse
+from sqlalchemy import text
+
+from shared.database import AsyncSessionFactory
+from shared.redis_client import RedisManager
+
+logger = logging.getLogger(__name__)
 
 from api.v1.routers import (
     auth,
@@ -108,8 +115,43 @@ app.include_router(discovery.router, prefix="/v1")
 # 包含 v1 的健康检查端点
 @app.get("/v1/health", summary="健康检查", tags=["系统"])
 async def health_check():
-    """API 服务健康检查端点"""
-    return {"status": "ok"}
+    """API 服务健康检查端点，检查数据库和 Redis 连通性"""
+    healthy = True
+    checks = {}
+
+    # 数据库检查
+    try:
+        async with AsyncSessionFactory() as session:
+            await session.execute(text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception:
+        checks["database"] = "unavailable"
+        healthy = False
+        logger.warning("健康检查：数据库不可达", exc_info=True)
+
+    # Redis 检查
+    try:
+        redis = RedisManager.get_client()
+        await redis.ping()
+        checks["redis"] = "ok"
+    except Exception:
+        checks["redis"] = "unavailable"
+        healthy = False
+        logger.warning("健康检查：Redis 不可达", exc_info=True)
+
+    # Bot 元数据就绪检查（仅观测，不影响健康状态）
+    try:
+        redis = RedisManager.get_client()
+        ready = await redis.get("cache:forum-ready")
+        checks["bot_metadata"] = "ready" if ready else "not_ready"
+    except Exception:
+        checks["bot_metadata"] = "unknown"
+
+    status_code = 200 if healthy else 503
+    return JSONResponse(
+        content={"status": "ok" if healthy else "degraded", "checks": checks},
+        status_code=status_code,
+    )
 
 
 @app.get("/", summary="API 根路径", tags=["系统"])

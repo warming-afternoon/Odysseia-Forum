@@ -1,24 +1,22 @@
 """Banner申请API路由"""
 
+import json
 import logging
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import get_current_user, require_auth
-from banner.banner_service import BannerService, send_review_message
-
-if TYPE_CHECKING:
-    from bot_main import MyBot
+from banner.banner_service import BannerService
+from shared.redis_client import RedisManager
 
 logger = logging.getLogger(__name__)
 
-# 全局变量，将在应用启动时由 bot_main.py 注入
+# 全局变量，将在应用启动时注入
 async_session_factory: async_sessionmaker | None = None
 banner_config: dict | None = None
-bot_instance: "MyBot | None" = None
 
 
 class BannerApplicationRequest(BaseModel):
@@ -87,22 +85,21 @@ async def apply_banner(
 
             application = result.application
 
-            # 发送审核消息到指定子区
-            if bot_instance and banner_config and application:
-                review_sent = await send_review_message(
-                    bot=bot_instance,
-                    session_factory=async_session_factory,
-                    application=application,
-                    config=banner_config,
-                    guild_id=None,  # API 调用没有 guild_id 上下文
-                )
-
-                if not review_sent:
+            # 将审核消息放入 Redis 队列，由 Bot 进程消费发送
+            if banner_config and application:
+                try:
+                    redis = RedisManager.get_client()
+                    await redis.lpush(
+                        "banner:review:queue",
+                        json.dumps({"application_id": application.id}),
+                    )
+                except Exception:
                     logger.warning(
-                        f"审核消息发送失败，但申请已创建。申请ID: {application.id}"
+                        f"审核消息入队失败，但申请已创建。申请ID: {application.id}",
+                        exc_info=True,
                     )
             else:
-                logger.warning("Bot实例或配置未初始化，无法发送审核消息")
+                logger.warning("Banner配置未初始化，跳过审核消息入队")
 
             return BannerApplicationResponse(
                 success=True,
