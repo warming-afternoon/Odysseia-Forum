@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 class MyBot(commands.Bot):
     def __init__(self, *, intents: discord.Intents, config: dict):
         proxy = config.get("proxy")
-        bot_kwargs = {"command_prefix": "!", "intents": intents}
+        bot_kwargs = {"command_prefix": "!", "intents": intents, "max_messages": 0, "chunk_guilds_at_startup": False}
         if proxy:
             bot_kwargs["proxy"] = proxy
         super().__init__(**bot_kwargs)

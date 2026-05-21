@@ -40,6 +40,8 @@ def _setup_tokenizer_on_connect(dbapi_connection, connection_record):
     """
     try:
         dbapi_connection.execute("PRAGMA journal_mode=WAL")
+        dbapi_connection.execute("PRAGMA synchronous=NORMAL")
+        dbapi_connection.execute("PRAGMA busy_timeout=2000")
         # dbapi_connection 是 SQLAlchemy 的异步包装器 (AsyncAdapt_...)
         # 访问其 ._connection 属性，获取原始的 aiosqlite.Connection
         aiosqlite_conn = dbapi_connection._connection

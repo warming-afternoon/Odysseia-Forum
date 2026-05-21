@@ -13,13 +13,17 @@ from models import Tag, TagVote, Thread, ThreadTagLink
 from ThreadManager.update_data_dto import UpdateData
 
 import asyncio
-from functools import partial
 import rjieba
 import re
 from shared.database import thread_fts_table
 from shared.enum import SearchTimeout
 
 logger = logging.getLogger(__name__)
+
+
+def _batch_cut(keywords: list[str]) -> list[list[str]]:
+    """批量 jieba 分词"""
+    return [list(rjieba.cut(kw)) for kw in keywords]
 
 
 class ThreadRepository:
@@ -518,16 +522,17 @@ class ThreadRepository:
 
             # 逐个关键词构建 FTS5 MATCH 表达式
             all_exclude_parts = []
-            for keyword in exclude_keywords_list:
-                # 使用 jieba 对排除关键词进行中文分词（带超时保护，防止线程池阻塞）
-                try:
-                    raw_tokens = await asyncio.wait_for(
-                        loop.run_in_executor(None, partial(rjieba.cut, keyword)),
-                        timeout=SearchTimeout.FTS_TOKENIZE.value,
-                    )
-                except asyncio.TimeoutError:
-                    logger.warning(f"jieba 分词超时（排除关键词）: {keyword[:50]}")
-                    continue
+            # 批量 jieba 分词，减少线程池提交次数
+            try:
+                all_raw_tokens = await asyncio.wait_for(
+                    loop.run_in_executor(None, _batch_cut, exclude_keywords_list),
+                    timeout=SearchTimeout.FTS_TOKENIZE.value,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("jieba 分词超时（排除关键词）")
+                all_raw_tokens = [[] for _ in exclude_keywords_list]
+
+            for keyword, raw_tokens in zip(exclude_keywords_list, all_raw_tokens):
                 # 清理 token 内部的双引号，防止破坏 FTS5 语法
                 tokens = []
                 for tok in raw_tokens:
@@ -586,6 +591,36 @@ class ThreadRepository:
                 group.strip() for group in keywords_str.split(",") if group.strip()
             ]
 
+            # 收集所有需要分词的普通关键词，一次批量提交到线程池
+            _jieba_inputs = []
+            for group in and_groups:
+                for kw in group.split("/"):
+                    kw = kw.strip()
+                    if not kw:
+                        continue
+                    if not (kw.startswith('"') and kw.endswith('"') and len(kw) > 2):
+                        _jieba_inputs.append(kw)
+
+            _token_map = {}
+            if _jieba_inputs:
+                try:
+                    _all_raw = await asyncio.wait_for(
+                        loop.run_in_executor(None, _batch_cut, _jieba_inputs),
+                        timeout=SearchTimeout.FTS_TOKENIZE.value,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning("jieba 分词超时（正选关键词）")
+                    _all_raw = [[] for _ in _jieba_inputs]
+
+                for kw, raw_tokens in zip(_jieba_inputs, _all_raw):
+                    tokens = []
+                    for tok in raw_tokens:
+                        clean_tok = tok.strip().replace('"', "")
+                        if clean_tok:
+                            tokens.append(clean_tok)
+                    if tokens:
+                        _token_map[kw] = tokens
+
             for group in and_groups:
                 # 按斜杠拆分同一组内的 OR 关键词
                 or_keywords = []
@@ -595,31 +630,12 @@ class ThreadRepository:
                         continue
 
                     # 支持精确匹配语法：用双引号包裹的关键词不做分词，直接精确匹配
-                    # 例如 '"原神启动"' → FTS5 精确匹配 "原神启动"（不分词）
                     if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
-                        # 清理用户输入的非法内嵌双引号，防止破坏 FTS5 语法
                         exact_kw = kw[1:-1].strip().replace('"', "")
                         if exact_kw:
                             or_keywords.append(f'"{exact_kw}"')
                     else:
-                        # 普通关键词：用 jieba 分词后，每个分词结果加 * 前缀匹配
-                        # 例如 "原神启动" 分词为 ["原神", "启动"] → "原神"* "启动"*
-                        # 多个分词时用括号包裹，FTS5 隐式 AND 连接
-                        # 即 "原神"* AND "启动"*（帖子必须同时包含"原神*"和"启动*"）
-                        try:
-                            raw_tokens = await asyncio.wait_for(
-                                loop.run_in_executor(None, partial(rjieba.cut, kw)),
-                                timeout=SearchTimeout.FTS_TOKENIZE.value,
-                            )
-                        except asyncio.TimeoutError:
-                            logger.warning(f"jieba 分词超时（正选关键词）: {kw[:50]}")
-                            continue
-                        # 清理 token 内部的双引号，防止破坏 FTS5 语法
-                        tokens = []
-                        for tok in raw_tokens:
-                            clean_tok = tok.strip().replace('"', "")
-                            if clean_tok:
-                                tokens.append(clean_tok)
+                        tokens = _token_map.get(kw)
                         if tokens:
                             expr = " ".join(f'"{t}"*' for t in tokens)
                             or_keywords.append(f"({expr})" if len(tokens) > 1 else expr)
