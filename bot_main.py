@@ -35,6 +35,7 @@ from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
 from author.cog import AuthorCog
+from backup.cog import BackupCog
 from shared.api_scheduler import APIScheduler
 from shared.enum import SearchConfigDefaultsInt
 
@@ -191,6 +192,7 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
             ),
+            BackupCog(bot=self, config=self.config),
         ]
         await asyncio.gather(
             *(self.add_cog(cog) for cog in cogs_to_load), return_exceptions=True
