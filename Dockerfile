@@ -29,7 +29,7 @@ COPY start.sh ./
 
 RUN uv sync --locked --no-dev
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data /app/logs
 
 CMD ["uv", "run", "bot_main.py"]
 

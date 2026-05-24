@@ -13,6 +13,7 @@ if sys.platform != "win32":
 import json
 import discord
 import logging
+from logging.handlers import TimedRotatingFileHandler
 from discord.ext import commands
 import asyncio
 
@@ -283,6 +284,15 @@ async def main():
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
     )
+
+    try:
+        file_handler = TimedRotatingFileHandler(
+            "/app/logs/bot.log", when="midnight", backupCount=15, encoding="utf-8"
+        )
+        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        logging.getLogger().addHandler(file_handler)
+    except Exception:
+        logging.getLogger().warning("无法创建日志文件处理器，仅输出到控制台")
 
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)

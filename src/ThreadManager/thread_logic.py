@@ -43,7 +43,7 @@ class ThreadLogic:
         if not success:
             return
 
-        logger.info(f"帖子 {thread.id} 首楼被删，已将其隐藏")
+        logger.info(f"帖子 {thread.id}(频道:{thread.parent_id}) 首楼被删，已将其隐藏")
 
         # if not thread.owner_id:
         #     return
@@ -52,7 +52,7 @@ class ThreadLogic:
         # view = ThreadVisibilityView(self.bot, self.session_factory)
         # content = (
         #     f"<@{thread.owner_id}>\n"
-        #     f"系统检测到您的首楼消息已被删除，为防止死链，**本帖已自动从搜索系统中隐藏**。\n"
+        #     f"系统检测到您的首楼消息已被删除，为防止死链，**本帖已自动从新搜索系统中隐藏**。\n"
         #     f"如果您仍希望本帖在搜索中可见（例如您已在楼中补档），请点击下方按钮重新开放可见性。"
         # )
 
