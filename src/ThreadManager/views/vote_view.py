@@ -1,3 +1,5 @@
+"""标签投票视图：展示标签评分界面并处理投票交互。"""
+
 import logging
 
 import discord

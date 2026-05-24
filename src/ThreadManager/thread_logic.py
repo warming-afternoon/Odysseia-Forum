@@ -1,3 +1,5 @@
+"""ThreadManager 的业务逻辑层：处理帖子删除、互斥标签、反应补录与发布更新。"""
+
 import logging
 import re
 from typing import TYPE_CHECKING, Any, Dict, List
@@ -330,31 +332,6 @@ class ThreadLogic:
         async with self.session_factory() as session:
             tag_service = TagRepository(session)
             await tag_service.get_or_create_tags(tags_data)
-
-    async def update_reaction_count_and_sync(self, thread: discord.Thread):
-        """(协程) 更新帖子的反应数。如果记录不存在，则触发一次完整的同步进行补录。"""
-        try:
-            first_msg = await thread.get_partial_message(thread.id).fetch()
-            reaction_count = (
-                max([r.count for r in first_msg.reactions])
-                if first_msg.reactions
-                else 0
-            )
-            async with self.session_factory() as session:
-                repo = ThreadRepository(session)
-                update_succeeded = await repo.update_thread_reaction_count(
-                    thread.id, reaction_count
-                )
-
-                if not update_succeeded:
-                    logger.warning(f"帖子 {thread.id} 反应数更新失败，触发同步补录。")
-                    await self.sync_service.sync_thread(thread=thread)
-        except discord.NotFound:
-            pass
-        except Exception:
-            logger.warning(
-                f"更新或补录反应数时失败 (帖子ID: {thread.id})", exc_info=True
-            )
 
     async def process_publish_update(
         self,

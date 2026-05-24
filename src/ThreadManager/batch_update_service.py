@@ -1,3 +1,5 @@
+"""批量更新服务：将回复计数和活跃时间缓存在内存中，定时批量写入数据库。"""
+
 import asyncio
 import logging
 from collections import defaultdict
@@ -72,6 +74,16 @@ class BatchUpdateService:
         """
         async with self.lock:
             self.pending_updates[thread_id]["increment"] -= 1
+
+    async def add_active_at_update(self, thread_id: int, active_time: datetime):
+        """
+        仅更新帖子的活跃时间，不增加回复计数。
+        用于消息编辑等不产生新回复但需要刷新活跃度的场景。
+        """
+        async with self.lock:
+            data = self.pending_updates[thread_id]
+            if data["last_active_at"] is None or active_time > data["last_active_at"]:
+                data["last_active_at"] = active_time
 
     async def flush_to_db(self):
         """将内存中的所有待处理更新写入数据库，并处理幽灵数据。"""

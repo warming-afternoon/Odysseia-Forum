@@ -121,10 +121,7 @@ class ThreadRepository:
             .where(Thread.thread_id == thread_id)  # type: ignore
             .values(reaction_count=reaction_count)
         )
-        # 执行语句并获取结果对象
         result = await self.session.execute(stmt)
-        await self.session.commit()
-        # 返回 rowcount 是否大于 0
         return result.rowcount > 0
 
     async def record_tag_vote(

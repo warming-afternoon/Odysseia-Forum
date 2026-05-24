@@ -1,3 +1,5 @@
+"""批量更新服务的数据传输对象。"""
+
 from datetime import datetime
 from typing import TypedDict
 

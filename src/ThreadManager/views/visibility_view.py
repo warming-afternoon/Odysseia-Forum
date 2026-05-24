@@ -1,3 +1,5 @@
+"""帖子可见性切换视图：首楼被删除后允许贴主恢复或隐藏帖子。"""
+
 import discord
 import logging
 from typing import TYPE_CHECKING

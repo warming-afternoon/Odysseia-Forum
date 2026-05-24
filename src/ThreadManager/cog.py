@@ -1,3 +1,5 @@
+"""ThreadManager Cog：监听 Discord 事件并调度帖子同步、状态更新与标签评价。"""
+
 import asyncio
 import datetime
 from typing import TYPE_CHECKING
@@ -10,6 +12,7 @@ from core.thread_repository import ThreadRepository
 from shared.safe_defer import safe_defer
 from shared.enum import ConstantEnum
 from ThreadManager.batch_update_service import BatchUpdateService
+from ThreadManager.reaction_batch_service import ReactionBatchService
 from ThreadManager.thread_logic import ThreadLogic
 from ThreadManager.views.visibility_view import ThreadVisibilityView
 from ThreadManager.views.vote_view import TagVoteView
@@ -27,6 +30,7 @@ class ThreadManager(commands.Cog):
     """处理帖子同步、状态检测与评价"""
 
     def __init__(self, bot: "MyBot", session_factory: async_sessionmaker, config: dict):
+        """初始化 ThreadManager，构建批量更新服务与业务逻辑处理器。"""
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
@@ -41,6 +45,16 @@ class ThreadManager(commands.Cog):
             session_factory, sync_service=self.sync_service, interval=update_interval
         )
 
+        reaction_flush_interval = self.config.get("performance", {}).get(
+            "reaction_flush_interval", 10
+        )
+        self.reaction_batch_service = ReactionBatchService(
+            bot=self.bot,
+            session_factory=session_factory,
+            sync_service=self.sync_service,
+            interval=reaction_flush_interval,
+        )
+
         # 实例化业务逻辑处理器
         self.logic = ThreadLogic(bot, session_factory, config, self.sync_service)
         logger.info("ThreadManager 模块已加载")
@@ -48,12 +62,14 @@ class ThreadManager(commands.Cog):
     async def cog_load(self):
         """当 Cog 加载时，启动后台任务，并注册持久化视图。"""
         self.batch_update_service.start()
+        self.reaction_batch_service.start()
         # 注册可见性切换的持久化视图
         self.bot.add_view(ThreadVisibilityView(self.bot, self.session_factory))
 
     async def cog_unload(self):
         """当 Cog 卸载时，确保所有数据都被写入。"""
         await self.batch_update_service.stop()
+        await self.reaction_batch_service.stop()
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道是否已索引"""
@@ -64,6 +80,7 @@ class ThreadManager(commands.Cog):
     # ---------------------------------------------------------
     @commands.Cog.listener()
     async def on_thread_create(self, thread: discord.Thread):
+        """新帖子创建时：同步索引并自动让贴主关注。"""
         if self.is_channel_indexed(channel_id=thread.parent_id):
             # 延时 5s 再进行同步。减小请求失败概率
             await asyncio.sleep(5)
@@ -83,6 +100,7 @@ class ThreadManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_thread_member_join(self, member: discord.ThreadMember):
+        """用户加入帖子时：自动关注并标记为已查看。"""
         try:
             thread = member.thread
             if not thread or not self.is_channel_indexed(thread.parent_id):
@@ -106,6 +124,7 @@ class ThreadManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
+        """帖子标签或名称变更时：应用互斥规则并触发同步。"""
         if self.is_channel_indexed(channel_id=after.parent_id) and (
             before.applied_tags != after.applied_tags or before.name != after.name
         ):
@@ -121,6 +140,7 @@ class ThreadManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
+        """新消息发送时：将帖子的回复计数和活跃时间增量写入缓存。"""
         if (
             not message.guild
             or not isinstance(message.channel, discord.Thread)
@@ -137,6 +157,7 @@ class ThreadManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+        """消息编辑时：首楼编辑触发同步，普通回复刷新活跃时间。"""
         if not payload.guild_id:
             return
 
@@ -150,16 +171,15 @@ class ThreadManager(commands.Cog):
                         thread=channel, fetch_if_incomplete=True
                     )
                 else:
-                    async with self.session_factory() as session:
-                        repo = ThreadRepository(session)
-                        await repo.update_thread_last_active_at(
-                            channel.id, datetime.datetime.now(datetime.timezone.utc)
-                        )
+                    await self.batch_update_service.add_active_at_update(
+                        channel.id, datetime.datetime.now(datetime.timezone.utc)
+                    )
         except Exception:
             logger.warning("处理消息编辑事件失败", exc_info=True)
 
     @commands.Cog.listener()
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        """消息删除时：首楼删除则隐藏帖子，普通回复则递减计数。"""
         if not payload.guild_id:
             return
         try:
@@ -177,6 +197,7 @@ class ThreadManager(commands.Cog):
 
     @commands.Cog.listener()
     async def on_raw_reaction_add(self, payload: discord.RawReactionActionEvent):
+        """反应添加时：更新帖子反应数，60 天内帖子同步记录趋势。"""
         if not payload.guild_id:
             return
         try:
@@ -200,17 +221,13 @@ class ThreadManager(commands.Cog):
                             "reaction", channel.id, 1
                         )
 
-                await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: self.logic.update_reaction_count_and_sync(
-                        channel
-                    ),  # noqa: E501
-                    priority=5,
-                )
+                await self.reaction_batch_service.add_update(channel.id)
         except Exception:
             logger.warning("处理反应添加事件失败", exc_info=True)
 
     @commands.Cog.listener()
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
+        """反应移除时：更新帖子反应数。"""
         if not payload.guild_id:
             return
         try:
@@ -220,12 +237,7 @@ class ThreadManager(commands.Cog):
                 and self.is_channel_indexed(channel.parent_id)
                 and payload.message_id == channel.id
             ):
-                await self.bot.api_scheduler.submit(
-                    coro_factory=lambda: self.logic.update_reaction_count_and_sync(
-                        channel
-                    ),  # noqa: E501
-                    priority=5,
-                )
+                await self.reaction_batch_service.add_update(channel.id)
         except Exception:
             logger.warning("处理反应移除事件失败", exc_info=True)
 
@@ -236,6 +248,7 @@ class ThreadManager(commands.Cog):
     #                       description="发布帖子更新（仅贴主可用）")
     # @app_commands.describe(消息链接="更新消息的Discord链接")
     async def publish_update(self, interaction: discord.Interaction, 消息链接: str):
+        """贴主发布帖子更新公告。"""
         await safe_defer(interaction)
         try:
             if not isinstance(interaction.channel, discord.Thread):
@@ -262,6 +275,7 @@ class ThreadManager(commands.Cog):
     #     name="标签评价", description="对当前帖子的标签进行评价（赞或踩）"
     # )
     async def tag_rate(self, interaction: discord.Interaction):
+        """打开标签评价面板，允许用户对当前帖子的标签进行赞踩投票。"""
         await safe_defer(interaction)
         try:
             if not isinstance(interaction.channel, discord.Thread):
