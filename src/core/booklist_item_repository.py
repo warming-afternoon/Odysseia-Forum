@@ -101,6 +101,7 @@ class BooklistItemRepository:
             comment=item.comment,
             display_order=item.display_order,
             added_at=item.created_at,
+            tournament_participated_at=item.tournament_participated_at,
             collected_flag=False,
         )
         return item_detail
@@ -227,6 +228,7 @@ class BooklistItemRepository:
                 comment=item.comment,
                 display_order=item.display_order,
                 added_at=item.created_at,
+                tournament_participated_at=item.tournament_participated_at,
                 collected_flag=False,
             )
             items.append(item_detail)

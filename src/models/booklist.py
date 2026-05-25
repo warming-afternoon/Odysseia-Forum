@@ -37,6 +37,14 @@ class Booklist(SQLModel, table=True):
     )
     """是否为用户的默认书单"""
 
+    is_tournament: bool = Field(default=False, index=True, description="是否为赛事书单")
+    """是否为赛事书单"""
+
+    tournament_channel_id: Optional[int] = Field(
+        default=None, index=True, unique=True, description="赛事关联的 Discord 频道ID"
+    )
+    """赛事关联的 Discord 频道ID"""
+
     display_type: int = Field(
         default=1, description="展示方式: 1-加入时间倒序, 2-display_order"
     )

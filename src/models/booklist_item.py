@@ -33,6 +33,11 @@ class BooklistItem(SQLModel, table=True):
     comment: Optional[str] = Field(default=None, description="书单主对该帖子的备注")
     """书单主对该帖子的备注"""
 
+    tournament_participated_at: Optional[datetime] = Field(
+        default=None, description="参赛时间（赛事专用）"
+    )
+    """参赛时间（赛事专用）"""
+
     display_message_id: Optional[int] = Field(default=None, description="展示消息的ID")
     """展示消息的 Discord ID"""
 

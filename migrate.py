@@ -299,6 +299,13 @@ def main():
         print("--- Alembic 输出结束 ---")
 
         print_success("数据库迁移成功完成！")
+
+        # 输出当前数据库版本
+        current_cmd = ["alembic", "current"]
+        current_result = subprocess.run(
+            current_cmd, check=True, capture_output=True, text=True, encoding="utf-8"
+        )
+        print_info(f"当前数据库版本: {current_result.stdout.strip()}")
     except FileNotFoundError:
         print_error("错误：'alembic' 命令未找到。")
         print_error("请确保 Alembic 已通过 uv 安装在项目的开发依赖中。")

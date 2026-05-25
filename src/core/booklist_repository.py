@@ -55,6 +55,8 @@ class BooklistRepository:
         is_public: bool = True,
         is_anonymous: bool = False,
         display_type: int = 1,
+        is_tournament: bool = False,
+        tournament_channel_id: Optional[int] = None,
     ) -> Booklist:
         """
         创建新书单
@@ -67,6 +69,8 @@ class BooklistRepository:
             is_public=is_public,
             is_anonymous=is_anonymous,
             display_type=display_type,
+            is_tournament=is_tournament,
+            tournament_channel_id=tournament_channel_id,
             item_count=0,
             collection_count=0,
             view_count=0,
@@ -87,6 +91,16 @@ class BooklistRepository:
         根据ID获取书单
         """
         statement = select(Booklist).where(Booklist.id == booklist_id)
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def get_booklist_by_tournament_channel_id(
+        self, tournament_channel_id: int
+    ) -> Optional[Booklist]:
+        """根据赛事频道ID查找赛事书单"""
+        statement = select(Booklist).where(
+            Booklist.tournament_channel_id == tournament_channel_id
+        )
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 
@@ -167,6 +181,7 @@ class BooklistRepository:
         self,
         owner_id: Optional[int] = None,
         is_public: Optional[bool] = None,
+        is_tournament: Optional[bool] = None,
         keywords: Optional[str] = None,
         included_thread_id: Optional[int] = None,
         collected_by_user_id: Optional[int] = None,
@@ -184,6 +199,8 @@ class BooklistRepository:
             query = query.where(Booklist.owner_id == owner_id)
         if is_public is not None:
             query = query.where(Booklist.is_public == is_public)
+        if is_tournament is not None:
+            query = query.where(Booklist.is_tournament == is_tournament)
         if keywords:
             search_pattern = f"%{keywords}%"
             query = query.where(
@@ -291,6 +308,9 @@ class BooklistRepository:
                     owner_id=owner_id,
                     comment=item_data.comment,
                     display_order=display_order,
+                    tournament_participated_at=getattr(
+                        item_data, "tournament_participated_at", None
+                    ),
                 )
             )
 

@@ -76,6 +76,11 @@ class BooklistItemDetail(BaseModel):
     comment: Optional[str] = Field(None, description="书单主对该帖子的推荐语")
     """书单主对该帖子的推荐语"""
 
+    tournament_participated_at: Optional[datetime] = Field(
+        None, description="参赛时间（赛事专用）"
+    )
+    """参赛时间（赛事专用）"""
+
     display_order: int = Field(description="排序权重")
     """排序权重"""
 

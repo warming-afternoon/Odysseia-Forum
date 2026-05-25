@@ -25,6 +25,7 @@ from api.v1.routers import (
     search,
     tags,
     discovery,
+    tournaments,
 )
 
 # 读取配置
@@ -110,6 +111,7 @@ app.include_router(collections.router, prefix="/v1")
 app.include_router(booklists.router, prefix="/v1")
 app.include_router(tags.router, prefix="/v1")
 app.include_router(discovery.router, prefix="/v1")
+app.include_router(tournaments.router, prefix="/v1")
 
 
 # 包含 v1 的健康检查端点

@@ -1,11 +1,11 @@
 from datetime import datetime
-from typing import Optional, Union, Any
+from typing import List, Optional, Union, Any
 
 from pydantic import BaseModel, Field, field_validator
 
 
-class BooklistItemAddData(BaseModel):
-    """书单项添加数据"""
+class TournamentItemAddData(BaseModel):
+    """赛事项添加数据"""
 
     thread_id: Union[int, str] = Field(..., description="Discord Thread ID")
     """Discord Thread ID"""
@@ -13,13 +13,10 @@ class BooklistItemAddData(BaseModel):
     comment: Optional[str] = Field(None, description="推荐语/备注")
     """推荐语/备注"""
 
-    display_order: Optional[int] = Field(None, description="排序权重")
-    """排序权重"""
-
     tournament_participated_at: Optional[datetime] = Field(
-        None, description="参赛时间（赛事专用）"
+        None, description="参赛时间"
     )
-    """参赛时间（赛事专用）"""
+    """参赛时间"""
 
     @field_validator("thread_id", mode="before")
     @classmethod
@@ -30,3 +27,10 @@ class BooklistItemAddData(BaseModel):
         if isinstance(v, str) and v.isdigit():
             return int(v)
         return v
+
+
+class TournamentItemsAddRequest(BaseModel):
+    """批量添加赛事项请求"""
+
+    items: List[TournamentItemAddData] = Field(..., description="要添加的帖子列表")
+    """要添加的帖子列表"""

@@ -12,11 +12,12 @@ logger = logging.getLogger(__name__)
 
 # 全局变量，在应用启动时初始化
 _JWT_SECRET = None
+_API_KEY = None
 
 
 def initialize_api_security():
     """在应用启动时调用，初始化 API 安全配置"""
-    global _JWT_SECRET
+    global _JWT_SECRET, _API_KEY
     try:
         with open("config.json", "r", encoding="utf-8") as f:
             config = json.load(f)
@@ -25,6 +26,11 @@ def initialize_api_security():
         _JWT_SECRET = config.get("auth", {}).get("jwt_secret")
         if _JWT_SECRET:
             logger.info("JWT 密钥已加载")
+
+        # 加载 API Key（用于BOT机机通信认证）
+        _API_KEY = config.get("api", {}).get("api_key")
+        if _API_KEY:
+            logger.info("API Key 已加载")
 
         logger.info("API 安全配置已初始化")
     except (FileNotFoundError, ValueError) as e:
@@ -78,3 +84,20 @@ async def require_auth(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="未登录或会话失效"
         )
     return user
+
+
+async def require_api_key(
+    api_key: Optional[str] = Depends(api_key_header),
+) -> bool:
+    """验证 X-API-Key 请求头，用于 BOT 机机通信认证"""
+    if not _API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API key 认证未配置",
+        )
+    if not api_key or api_key != _API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效或缺失的 API Key",
+        )
+    return True

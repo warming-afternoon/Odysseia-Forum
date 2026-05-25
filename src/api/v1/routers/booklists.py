@@ -172,6 +172,9 @@ async def list_public_booklists(
     included_thread_id: Optional[int] = Query(
         None, description="筛选包含指定帖子ID的书单"
     ),
+    is_tournament: Optional[bool] = Query(
+        None, description="筛选赛事书单（true=仅赛事，false=仅非赛事，不传=全部）"
+    ),
     search_by_collect: Optional[bool] = Query(
         None, description="从当前用户收藏的书单中筛选"
     ),
@@ -197,6 +200,7 @@ async def list_public_booklists(
     - owner_id: 按创建者筛选
     - keywords: 模糊搜索关键词(标题和简介)
     - included_thread_id: 筛选包含指定帖子ID的书单
+    - is_tournament: 筛选赛事书单
     - sort_method: 排序方式 (1: 书单内帖子数, 2: 浏览数, 3: 收藏数, 4: 创建时间, 5: 更新时间)
     - sort_order: 排序顺序 ('asc' 或 'desc')
     - limit: 返回数量
@@ -213,6 +217,7 @@ async def list_public_booklists(
             booklists, total = await service.list_booklists(
                 owner_id=owner_id,
                 is_public=True,  # 强制只搜索公开书单
+                is_tournament=is_tournament,
                 keywords=keywords,
                 included_thread_id=included_thread_id,
                 collected_by_user_id=collected_by_user_id,
