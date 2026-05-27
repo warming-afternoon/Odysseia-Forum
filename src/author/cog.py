@@ -52,7 +52,7 @@ class AuthorCog(commands.Cog, name="Author"):
     async def _pop_user_ids() -> list[int]:
         """从 Redis 集合中原子弹出最多 50 个待拉取用户 ID"""
         client = RedisManager.get_client()
-        raw_ids = await client.spop("author_fetch_queue", 50)
+        raw_ids = await client.spop("author_fetch_queue", 50)  # pyright: ignore[reportGeneralTypeIssues]
         if not raw_ids:
             return []
         result: list[int] = []
