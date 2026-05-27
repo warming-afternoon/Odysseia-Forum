@@ -6,10 +6,13 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
+import orjson
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from api.v1.utils.jwt_utils import sign_jwt, verify_jwt
+from shared.enum.constant_enum import ConstantEnum
+from shared.redis_client import RedisManager
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,31 @@ def initialize_auth_config():
     except (FileNotFoundError, ValueError) as e:
         logger.error(f"无法加载认证配置: {e}")
         _AUTH_CONFIG = None
+
+
+async def _get_cached_member(user_id: str) -> Optional[dict]:
+    """从 Redis 读取缓存的 Discord 成员信息"""
+    try:
+        client = RedisManager.get_client()
+        raw = await client.get(f"user:discord:{user_id}")
+        if raw:
+            return orjson.loads(raw)
+    except Exception:
+        logger.warning("读取用户缓存失败", exc_info=True)
+    return None
+
+
+async def _cache_member(user_id: str, member: dict) -> None:
+    """将 Discord 成员信息写入 Redis 缓存，TTL 1 天"""
+    try:
+        client = RedisManager.get_client()
+        await client.setex(
+            f"user:discord:{user_id}",
+            int(ConstantEnum.AUTH_CACHE_TTL),
+            orjson.dumps(member).decode(),
+        )
+    except Exception:
+        logger.warning("写入用户缓存失败", exc_info=True)
 
 
 router = APIRouter(prefix="/auth", tags=["认证"])
@@ -149,6 +177,12 @@ async def callback(code: Optional[str] = None):
             if not has_role:
                 error_url = f"{_AUTH_CONFIG['frontend_url']}?error=缺少指定身份组"
                 return RedirectResponse(url=error_url, status_code=302)
+
+            # 缓存成员信息到 Redis
+            await _cache_member(
+                user["id"],
+                {"roles": member.get("roles", []), "user": member.get("user", {})},
+            )
 
             # 签发 JWT
             token = await sign_jwt(
@@ -292,6 +326,12 @@ async def callback_dev(code: Optional[str] = None):
                     status_code=status.HTTP_403_FORBIDDEN,
                 )
 
+            # 缓存成员信息到 Redis
+            await _cache_member(
+                user["id"],
+                {"roles": member.get("roles", []), "user": member.get("user", {})},
+            )
+
             token = await sign_jwt(
                 {
                     "id": user["id"],
@@ -416,62 +456,92 @@ async def check_auth(request: Request):
     if not payload:
         return JSONResponse(content={"loggedIn": False}, status_code=200)
 
-    # 使用 Bot Token 再次验证 Discord 身份并获取完整用户信息
-    bot_token = _AUTH_CONFIG.get("bot_token")
-    user_info = {
-        "id": payload["id"],
-        "username": payload.get("username", ""),
-        "global_name": None,
-        "avatar": None,
-    }
+    # 尝试从 Redis 缓存获取成员信息
+    cached = await _get_cached_member(payload["id"])
+    user_roles = payload.get("roles", [])
 
-    if bot_token:
-        try:
-            async with httpx.AsyncClient() as client:
-                member_response = await client.get(
-                    f"https://discord.com/api/guilds/{_AUTH_CONFIG['guild_id']}/members/{payload['id']}",
-                    headers={"Authorization": f"Bot {bot_token}"},
-                )
+    if cached:
+        user_roles = cached.get("roles", [])
+        user_data = cached.get("user", {})
+        user_info = {
+            "id": user_data.get("id", payload["id"]),
+            "username": user_data.get("username", payload.get("username", "")),
+            "global_name": user_data.get("global_name"),
+            "avatar": user_data.get("avatar"),
+        }
+    else:
+        bot_token = _AUTH_CONFIG.get("bot_token")
+        user_info = {
+            "id": payload["id"],
+            "username": payload.get("username", ""),
+            "global_name": None,
+            "avatar": None,
+        }
 
-                if member_response.status_code != 200:
-                    response = JSONResponse(
-                        content={"loggedIn": False}, status_code=200
+        if bot_token:
+            try:
+                async with httpx.AsyncClient() as client:
+                    member_response = await client.get(
+                        f"https://discord.com/api/guilds/{_AUTH_CONFIG['guild_id']}/members/{payload['id']}",
+                        headers={"Authorization": f"Bot {bot_token}"},
                     )
-                    response.delete_cookie(
-                        key="session", path="/", secure=True, samesite="none"
+
+                    if member_response.status_code != 200:
+                        response = JSONResponse(
+                            content={"loggedIn": False}, status_code=200
+                        )
+                        response.delete_cookie(
+                            key="session", path="/", secure=True, samesite="none"
+                        )
+                        return response
+
+                    member = member_response.json()
+                    user_roles = member.get("roles", [])
+                    role_ids = _AUTH_CONFIG["role_ids"].split(",")
+                    has_role = any(
+                        role_id in member.get("roles", []) for role_id in role_ids
                     )
-                    return response
 
-                member = member_response.json()
-                user_roles = member.get("roles", [])
-                role_ids = _AUTH_CONFIG["role_ids"].split(",")
-                has_role = any(
-                    role_id in member.get("roles", []) for role_id in role_ids
-                )
+                    if not has_role:
+                        response = JSONResponse(
+                            content={"loggedIn": False}, status_code=200
+                        )
+                        response.delete_cookie(
+                            key="session", path="/", secure=True, samesite="none"
+                        )
+                        return response
 
-                if not has_role:
-                    response = JSONResponse(
-                        content={"loggedIn": False}, status_code=200
+                    if "user" in member:
+                        user_data = member["user"]
+                        user_info = {
+                            "id": user_data.get("id", payload["id"]),
+                            "username": user_data.get(
+                                "username", payload.get("username", "")
+                            ),
+                            "global_name": user_data.get("global_name"),
+                            "avatar": user_data.get("avatar"),
+                        }
+
+                    # 写入缓存
+                    await _cache_member(
+                        payload["id"],
+                        {
+                            "roles": user_roles,
+                            "user": member.get("user", user_info),
+                        },
                     )
-                    response.delete_cookie(
-                        key="session", path="/", secure=True, samesite="none"
-                    )
-                    return response
 
-                # 获取完整的用户信息
-                if "user" in member:
-                    user_data = member["user"]
-                    user_info = {
-                        "id": user_data.get("id", payload["id"]),
-                        "username": user_data.get(
-                            "username", payload.get("username", "")
-                        ),
-                        "global_name": user_data.get("global_name"),
-                        "avatar": user_data.get("avatar"),
-                    }
+            except Exception as e:
+                logger.error(f"验证 Discord 身份失败: {e}")
 
-        except Exception as e:
-            logger.error(f"验证 Discord 身份失败: {e}")
+    # 校验角色（缓存路径下也需要校验）
+    role_ids = _AUTH_CONFIG["role_ids"].split(",")
+    if not any(role_id in user_roles for role_id in role_ids):
+        response = JSONResponse(content={"loggedIn": False}, status_code=200)
+        response.delete_cookie(
+            key="session", path="/", secure=True, samesite="none"
+        )
+        return response
 
     # 获取未读更新数量
     unread_count = 0
@@ -492,9 +562,7 @@ async def check_auth(request: Request):
         {
             "id": payload["id"],
             "username": payload.get("username", ""),
-            "roles": user_roles
-            if "user_roles" in locals()
-            else payload.get("roles", []),
+            "roles": user_roles,
         },
         _AUTH_CONFIG["jwt_secret"],
         7 * 24 * 60 * 60,

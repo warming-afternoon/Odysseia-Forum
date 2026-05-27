@@ -18,3 +18,6 @@ class ConstantEnum(IntEnum):
 
     STATISTICS_THRESHOLD_DAYS = 60
     """只有最近 60 天内创建的帖子才计入趋势统计"""
+
+    AUTH_CACHE_TTL = 86400
+    """Discord 成员信息缓存 TTL（秒）—— 1 天"""
