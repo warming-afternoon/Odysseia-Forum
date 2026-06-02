@@ -2,7 +2,6 @@ import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
 from datetime import datetime, timezone
-from sqlalchemy.pool import StaticPool
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlmodel import SQLModel, delete
 
@@ -19,30 +18,30 @@ from core.booklist_repository import BooklistRepository
 from core.booklist_item_repository import BooklistItemRepository
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 
-# 使用内存数据库进行测试
-TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DB_URL",
+    "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia",
+)
 
 
 @pytest_asyncio.fixture(scope="module")
 async def db_session_factory() -> AsyncGenerator[
     async_sessionmaker[AsyncSession], None
 ]:
-    """
-    创建一个模块级别的数据库引擎和会话工厂。
-    """
+    """模块级别的 PostgreSQL 数据库引擎 + 会话工厂。"""
     engine = create_async_engine(
         TEST_DATABASE_URL,
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
+        echo=False,
+        pool_size=5,
+        max_overflow=5,
+        pool_pre_ping=True,
     )
 
-    # 数据库初始化逻辑
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     yield factory
-
     await engine.dispose()
 
 

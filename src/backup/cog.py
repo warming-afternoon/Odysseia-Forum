@@ -1,8 +1,6 @@
 import glob
 import os
-import gzip
-import shutil
-import sqlite3
+import subprocess
 import asyncio
 import logging
 import traceback
@@ -11,15 +9,13 @@ from datetime import datetime, timezone
 from discord.ext import commands, tasks
 import aioboto3
 
-from shared.database import DB_PATH
-
 logger = logging.getLogger(__name__)
 
-TEMP_BACKUP_PATTERN = "data/backup_temp_*.db"
+TEMP_BACKUP_PATTERN = "data/backup_temp_*.dump"
 
 
 class BackupCog(commands.Cog):
-    """定时将 SQLite 数据库安全快照压缩后上传至 S3 兼容对象存储（如 Cloudflare R2）"""
+    """定时将 PostgreSQL 数据库快照压缩后上传至 S3 兼容对象存储（如 Cloudflare R2）"""
 
     def __init__(self, bot: commands.Bot, config: dict):
         self.bot = bot
@@ -47,22 +43,37 @@ class BackupCog(commands.Cog):
             self.backup_task.cancel()
 
     def _create_compressed_backup_sync(self) -> str:
-        """在子线程中执行：使用 sqlite3.backup() 生成 WAL 安全快照并 gzip 压缩"""
+        """在子线程中执行：使用 pg_dump 生成数据库快照并 gzip 压缩"""
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        temp_db_path = f"data/backup_temp_{timestamp}.db"
-        gz_path = f"data/db_backup_{timestamp}.db.gz"
+        dump_path = f"data/backup_temp_{timestamp}.dump"
 
         try:
-            with sqlite3.connect(DB_PATH) as src, sqlite3.connect(temp_db_path) as dst:
-                src.backup(dst)
+            # 从环境变量获取数据库连接信息
+            db_url = os.environ.get(
+                "DATABASE_URL",
+                "postgresql://odysseia:changeme@localhost:5432/odysseia",
+            )
+            # 将 asyncpg URL 转为标准 pg URL（pg_dump 不需要 async 驱动前缀）
+            pg_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
 
-            with open(temp_db_path, "rb") as f_in, gzip.open(gz_path, "wb", compresslevel=6) as f_out:
-                shutil.copyfileobj(f_in, f_out)
+            subprocess.run(
+                [
+                    "pg_dump",
+                    "--dbname", pg_url,
+                    "--format", "custom",
+                    "--compress", "6",
+                    "--file", dump_path,
+                    "--no-owner",
+                    "--no-acl",
+                ],
+                check=True,
+                capture_output=True,
+            )
 
-            return gz_path
-        finally:
-            if os.path.exists(temp_db_path):
-                os.remove(temp_db_path)
+            return dump_path
+        except subprocess.CalledProcessError as e:
+            logger.error(f"pg_dump 失败: {e.stderr.decode() if e.stderr else str(e)}")
+            raise
 
     async def _upload_to_s3(self, file_path: str) -> None:
         """将压缩后的备份文件上传至 S3 兼容对象存储"""

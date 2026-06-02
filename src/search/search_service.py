@@ -160,8 +160,8 @@ class SearchService:
             / ln10
         )
 
-        # created_at 是 UTC datetime，在 SQLite 下用 strftime('%s') 转 Unix 秒
-        time_score = cast(func.strftime("%s", Thread.created_at), Float) / float(
+        # created_at 是 UTC datetime，用 extract(epoch) 转 Unix 秒（跨数据库兼容）
+        time_score = func.extract("epoch", Thread.created_at).cast(Float) / float(
             time_decay
         )
 
