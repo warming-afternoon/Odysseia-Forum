@@ -13,7 +13,6 @@ if sys.platform != "win32":
 import json
 import discord
 import logging
-from datetime import datetime, timedelta, timezone
 from logging.handlers import TimedRotatingFileHandler
 from discord.ext import commands
 import asyncio
@@ -206,9 +205,6 @@ class MyBot(commands.Bot):
         # 4. 启动 Banner 审核消息队列消费者
         asyncio.create_task(self._consume_banner_review_queue())
 
-        # 5. 启动每日 FTS 碎片合并任务（UTC 19:00 = 北京时间 03:00）
-        asyncio.create_task(self._daily_fts_merge())
-
         # --- 同步应用程序命令 ---
         try:
             synced = await self.tree.sync()
@@ -240,42 +236,6 @@ class MyBot(commands.Bot):
                 "config.json 中的 main_guild_id 无法解析，已回退到默认主服务器 ID。"
             )
             return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
-
-    async def _daily_fts_merge(self):
-        """每日 UTC 19:00（北京时间 03:00）执行 FTS 碎片合并。"""
-        from shared.database import merge_fts_index
-
-        await self.wait_until_ready()
-        while not self.is_closed():
-            await self._sleep_until_utc(hour=19)
-            await self._merge_with_retry(merge_fts_index)
-
-    @staticmethod
-    async def _sleep_until_utc(hour: int):
-        """休眠至下一个 UTC 指定整点。中途被取消则上抛 CancelledError。"""
-        now = datetime.now(timezone.utc)
-        next_run = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-        if now >= next_run:
-            next_run += timedelta(days=1)
-        await asyncio.sleep((next_run - now).total_seconds())
-
-    @staticmethod
-    async def _merge_with_retry(merge_fn, max_retries: int = 3, base_delay: int = 60):
-        """执行合并，失败时指数退避重试；全部失败仅记录错误。"""
-        for attempt in range(max_retries):
-            try:
-                await merge_fn()
-                logger.info("FTS 碎片合并完成")
-                return
-            except Exception:
-                if attempt < max_retries - 1:
-                    delay = base_delay * (2 ** attempt)
-                    logger.warning(
-                        "FTS 合并失败，第 %d/%d 次重试，%d 秒后重试",
-                        attempt + 1, max_retries, delay, exc_info=True,
-                    )
-                    await asyncio.sleep(delay)
-        logger.error("FTS 合并连续 %d 次失败，等待下次定时执行", max_retries, exc_info=True)
 
     async def _consume_banner_review_queue(self):
         """后台任务：消费 banner 审核消息队列，将审核消息发送到 Discord。"""

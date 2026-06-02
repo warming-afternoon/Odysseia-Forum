@@ -192,15 +192,6 @@ async def init_db_for_test(engine_instance: AsyncEngine):
         )
 
 
-async def merge_fts_index():
-    """合并 FTS5 索引碎片段，轻量级每日维护。"""
-    async with async_engine.begin() as conn:
-        await conn.execute(
-            text("INSERT INTO thread_fts(thread_fts) VALUES('optimize')")
-        )
-        await conn.execute(text("PRAGMA wal_checkpoint(PASSIVE)"))
-
-
 async def close_db():
     """
     关闭数据库引擎，释放连接池。
