@@ -27,10 +27,8 @@ Discord 论坛搜索机器人，支持智能索引、多维度搜索和用户偏
 
 ## 📋 系统要求
 
-- Python 3.13+
-- PostgreSQL 16
-- Redis
-- Docker / Docker Compose（推荐）
+- Python 3.11+
+- Docker / Docker Compose（可选）
 
 ## 🚀 快速开始
 
@@ -42,63 +40,44 @@ cd Odysseia-Forum
 ```
 
 ### 2. 配置文件
+根据 `config.example.json` 创建你自己的 `config.json` 文件，并填入你的Discord机器人Token。
 
-1. 复制 `config.example.json` → `config.json`，填入 Discord Bot Token 等配置
-2. 复制 `.env.example` → `.env`，设置 PostgreSQL 数据库密码
 
-### 3. Docker Compose 运行（推荐）
+### 3. 手动运行 (与 4. 二选一)
 
-项目使用 PostgreSQL 作为数据库、Redis 作为缓存。Docker Compose 一键启动全部服务：
+1.  创建虚拟环境并安装项目 (若为首次运行)
+    ```bash
+    # 首次运行前，请下载 uv
+    pip install uv
 
-```bash
-# 启动所有服务（PostgreSQL + Redis + Bot + API）
-docker compose up -d --build
-```
+    # 使用 uv 创建虚拟环境
+    uv venv
 
-服务说明：
+    # 安装项目及其依赖
+    uv pip install -e .
+    ```
 
-| 服务 | 端口 | 说明 |
-|------|------|------|
-| `odysseia-postgres` | 127.0.0.1:15432 | PostgreSQL 16 数据库 |
-| `odysseia-redis` | 11810 | Redis 缓存 |
-| `odysseia-forum-bot` | - | Discord 机器人 |
-| `odysseia-forum-api` | 10810 | FastAPI 搜索接口 |
+2.  运行机器人 (后续运行)
+    ```bash
+    uv run bot_main.py
+    ```
 
-常用命令：
+### 4. Docker Compose 运行 (与 3. 二选一)
 
-```bash
-# 查看日志
-docker compose logs -f
+-  按最新代码构建并启动容器
+    ```bash
+    docker compose up -d --build
+    ```
 
-# 停止所有服务
-docker compose down
+-  停止服务并删除镜像 (不删除资源)
+    ```bash
+    docker compose down --rmi all
+    ```
 
-# 停止并删除数据卷（⚠️ 会删除数据库数据）
-docker compose down -v
-```
-
-### 4. 从 SQLite 迁移数据（老用户）
-
-如果你有旧的 SQLite 数据库需要迁移到 PostgreSQL：
-
-```bash
-# 1. 确保 PostgreSQL 容器已启动
-docker compose up -d odysseia-postgres
-
-# 2. 运行迁移脚本
-uv run python scripts/migrate_sqlite_to_pg.py
-```
-
-### 5. 本地开发运行（不使用 Docker）
-
-```bash
-# 安装依赖
-uv sync
-
-# 确保 PostgreSQL 和 Redis 已运行，然后：
-uv run bot_main.py    # 启动机器人
-uv run api_main.py    # 启动 API 服务
-```
+-  查看日志
+    ```bash
+    docker compose logs -f
+    ```
 
 ## 📖 使用指南
 
@@ -156,24 +135,12 @@ uv run api_main.py    # 启动 API 服务
 
 我们采用 UCB1 (Upper Confidence Bound) 算法
 
-- **利用 (Exploitation)**：帖子获得的反应数越多，其”实力分”就越高。
-- **探索 (Exploration)**：帖子被展示的次数越少，其”机会分”就越高，从而获得更多曝光机会。
+- **利用 (Exploitation)**：帖子获得的反应数越多，其“实力分”就越高。
+- **探索 (Exploration)**：帖子被展示的次数越少，其“机会分”就越高，从而获得更多曝光机会。
 
 **最终分数** = `实力分 + 机会分`
 
-### Reddit Hot 算法
-
-备选排序方案，基于 Reddit 的热门排序公式：时间越新的帖子获得越高的时间加分，而高分帖子不会获得不成比例的巨大优势。
-
-## 🔍 全文搜索实现
-
-项目使用 PostgreSQL 的 `tsvector`/`tsquery` 实现中文全文搜索：
-
-- **分词**：jieba-rs（Rust 实现的中文分词器），在 Python 端完成分词后通过 `array_to_tsvector` 存入 PostgreSQL
-- **索引**：GIN 索引加速全文搜索，2 万帖子下搜索延迟 < 100ms
-- **查询语法**：支持 AND/OR 组、前缀匹配、短语精确匹配、排除关键词 + 豁免标记
-
-> 详细技术方案见 [PG 迁移方案文档](docs/PG_MIGRATION.md)
+这个机制确保了高质量的帖子能保持高排名，同时新帖子或被埋没的旧帖子也有机会被重新发现。
 
 ## 🔧 配置参数
 

@@ -53,6 +53,7 @@ class MyBot(commands.Bot):
         super().__init__(**bot_kwargs)
 
         self.config = config
+        self.db_url = config["db_url"]
         self.tag_cache_service: TagCacheService
         self.cache_service: CacheService
         self.sync_service: SyncService
@@ -445,8 +446,7 @@ async def main():
 
     try:
         async with bot:
-            token = os.environ.get("BOT_TOKEN", config.get("token"))
-            await bot.start(token)
+            await bot.start(config["token"])
     finally:
         # 服务关闭时切断与Redis的连接
         # 使用嵌套 try/finally 确保即使 close_redis() 抛出异常，

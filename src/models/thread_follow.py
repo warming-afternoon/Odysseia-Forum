@@ -20,4 +20,5 @@ class ThreadFollow(SQLModel, table=True):
     )
 
     class Config:
-        pass
+        # 用户和帖子的组合必须唯一
+        table_args = {"sqlite_autoincrement": True}

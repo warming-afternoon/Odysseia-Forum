@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Sequence, Tuple, Type, TypeVar
 
 from sqlalchemy import case, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, delete, desc, func, select
@@ -129,7 +129,7 @@ class CollectionRepository:
             update_stmt = (
                 update(Booklist)
                 .where(Booklist.id.in_(affected_booklists))  # type: ignore
-                .values(item_count=func.greatest(0, Booklist.item_count - 1))
+                .values(item_count=func.max(0, Booklist.item_count - 1))
             )
             await self.session.execute(update_stmt)
             await self.session.commit()
@@ -313,7 +313,7 @@ class CollectionRepository:
 
             # 扣减各个受影响书单的 item_count
             whens = {
-                bid: func.greatest(0, Booklist.item_count - count)
+                bid: func.max(0, Booklist.item_count - count)
                 for bid, count in booklist_decrements.items()
             }
             case_stmt = case(whens, value=Booklist.id, else_=Booklist.item_count)

@@ -1,35 +1,4 @@
 services:
-  odysseia-postgres:
-    image: postgres:16-alpine
-    container_name: odysseia-postgres
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:15432:5432"
-    volumes:
-      - ./data/pgdata:/var/lib/postgresql/data
-    environment:
-      POSTGRES_DB: odysseia
-      POSTGRES_USER: odysseia
-      POSTGRES_PASSWORD: "${PG_PASSWORD:-changeme}"
-    command:
-      - postgres
-      - -c
-      - shared_buffers=128MB
-      - -c
-      - effective_cache_size=256MB
-      - -c
-      - max_connections=150
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U odysseia -d odysseia"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "20m"
-        max-file: "5"
-
   odysseia-forum-bot:
     build:
       context: .
@@ -43,15 +12,11 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     depends_on:
-      odysseia-postgres:
-        condition: service_healthy
       odysseia-redis:
         condition: service_healthy
     environment:
       PYTHONPATH: /app/src
-      BOT_TOKEN: "${BOT_TOKEN}"
       REDIS_URL: redis://odysseia-redis:6379/0
-      DATABASE_URL: "postgresql+asyncpg://odysseia:${PG_PASSWORD:-changeme}@odysseia-postgres:5432/odysseia"
     logging:
       driver: "json-file"
       options:
@@ -81,10 +46,7 @@ services:
     environment:
       PYTHONPATH: /app/src
       REDIS_URL: redis://odysseia-redis:6379/0
-      DATABASE_URL: "postgresql+asyncpg://odysseia:${PG_PASSWORD:-changeme}@odysseia-postgres:5432/odysseia"
     depends_on:
-      odysseia-postgres:
-        condition: service_healthy
       odysseia-redis:
         condition: service_healthy
       odysseia-forum-bot:
@@ -116,10 +78,6 @@ services:
       - ./data:/app/data
     environment:
       PYTHONPATH: /app/src
-      DATABASE_URL: "postgresql+asyncpg://odysseia:${PG_PASSWORD:-changeme}@odysseia-postgres:5432/odysseia"
-    depends_on:
-      odysseia-postgres:
-        condition: service_healthy
     command: ["uv", "run", "migrate.py"]
 
   odysseia-redis:

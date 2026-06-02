@@ -2,7 +2,7 @@ import logging
 from typing import Dict, Any, List, Optional, Sequence
 
 from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Author, Thread
@@ -25,9 +25,9 @@ class AuthorRepository:
         Args:
             author_data: 包含作者信息的字典，键应与 Author 模型字段匹配。
         """
-        stmt = pg_insert(Author).values(author_data)
+        stmt = sqlite_insert(Author).values(author_data)
         update_stmt = stmt.on_conflict_do_update(
-            constraint="author_pkey",
+            index_elements=["id"],
             set_=author_data,
         )
 

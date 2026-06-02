@@ -1,7 +1,7 @@
 import logging
 from typing import List, Optional
 
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.sqlite import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select, update
@@ -133,7 +133,7 @@ class ConfigRepository:
                 value_int=0,
                 tips="UCB1算法中的全局总展示次数 (N)",
             )
-            .on_conflict_do_nothing(constraint="bot_config_type_key"),
+            .on_conflict_do_nothing(index_elements=["type"]),
             insert(BotConfig)
             .values(
                 type=SearchConfigType.UCB1_EXPLORATION_FACTOR,
@@ -141,7 +141,7 @@ class ConfigRepository:
                 value_float=SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value,
                 tips="UCB1算法的探索因子C，值越大越倾向于探索新内容",
             )
-            .on_conflict_do_nothing(constraint="bot_config_type_key"),
+            .on_conflict_do_nothing(index_elements=["type"]),
             insert(BotConfig)
             .values(
                 type=SearchConfigType.STRENGTH_WEIGHT,
@@ -149,7 +149,7 @@ class ConfigRepository:
                 value_float=SearchConfigDefaults.STRENGTH_WEIGHT.value,
                 tips="UCB1算法中实力分(x/n)的权重W",
             )
-            .on_conflict_do_nothing(constraint="bot_config_type_key"),
+            .on_conflict_do_nothing(index_elements=["type"]),
             insert(BotConfig)
             .values(
                 type=SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT,
@@ -157,7 +157,7 @@ class ConfigRepository:
                 value_int=1,
                 tips="当检测到帖子应用了互斥TAG时，是否通知管理组 (0=关, 1=开)",
             )
-            .on_conflict_do_nothing(constraint="bot_config_type_key"),
+            .on_conflict_do_nothing(index_elements=["type"]),
             insert(BotConfig)
             .values(
                 type=SearchConfigType.MAIN_GUILD_ID,
@@ -165,7 +165,7 @@ class ConfigRepository:
                 value_int=main_guild_id,
                 tips="主服务器 ID，用于多服务器搜索时确认主布局",
             )
-            .on_conflict_do_nothing(constraint="bot_config_type_key"),
+            .on_conflict_do_nothing(index_elements=["type"]),
         ]
 
         for stmt in config_statements:
