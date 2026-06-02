@@ -14,8 +14,8 @@ DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
 async_engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=8,
+    max_overflow=7,
     pool_timeout=60,
     pool_pre_ping=True,
     pool_recycle=1800,
@@ -42,6 +42,9 @@ def _setup_tokenizer_on_connect(dbapi_connection, connection_record):
         dbapi_connection.execute("PRAGMA journal_mode=WAL")
         dbapi_connection.execute("PRAGMA synchronous=NORMAL")
         dbapi_connection.execute("PRAGMA busy_timeout=2000")
+        dbapi_connection.execute("PRAGMA cache_size=-4000")
+        dbapi_connection.execute("PRAGMA mmap_size=134217728")
+        dbapi_connection.execute("PRAGMA temp_store=MEMORY")
         # dbapi_connection 是 SQLAlchemy 的异步包装器 (AsyncAdapt_...)
         # 访问其 ._connection 属性，获取原始的 aiosqlite.Connection
         aiosqlite_conn = dbapi_connection._connection
@@ -62,7 +65,13 @@ AsyncSessionFactory = async_sessionmaker(
 )
 
 
-async def init_db():
+async def init_db(skip_fts_rebuild: bool = False):
+    """初始化数据库表、FTS5 索引及触发器。
+
+    Args:
+        skip_fts_rebuild: 若为 True 则跳过 FTS5 全量重建（API 进程使用，
+                          Bot 进程已处理索引重建）。
+    """
     db_dir = os.path.dirname(DB_PATH)
     if not os.path.exists(db_dir):
         os.makedirs(db_dir)
@@ -123,7 +132,8 @@ async def init_db():
         )
 
         # 重建 FTS 索引（使用当前分词器重新索引全部内容）并合并碎片段
-        await conn.execute(text("INSERT INTO thread_fts(thread_fts) VALUES('rebuild')"))
+        if not skip_fts_rebuild:
+            await conn.execute(text("INSERT INTO thread_fts(thread_fts) VALUES('rebuild')"))
         await conn.execute(
             text("INSERT INTO thread_fts(thread_fts) VALUES('optimize')")
         )

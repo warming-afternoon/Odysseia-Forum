@@ -5,13 +5,16 @@ FROM python:3.13-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src
+    PYTHONPATH=/app/src \
+    LD_PRELOAD=/usr/lib/libjemalloc.so.2 \
+    MALLOC_CONF="narenas:2"
 
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl procps \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get install -y --no-install-recommends build-essential curl procps libjemalloc2 \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/lib/*/libjemalloc.so.2 /usr/lib/libjemalloc.so.2
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 

@@ -162,8 +162,8 @@ async def main():
     redis_url = config.get("redis_url", "redis://odysseia-redis:6379/0")
     await RedisManager.init_redis(redis_url)
 
-    # 初始化数据库
-    await init_db()
+    # 初始化数据库（API 进程跳过 FTS5 rebuild，Bot 进程已处理）
+    await init_db(skip_fts_rebuild=True)
 
     # 初始化安全与认证配置
     initialize_api_security()
@@ -219,6 +219,10 @@ async def main():
 
 
 if __name__ == "__main__":
+    import gc
+
+    gc.freeze()
+    gc.set_threshold(2000, 20, 20)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

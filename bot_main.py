@@ -460,6 +460,10 @@ async def main():
 
 
 if __name__ == "__main__":
+    import gc
+
+    gc.freeze()
+    gc.set_threshold(2000, 20, 20)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
