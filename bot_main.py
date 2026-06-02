@@ -16,6 +16,8 @@ import logging
 from logging.handlers import TimedRotatingFileHandler
 from discord.ext import commands
 import asyncio
+import time
+import os
 
 from shared.database import AsyncSessionFactory, init_db, close_db
 from shared.redis_client import RedisManager
@@ -62,6 +64,16 @@ class MyBot(commands.Bot):
             "api_scheduler_concurrency", 40
         )
         self.api_scheduler = APIScheduler(concurrent_requests=concurrency)
+
+        # 健康监控状态（Plan A + C）
+        self._connected: bool = False
+        # 从 Bot 创建时开始计时，防止首次连接失败时 _disconnected_at 为 None
+        # 导致看门狗和健康检查双双失效（启动死锁）。
+        self._disconnected_at: float | None = time.monotonic()
+        self._heartbeat_path: str = "/app/data/bot_heartbeat.json"  # 与 healthcheck.py 同步
+        self._max_disconnect_seconds: float = 300.0  # 5 分钟断连后自愈退出
+        self._health_exit_code: int = 0
+        self._closing: bool = False  # close() 重入守卫
 
     async def process_commands(self, message: discord.Message):
         """
@@ -124,7 +136,7 @@ class MyBot(commands.Bot):
             config_repository = ConfigRepository(session)
             await config_repository.initialize_search_configs(main_guild_id)
 
-        # 1. 初始化核心服务
+        # 初始化核心服务
         self.tag_cache_service = TagCacheService(AsyncSessionFactory)
         self.cache_service = CacheService(self, AsyncSessionFactory)
         self.sync_service = SyncService(
@@ -145,7 +157,7 @@ class MyBot(commands.Bot):
         # 将频道元数据发布到 Redis，供 API 进程读取
         await self.cache_service.publish_channel_metadata(RedisManager.get_client())
 
-        # 2. 加载 Cogs
+        # 加载 Cogs
         cogs_to_load = [
             ThreadManager(
                 bot=self,
@@ -199,11 +211,15 @@ class MyBot(commands.Bot):
         )
         logger.info("所有 Cogs 已加载。")
 
-        # 3. 注册全局事件监听器
+        # 注册全局事件监听器
         self.add_listener(self.on_index_updated_global, "on_index_updated")
 
-        # 4. 启动 Banner 审核消息队列消费者
+        # 启动 Banner 审核消息队列消费者
         asyncio.create_task(self._consume_banner_review_queue())
+
+        # 启动健康监控后台任务
+        asyncio.create_task(self._heartbeat_writer())
+        asyncio.create_task(self._disconnect_timeout_monitor())
 
         # --- 同步应用程序命令 ---
         try:
@@ -212,8 +228,109 @@ class MyBot(commands.Bot):
         except Exception as e:
             logger.error(f"同步应用程序命令时出错: {e}", exc_info=True)
 
+    # -------------------------
+    # 健康监控
+    # -------------------------
+
+    async def on_connect(self):
+        """当 bot 建立（或重新建立）Discord 网关连接时调用。"""
+        self._connected = True
+        self._disconnected_at = None
+        logger.info("已连接到 Discord 网关")
+
+    async def on_disconnect(self):
+        """当 bot 与 Discord 网关断开连接时调用。
+
+        「_connected」守卫：discord.py 的重连循环在每次失败时
+        都会 dispatch 'disconnect'，不加守卫会导致断连时间戳被反复重置，
+        使得 _disconnect_timeout_monitor 永远达不到超时阈值。
+        """
+        if self._connected:
+            self._connected = False
+            self._disconnected_at = time.monotonic()
+            logger.warning("与 Discord 网关的连接已断开")
+
+    async def on_resumed(self):
+        """当 bot 通过 RESUME 成功恢复 Discord 会话时调用。"""
+        self._connected = True
+        self._disconnected_at = None
+        logger.info("已恢复 Discord 会话")
+
+    async def _heartbeat_writer(self):
+        """后台任务：每 30 秒将健康状态写入心跳文件供 Docker healthcheck 读取。
+
+        如果因事件循环阻塞导致此任务无法运行，文件将过期，
+        Docker 可以独立检测到异常。
+        """
+        await asyncio.sleep(10)  # 等待 setup_hook 完成
+        while not self.is_closed():
+            try:
+                state = {
+                    "timestamp": time.time(),
+                    "connected": self._connected,
+                    "disconnected_since": (
+                        # 将 monotonic 时钟转换为 wall-clock 时间戳，
+                        # 使 healthcheck.py 能使用相同的 time.time() 基准正确计算断连时长
+                        time.time() - (time.monotonic() - self._disconnected_at)
+                        if self._disconnected_at is not None
+                        else 0
+                    ),
+                    "is_closed": self.is_closed(),
+                }
+                with open(self._heartbeat_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f)
+            except Exception:
+                logger.warning("写入心跳文件失败", exc_info=True)
+            await asyncio.sleep(30)
+
+    async def _disconnect_timeout_monitor(self):
+        """后台任务：若断连超过 5 分钟则主动退出进程。
+
+        这是 Plan C（进程内自愈）的核心：当 discord.py 的重连循环
+        持续失败时，以退出码 1 退出进程，由 Docker 的 unless-stopped
+        策略自动重启容器。
+        """
+        await asyncio.sleep(120)  # 等待初始连接建立
+        while not self.is_closed():
+            if self._disconnected_at is not None:
+                disconnected_for = time.monotonic() - self._disconnected_at
+                if disconnected_for > self._max_disconnect_seconds:
+                    logger.critical(
+                        f"与 Discord 断开连接已持续 {disconnected_for:.0f} 秒"
+                        f"（超过 {self._max_disconnect_seconds:.0f} 秒限制），"
+                        "即将退出进程以触发 Docker 重启"
+                    )
+                    # 写入最终心跳供 Docker 诊断
+                    try:
+                        state = {
+                            "timestamp": time.time(),
+                            "connected": False,
+                            "disconnected_since": self._disconnected_at,
+                            "is_closed": True,
+                        }
+                        with open(self._heartbeat_path, "w", encoding="utf-8") as f:
+                            json.dump(state, f)
+                    except Exception:
+                        pass
+                    self._health_exit_code = 1
+                    await self.close()
+                    return
+            await asyncio.sleep(30)
+
+    # -------------------------
+    # 生命周期
+    # -------------------------
+
     async def close(self):
-        """关闭机器人时，一并关闭调度器和数据库连接。"""
+        """关闭机器人时，一并关闭调度器和数据库连接。
+
+        可能被调用两次：一次由 _disconnect_timeout_monitor 主动退出，
+        一次由 async with bot: 上下文管理器退出。通过 _closing 守卫
+        保证内部清理逻辑只执行一次。
+        """
+        if self._closing:
+            return
+        self._closing = True
         await self.impression_cache_service.stop()
         await self.api_scheduler.stop()
         await close_db()
@@ -249,7 +366,7 @@ class MyBot(commands.Bot):
         logger.info("Banner 审核队列消费者已启动")
         while not self.is_closed():
             try:
-                result = await redis.brpop("banner:review:queue", timeout=5)
+                result = await redis.brpop("banner:review:queue", timeout=5)  # pyright: ignore[reportGeneralTypeIssues]
                 if result is None:
                     continue
                 _, payload = result
@@ -332,7 +449,14 @@ async def main():
             await bot.start(config["token"])
     finally:
         # 服务关闭时切断与Redis的连接
-        await RedisManager.close_redis()
+        # 使用嵌套 try/finally 确保即使 close_redis() 抛出异常，
+        # os._exit() 仍能执行并传播正确的退出码给 Docker
+        try:
+            await RedisManager.close_redis()
+        finally:
+            # 健康检测触发的退出，传播非零退出码让 Docker 感知
+            if bot._health_exit_code:
+                os._exit(bot._health_exit_code)
 
 
 if __name__ == "__main__":

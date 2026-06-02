@@ -18,6 +18,7 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
 COPY bot_main.py ./
+COPY healthcheck.py ./
 COPY api_main.py ./
 COPY alembic.ini ./
 COPY alembic ./alembic

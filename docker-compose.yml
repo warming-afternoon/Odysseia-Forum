@@ -23,11 +23,11 @@ services:
         max-size: "20m"
         max-file: "5"
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f bot_main.py"]
+      test: ["CMD", "python3", "healthcheck.py"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 15s
+      retries: 2
+      start_period: 120s
 
   odysseia-forum-api:
     build:
