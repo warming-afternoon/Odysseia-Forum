@@ -16,6 +16,8 @@ from models import BooklistItem
 from models import Thread
 from models import Author
 from core.booklist_repository import BooklistRepository
+from core.booklist_item_repository import BooklistItemRepository
+from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 
 # 使用内存数据库进行测试
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
@@ -173,12 +175,12 @@ async def test_add_thread_to_booklist(seeded_db_session: AsyncSession):
     assert booklist.id is not None
     booklist_id = booklist.id
     # 添加第一个帖子
-    item1 = await service.add_thread_to_booklist(
+    items = await service.add_threads_to_booklist(
         booklist_id=booklist_id,
-        thread_id=1001,
-        comment="Great thread",
-        display_order=1,
+        items=[BooklistItemAddData(thread_id=1001, comment="Great thread", display_order=1)],
     )
+    assert len(items) == 1
+    item1 = items[0]
     assert item1.id is not None
     assert item1.thread_id == 1001
     assert item1.comment == "Great thread"
@@ -188,12 +190,11 @@ async def test_add_thread_to_booklist(seeded_db_session: AsyncSession):
     assert updated_booklist is not None
     assert updated_booklist.item_count == 1
     # 添加第二个帖子，不指定 display_order，应自动递增
-    item2 = await service.add_thread_to_booklist(
+    items2 = await service.add_threads_to_booklist(
         booklist_id=booklist_id,
-        thread_id=1002,
-        comment="Another thread",
+        items=[BooklistItemAddData(thread_id=1002, comment="Another thread")],
     )
-    assert item2.display_order == 2
+    assert items2[0].display_order == 2
     updated_booklist = await service.get_booklist(booklist_id)
     assert updated_booklist is not None
     assert updated_booklist.item_count == 2
@@ -206,16 +207,18 @@ async def test_remove_thread_from_booklist(seeded_db_session: AsyncSession):
     booklist = await service.create_booklist(owner_id=222, title="Remove Test")
     assert booklist.id is not None
     booklist_id = booklist.id
-    await service.add_thread_to_booklist(booklist_id, 1001)
+    await service.add_threads_to_booklist(
+        booklist_id, items=[BooklistItemAddData(thread_id=1001)]
+    )
     # 移除存在的帖子
-    success = await service.remove_thread_from_booklist(booklist_id, 1001)
-    assert success is True
+    deleted = await service.remove_threads_from_booklist(booklist_id, [1001])
+    assert deleted == 1
     updated_booklist = await service.get_booklist(booklist_id)
     assert updated_booklist is not None
     assert updated_booklist.item_count == 0
     # 移除不存在的帖子
-    success = await service.remove_thread_from_booklist(booklist_id, 9999)
-    assert success is False
+    deleted = await service.remove_threads_from_booklist(booklist_id, [9999])
+    assert deleted == 0
 
 
 @pytest.mark.asyncio
@@ -230,16 +233,16 @@ async def test_list_booklists(seeded_db_session: AsyncSession):
             is_public=(i % 2 == 0),
         )
     # 列出所有书单
-    booklists, total = await service.list_booklists(owner_id=333, page=1, per_page=10)
+    booklists, total = await service.list_booklists(owner_id=333, limit=10, offset=0)
     assert total == 5
     assert len(booklists) == 5
     # 过滤公开书单
     public, total_public = await service.list_booklists(
-        owner_id=333, is_public=True, page=1, per_page=10
+        owner_id=333, is_public=True, limit=10, offset=0
     )
     assert total_public == 3  # 0,2,4 是公开的
     # 分页测试
-    page1, total1 = await service.list_booklists(owner_id=333, page=1, per_page=2)
+    page1, total1 = await service.list_booklists(owner_id=333, limit=2, offset=0)
     assert len(page1) == 2
     assert total1 == 5
 
@@ -251,20 +254,29 @@ async def test_get_booklist_items(seeded_db_session: AsyncSession):
     booklist = await service.create_booklist(owner_id=444, title="Items Test")
     assert booklist.id is not None
     booklist_id = booklist.id
-    await service.add_thread_to_booklist(booklist_id, 1001, comment="First")
-    await service.add_thread_to_booklist(booklist_id, 1002, comment="Second")
-    items, total = await service.get_booklist_items(booklist_id, page=1, per_page=10)
+    await service.add_threads_to_booklist(
+        booklist_id,
+        items=[
+            BooklistItemAddData(thread_id=1001, comment="First"),
+            BooklistItemAddData(thread_id=1002, comment="Second"),
+        ],
+    )
+    item_service = BooklistItemRepository(seeded_db_session)
+    items, total = await item_service.get_booklist_items_with_details(
+        booklist_id, display_type=1, limit=10, offset=0
+    )
     assert total == 2
     assert len(items) == 2
-    # 检查返回的数据结构
+    # 检查返回数据（BooklistItemDetail 是 Pydantic 模型，用属性访问）
+    # display_type=1 按 created_at DESC 排序，后添加的 thread 1002 排前面
     first = items[0]
-    assert first["thread_id"] == "1001"
-    assert first["comment"] == "First"
-    assert "title" in first
-    assert "author" in first
+    assert first.thread_id == 1002
+    assert first.comment == "Second"
+    assert first.title is not None
+    assert first.author is not None
     # 分页测试
-    items_page1, total_page1 = await service.get_booklist_items(
-        booklist_id, page=1, per_page=1
+    items_page1, total_page1 = await item_service.get_booklist_items_with_details(
+        booklist_id, display_type=1, limit=1, offset=0
     )
     assert len(items_page1) == 1
     assert total_page1 == 2
