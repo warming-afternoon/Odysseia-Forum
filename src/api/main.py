@@ -1,5 +1,9 @@
+import gc
 import json
 import logging
+import os
+import sys
+from collections import Counter
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -177,4 +181,341 @@ async def root():
             "booklists": "/v1/booklists",
             "tags": "/v1/tags",
         },
+    }
+
+
+@app.get("/v1/debug/memory", summary="内存诊断", tags=["系统"])
+async def debug_memory():
+    """调试端点：输出进程内存中 Top 对象类型及模块级内存占用"""
+    # 对象类型统计（数量 + 大小）
+    type_counts: dict[str, int] = {}
+    type_sizes: dict[str, int] = {}
+    module_sizes: dict[str, int] = {}
+    module_counts: dict[str, int] = {}
+
+    for obj in gc.get_objects():
+        t = type(obj)
+        name = t.__name__
+        type_counts[name] = type_counts.get(name, 0) + 1
+
+        try:
+            sz = sys.getsizeof(obj)
+        except Exception:
+            sz = 0
+        type_sizes[name] = type_sizes.get(name, 0) + sz
+
+        mod = getattr(t, "__module__", None)
+        if not isinstance(mod, str):
+            mod = "builtins"
+        parts = mod.split(".")
+        prefix = ".".join(parts[:2]) if len(parts) >= 2 else mod
+        module_sizes[prefix] = module_sizes.get(prefix, 0) + sz
+        module_counts[prefix] = module_counts.get(prefix, 0) + 1
+
+    # 按大小排序
+    top_by_size = sorted(type_sizes.items(), key=lambda x: -x[1])[:20]
+    top_by_count = sorted(type_counts.items(), key=lambda x: -x[1])[:20]
+    top_modules = sorted(module_sizes.items(), key=lambda x: -x[1])[:20]
+
+    # GC
+    gc_stats = gc.get_stats()
+
+    try:
+        with open("/proc/self/status") as f:
+            rss_line = [line for line in f if line.startswith("VmRSS:")]
+        rss = rss_line[0].split()[1] if rss_line else "unknown"
+    except Exception:
+        rss = "unknown"
+
+    return {
+        "rss_kb": rss,
+        "total_objects": sum(type_counts.values()),
+        "total_size_kb": round(sum(type_sizes.values()) / 1024),
+        "top_by_size": [
+            {"type": t, "count": type_counts[t], "size_kb": round(s / 1024)}
+            for t, s in top_by_size
+        ],
+        "top_by_count": [
+            {"type": t, "count": c, "size_kb": round(type_sizes.get(t, 0) / 1024)}
+            for t, c in top_by_count
+        ],
+        "modules_by_size_kb": [
+            {
+                "module": m,
+                "objects": module_counts[m],
+                "size_kb": round(s / 1024),
+            }
+            for m, s in top_modules
+        ],
+        "gc": {
+            "generations": [
+                {
+                    "collections": s["collections"],
+                    "collected": s["collected"],
+                    "uncollectable": s["uncollectable"],
+                }
+                for s in gc_stats
+            ],
+            "thresholds": list(gc.get_threshold()),
+        },
+    }
+
+
+@app.get("/v1/debug/memory/sources", summary="内存来源诊断", tags=["系统"])
+async def debug_memory_sources():
+    """调试端点：按模块来源汇总对象数量，定位泄漏代码路径"""
+    module_counts: dict[str, int] = {}
+    type_module_counts: dict[str, dict[str, int]] = {}
+    total = 0
+
+    for obj in gc.get_objects():
+        total += 1
+        cls = type(obj)
+        type_name = cls.__name__
+        try:
+            module = getattr(cls, "__module__", None)
+            if not isinstance(module, str) or not module:
+                module = "builtins"
+        except Exception:
+            module = "builtins"
+        # 截取到二级模块名
+        parts = module.split(".")
+        prefix = ".".join(parts[:2]) if len(parts) >= 2 else module
+        module_counts[prefix] = module_counts.get(prefix, 0) + 1
+        if prefix not in type_module_counts:
+            type_module_counts[prefix] = {}
+        type_module_counts[prefix][type_name] = (
+            type_module_counts[prefix].get(type_name, 0) + 1
+        )
+
+    top_modules = sorted(module_counts.items(), key=lambda x: -x[1])[:20]
+    sources = []
+    for module, count in top_modules:
+        types_in_module = sorted(
+            type_module_counts[module].items(), key=lambda x: -x[1]
+        )[:10]
+        sources.append(
+            {
+                "module": module,
+                "total_objects": count,
+                "top_types": [
+                    {"type": t, "count": c} for t, c in types_in_module
+                ],
+            }
+        )
+
+    return {"total_objects": total, "sources": sources}
+
+
+@app.get("/v1/debug/memory/force-gc", summary="强制 GC 并对比", tags=["系统"])
+async def debug_force_gc():
+    """调试端点：强制全量 GC，对比回收前后的对象数和 RSS"""
+    def _read_rss():
+        try:
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1])
+        except Exception:
+            return -1
+
+    rss_before = _read_rss()
+    total_before = len(gc.get_objects())
+
+    # 触发全量 GC
+    collected = gc.collect(2)
+    collected += gc.collect(1)
+    collected += gc.collect(0)
+
+    rss_after = _read_rss()
+    total_after = len(gc.get_objects())
+
+    return {
+        "rss_kb_before": rss_before,
+        "rss_kb_after": rss_after,
+        "rss_freed_kb": rss_before - rss_after if rss_before > 0 and rss_after > 0 else -1,
+        "objects_before": total_before,
+        "objects_after": total_after,
+        "objects_freed": total_before - total_after,
+        "gc_collected": collected,
+        "interpretation": (
+            "内存可回收，对象未释放 → 可能缺少 gc.collect() 调用"
+            if total_before - total_after > 1000 and rss_before - rss_after > 1024
+            else (
+                "大量不可回收对象 → 循环引用被持有，或 C 扩展泄漏"
+                if total_before - total_after < 100 and rss_before - rss_after < 1024
+                else "GC 回收了小部分内存"
+            )
+        ),
+    }
+
+
+@app.get("/v1/debug/memory/pools", summary="连接池状态", tags=["系统"])
+async def debug_pools():
+    """调试端点：SQLAlchemy 连接池和 Redis 连接池状态"""
+    pool = AsyncSessionFactory.kw["bind"].pool
+    return {
+        "sqlalchemy": {
+            "pool_size": pool.size(),
+            "checked_in": pool.checkedin(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+            "total_connections": pool.checkedin() + pool.checkedout(),
+        },
+    }
+
+
+@app.get("/v1/debug/memory/dict-owners", summary="追踪 dict 持有者", tags=["系统"])
+async def debug_dict_owners():
+    """调试端点：采样 dict 对象，追踪两层引用链定位泄漏源"""
+    from collections import Counter as _Counter
+    import sys as _sys
+
+    chain = _Counter()
+    parent_types = _Counter()
+    grandparent_types = _Counter()
+    sampled = 0
+    total_dicts = 0
+    large_dicts = 0
+
+    for obj in gc.get_objects():
+        if not isinstance(obj, dict):
+            continue
+        total_dicts += 1
+        sz = _sys.getsizeof(obj)
+        if sz < 512 or len(obj) == 0:
+            continue
+        large_dicts += 1
+
+        if sampled >= 500:
+            continue
+        sampled += 1
+
+        # 第一层：谁直接持有 dict
+        parents = gc.get_referrers(obj)
+        parent_type = "none"
+        for p in parents:
+            if p is gc.get_objects:
+                continue
+            pt = type(p).__name__
+            pm = getattr(type(p), "__module__", "")
+            parent_types[pt] += 1
+            parent_type = pt
+
+            # 第二层：谁持有 parent
+            grandparents = gc.get_referrers(p)
+            for g in grandparents:
+                if g is gc.get_objects or g is parents:
+                    continue
+                gt = type(g).__name__
+                gm = getattr(type(g), "__module__", "")
+                grandparent_types[gt] += 1
+                chain[f"{gt} → {pt} → dict[{len(obj)}]"] += 1
+                break
+            break
+
+    return {
+        "total_dicts": total_dicts,
+        "large_dicts_gt_512b": large_dicts,
+        "parent_types": parent_types.most_common(20),
+        "grandparent_types": grandparent_types.most_common(20),
+        "chains_top30": [
+            {"chain": k, "count": v} for k, v in chain.most_common(30)
+        ],
+    }
+
+
+@app.get("/v1/debug/memory/asyncio-tasks", summary="asyncio 任务诊断", tags=["系统"])
+async def debug_asyncio_tasks():
+    """调试端点：检查 asyncio task 是否泄漏"""
+    import asyncio as _asyncio
+
+    try:
+        loop = _asyncio.get_running_loop()
+    except RuntimeError:
+        return {"error": "no running loop"}
+
+    # 未完成的 task
+    tasks = _asyncio.all_tasks(loop)
+    task_info = []
+    for t in tasks:
+        name = t.get_name()
+        coro = t.get_coro()
+        coro_name = type(coro).__name__ if coro else "none"
+        task_info.append(
+            {
+                "name": name,
+                "coro": coro_name[:80],
+                "done": t.done(),
+                "cancelled": t.cancelled(),
+            }
+        )
+
+    from collections import Counter as _Counter
+    name_counts = _Counter(t["coro"] for t in task_info)
+
+    # Future 对象数量
+    future_count = sum(
+        1 for o in gc.get_objects() if isinstance(o, _asyncio.Future)
+    )
+
+    return {
+        "total_tasks": len(tasks),
+        "future_objects": future_count,
+        "task_coro_types": name_counts.most_common(20),
+        "tasks": task_info[:50],
+    }
+
+
+@app.get("/v1/debug/memory/clear-caches", summary="清除缓存并对比", tags=["系统"])
+async def debug_clear_caches():
+    """调试端点：清除 SQLAlchemy 编译缓存 + 全量 GC，对比效果"""
+    from collections import Counter as _Counter
+
+    def _count_sqla():
+        c = 0
+        for o in gc.get_objects():
+            mod = getattr(type(o), "__module__", None)
+            if isinstance(mod, str) and mod.startswith("sqlalchemy"):
+                c += 1
+        return c
+
+    def _rss():
+        try:
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1])
+        except Exception:
+            return -1
+
+    rss_before = _rss()
+    sqla_before = _count_sqla()
+    objs_before = len(gc.get_objects())
+
+    # 清除 SQLAlchemy 编译缓存
+    try:
+        engine = AsyncSessionFactory.kw["bind"]
+        engine.sync_engine._compiled_cache.clear()
+    except Exception:
+        pass
+
+    # 全量 GC
+    collected = gc.collect(2) + gc.collect(1) + gc.collect(0)
+
+    rss_after = _rss()
+    sqla_after = _count_sqla()
+    objs_after = len(gc.get_objects())
+
+    return {
+        "rss_kb_before": rss_before,
+        "rss_kb_after": rss_after,
+        "rss_freed_kb": rss_before - rss_after if rss_before > 0 and rss_after > 0 else -1,
+        "sqla_objects_before": sqla_before,
+        "sqla_objects_after": sqla_after,
+        "sqla_freed": sqla_before - sqla_after,
+        "total_objects_before": objs_before,
+        "total_objects_after": objs_after,
+        "objects_freed": objs_before - objs_after,
+        "gc_collected": collected,
     }
