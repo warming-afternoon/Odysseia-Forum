@@ -3,10 +3,10 @@ from pydantic import BaseModel, Field
 from shared.enum import SearchConfigDefaults
 
 
-class UCB1ConfigDTO(BaseModel):
+class SearchConfigDTO(BaseModel):
     """
-    UCB1 算法配置的数据传输对象。
-    包含总展示次数、探索因子和强度权重三个参数。
+    搜索算法配置的数据传输对象。
+    包含 UCB1 和 Reddit Hot 两种排序算法的可配置参数。
     """
 
     total_display_count: int = Field(
@@ -20,4 +20,8 @@ class UCB1ConfigDTO(BaseModel):
     strength_weight: float = Field(
         default=SearchConfigDefaults.STRENGTH_WEIGHT.value,
         description="实力分权重 (W)",
+    )
+    reddit_hot_time_decay: float = Field(
+        default=SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value,
+        description="Reddit Hot 时间衰减常量（秒），越大好帖子停留越久",
     )

@@ -6,6 +6,7 @@ class SearchConfigDefaults(float, Enum):
 
     UCB1_EXPLORATION_FACTOR = 1.414  # sqrt(2)
     STRENGTH_WEIGHT = 5.0
+    REDDIT_HOT_TIME_DECAY = 900_000.0  # 约 10.4 天衰减 1 分（原 450000 的 2 倍）
 
 
 class SearchConfigDefaultsInt(IntEnum):
@@ -22,3 +23,4 @@ class SearchConfigType(IntEnum):
     STRENGTH_WEIGHT = 3  # 实力分权重 (W)
     NOTIFY_ON_MUTEX_CONFLICT = 4  # 互斥标签冲突通知开关
     MAIN_GUILD_ID = 5  # 主服务器 ID
+    REDDIT_HOT_TIME_DECAY = 6  # Reddit Hot 时间衰减常量（秒）

@@ -134,6 +134,7 @@ class ConfigRepository:
                 tips="UCB1算法中的全局总展示次数 (N)",
             )
             .on_conflict_do_nothing(constraint="bot_config_type_key"),
+
             insert(BotConfig)
             .values(
                 type=SearchConfigType.UCB1_EXPLORATION_FACTOR,
@@ -142,6 +143,7 @@ class ConfigRepository:
                 tips="UCB1算法的探索因子C，值越大越倾向于探索新内容",
             )
             .on_conflict_do_nothing(constraint="bot_config_type_key"),
+
             insert(BotConfig)
             .values(
                 type=SearchConfigType.STRENGTH_WEIGHT,
@@ -150,6 +152,7 @@ class ConfigRepository:
                 tips="UCB1算法中实力分(x/n)的权重W",
             )
             .on_conflict_do_nothing(constraint="bot_config_type_key"),
+
             insert(BotConfig)
             .values(
                 type=SearchConfigType.NOTIFY_ON_MUTEX_CONFLICT,
@@ -158,12 +161,22 @@ class ConfigRepository:
                 tips="当检测到帖子应用了互斥TAG时，是否通知管理组 (0=关, 1=开)",
             )
             .on_conflict_do_nothing(constraint="bot_config_type_key"),
+
             insert(BotConfig)
             .values(
                 type=SearchConfigType.MAIN_GUILD_ID,
                 type_str=SearchConfigType.MAIN_GUILD_ID.name,
                 value_int=main_guild_id,
                 tips="主服务器 ID，用于多服务器搜索时确认主布局",
+            )
+            .on_conflict_do_nothing(constraint="bot_config_type_key"),
+
+            insert(BotConfig)
+            .values(
+                type=SearchConfigType.REDDIT_HOT_TIME_DECAY,
+                type_str=SearchConfigType.REDDIT_HOT_TIME_DECAY.name,
+                value_float=SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value,
+                tips="Reddit Hot 算法的时间衰减常量（秒），越大高反应帖子停留越久",
             )
             .on_conflict_do_nothing(constraint="bot_config_type_key"),
         ]

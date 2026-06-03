@@ -7,17 +7,13 @@ from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
 from core.thread_repository import ThreadRepository
-from dto.search import UCB1ConfigDTO
+from dto.search import SearchConfigDTO
 from models import Author, Tag, Thread, ThreadTagLink, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
-from shared.enum import DefaultPreferences
+from shared.enum import DefaultPreferences, SearchConfigDefaults
 from shared.range_parser import parse_range_string
 from shared.time_parser import parse_time_string
-
-# Reddit Hot 算法的时间衰减常量：125h 前的帖子比新帖少 1 分
-# score = log10(max(1, reaction_count)) + created_at_unix / REDDIT_HOT_TIME_DECAY
-REDDIT_HOT_TIME_DECAY: float = 450000.0
 
 
 class SearchService:
@@ -176,6 +172,7 @@ class SearchService:
         total_display_count: int,
         exploration_factor: float,
         strength_weight: float,
+        time_decay: float = SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value,
         offset: int = 0,
         exclude_thread_ids: Sequence[int | str] | None = None,
     ) -> tuple[Sequence[Thread], int]:
@@ -407,7 +404,7 @@ class SearchService:
             elif effective_sort_method == "reddit_hot":
                 # 按 Reddit Hot 热门排序
                 final_select_stmt, final_score_expr = self._apply_reddit_hot_ranking(
-                    final_select_stmt, REDDIT_HOT_TIME_DECAY
+                    final_select_stmt, time_decay
                 )
                 order_by = (
                     final_score_expr.desc()
@@ -531,7 +528,7 @@ class SearchService:
         *,
         limit: int = 5,
         exclude_channel_ids: list[int] | None = None,
-        ucb1_config: UCB1ConfigDTO,
+        ucb1_config: SearchConfigDTO,
     ) -> tuple[list[Thread], int]:
         """基于 TAG 匹配度的相似帖子推荐。
 
@@ -604,6 +601,7 @@ class SearchService:
                 total_display_count=ucb1_config.total_display_count,
                 exploration_factor=ucb1_config.exploration_factor,
                 strength_weight=ucb1_config.strength_weight,
+                time_decay=ucb1_config.reddit_hot_time_decay,
                 exclude_thread_ids=list(seen_discord_ids),
             )
 

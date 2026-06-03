@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 
 from core.thread_repository import ThreadRepository
-from dto.search import UCB1ConfigDTO
+from dto.search import SearchConfigDTO
 from models import BotConfig
 from shared.discord_utils import DiscordUtils
 from shared.enum import SearchConfigDefaults, SearchConfigType
@@ -132,11 +132,11 @@ class CacheService:
             )
         return config
 
-    async def get_ucb1_config(self) -> UCB1ConfigDTO:
+    async def get_ucb1_config(self) -> SearchConfigDTO:
         """
-        获取 UCB1 算法所需的三个配置参数，封装为 DTO 返回。
+        获取搜索算法所需的配置参数，封装为 DTO 返回。
 
-        从缓存中获取总展示次数、探索因子和强度权重
+        从缓存中获取总展示次数、探索因子、强度权重和 Reddit Hot 衰减常量
         """
         total_disp_conf = await self.get_bot_config(
             SearchConfigType.TOTAL_DISPLAY_COUNT
@@ -145,6 +145,9 @@ class CacheService:
             SearchConfigType.UCB1_EXPLORATION_FACTOR
         )
         strength_conf = await self.get_bot_config(SearchConfigType.STRENGTH_WEIGHT)
+        reddit_hot_conf = await self.get_bot_config(
+            SearchConfigType.REDDIT_HOT_TIME_DECAY
+        )
 
         total_display_count = (
             total_disp_conf.value_int
@@ -161,11 +164,17 @@ class CacheService:
             if strength_conf and strength_conf.value_float is not None
             else SearchConfigDefaults.STRENGTH_WEIGHT.value
         )
+        reddit_hot_time_decay = (
+            reddit_hot_conf.value_float
+            if reddit_hot_conf and reddit_hot_conf.value_float is not None
+            else SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value
+        )
 
-        return UCB1ConfigDTO(
+        return SearchConfigDTO(
             total_display_count=total_display_count,
             exploration_factor=exploration_factor,
             strength_weight=strength_weight,
+            reddit_hot_time_decay=reddit_hot_time_decay,
         )
 
     def is_channel_indexed(self, channel_id: int) -> bool:

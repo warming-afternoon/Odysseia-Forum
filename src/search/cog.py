@@ -528,6 +528,7 @@ class Search(commands.Cog):
                     total_display_count=ucb1_config.total_display_count,
                     exploration_factor=ucb1_config.exploration_factor,
                     strength_weight=ucb1_config.strength_weight,
+                    time_decay=ucb1_config.reddit_hot_time_decay,
                 )
 
             # 当排序方法为按创建时间或收藏时间排序时，不记录展示次数

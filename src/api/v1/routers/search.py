@@ -28,7 +28,7 @@ from core.impression_cache_service import ImpressionCacheService
 from core.preferences_repository import PreferencesRepository
 from core.tag_cache_service import TagCacheService
 from dto.preferences import UserSearchPreferencesDTO
-from dto.search import UCB1ConfigDTO
+from dto.search import SearchConfigDTO
 from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
@@ -323,7 +323,7 @@ async def get_similar_threads(
     limit: int = Query(default=5, ge=1, le=20, description="最大返回结果数量"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """根据指定帖子的 TAG 打末匹配相似帖子。
+    """根据指定帖子的 TAG 来匹配相似帖子。
 
     降级策略：先全 TAG 匹配，不足时按流行度从低到高逐个丢弃 TAG 继续匹配，
     直到凑足 limit 条或仅剩最热门的一个 TAG。结果按 Reddit Hot 热门算法排序。
@@ -602,7 +602,7 @@ def _parse_search_keywords(
 async def _perform_search_and_update_counts(
     session: Any,
     query_object: ThreadSearchQuery,
-    ucb1_config: UCB1ConfigDTO,
+    ucb1_config: SearchConfigDTO,
     limit: int,
     exclude_thread_ids: List[int],
     offset: int = 0,
@@ -620,6 +620,7 @@ async def _perform_search_and_update_counts(
         total_display_count=ucb1_config.total_display_count,
         exploration_factor=ucb1_config.exploration_factor,
         strength_weight=ucb1_config.strength_weight,
+        time_decay=ucb1_config.reddit_hot_time_decay,
         offset=offset,
         exclude_thread_ids=exclude_thread_ids,
     )

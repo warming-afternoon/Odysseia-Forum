@@ -12,7 +12,7 @@ from dto.meta.category_meta import CategoryMeta
 from dto.meta.channel_meta import ChannelMeta
 from dto.meta.guild_meta import GuildMeta
 from dto.meta.tag_meta import TagMeta
-from dto.search import UCB1ConfigDTO
+from dto.search import SearchConfigDTO
 from models import BotConfig
 from shared.enum import SearchConfigDefaults, SearchConfigType
 
@@ -95,8 +95,8 @@ class ApiCacheService:
             )
         return config
 
-    async def get_ucb1_config(self) -> UCB1ConfigDTO:
-        """获取 UCB1 算法所需的三个配置参数。"""
+    async def get_ucb1_config(self) -> SearchConfigDTO:
+        """获取搜索算法所需的配置参数。"""
         total_disp_conf = await self.get_bot_config(
             SearchConfigType.TOTAL_DISPLAY_COUNT
         )
@@ -104,6 +104,9 @@ class ApiCacheService:
             SearchConfigType.UCB1_EXPLORATION_FACTOR
         )
         strength_conf = await self.get_bot_config(SearchConfigType.STRENGTH_WEIGHT)
+        reddit_hot_conf = await self.get_bot_config(
+            SearchConfigType.REDDIT_HOT_TIME_DECAY
+        )
 
         total_display_count = (
             total_disp_conf.value_int
@@ -120,11 +123,17 @@ class ApiCacheService:
             if strength_conf and strength_conf.value_float is not None
             else SearchConfigDefaults.STRENGTH_WEIGHT.value
         )
+        reddit_hot_time_decay = (
+            reddit_hot_conf.value_float
+            if reddit_hot_conf and reddit_hot_conf.value_float is not None
+            else SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value
+        )
 
-        return UCB1ConfigDTO(
+        return SearchConfigDTO(
             total_display_count=total_display_count,
             exploration_factor=exploration_factor,
             strength_weight=strength_weight,
+            reddit_hot_time_decay=reddit_hot_time_decay,
         )
 
     async def refresh_bot_config_cache(self):
