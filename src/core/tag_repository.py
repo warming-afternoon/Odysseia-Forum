@@ -2,7 +2,7 @@ import logging
 from typing import List, Sequence, cast
 
 from sqlalchemy import ColumnElement
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -28,13 +28,13 @@ class TagRepository:
         values_to_insert = [{"id": id, "name": name} for id, name in tags_data.items()]
 
         # 使用 INSERT ... ON CONFLICT DO UPDATE 一次性完成创建和更新
-        insert_stmt = sqlite_insert(Tag).values(values_to_insert)
+        insert_stmt = pg_insert(Tag).values(values_to_insert)
 
         # 构建 ON CONFLICT ... DO UPDATE 子句
         # 当 'id' 冲突时，更新 'name' 字段
         # 'excluded' 是一个特殊的对象，代表了在 INSERT 语句中试图插入的值
         update_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=["id"], set_={"name": insert_stmt.excluded.name}
+            constraint="tag_pkey", set_={"name": insert_stmt.excluded.name}
         )
 
         await self.session.execute(update_stmt)

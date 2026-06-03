@@ -15,7 +15,6 @@ from ThreadManager.update_data_dto import UpdateData
 import asyncio
 import rjieba
 import re
-from shared.database import thread_fts_table
 from shared.enum import SearchTimeout
 
 logger = logging.getLogger(__name__)
@@ -24,6 +23,36 @@ logger = logging.getLogger(__name__)
 def _batch_cut(keywords: list[str]) -> list[list[str]]:
     """批量 jieba 分词"""
     return [list(rjieba.cut(kw)) for kw in keywords]
+
+
+def _escape_tsquery_token(token: str) -> str:
+    """转义 token 中可能破坏 PostgreSQL tsquery 语法的单引号。"""
+    return token.replace("'", "''")
+
+
+def _tokens_to_tsquery_and(tokens: list[str]) -> str:
+    """将 token 列表转为 PostgreSQL tsquery AND 表达式。
+
+    最后一个 token 带 :* 前缀匹配后缀。
+    例如 ['搬运', '工'] → '搬运 & 工:*'
+    """
+    if not tokens:
+        return ""
+    escaped = [_escape_tsquery_token(t) for t in tokens]
+    parts = [f"'{t}'" for t in escaped[:-1]]
+    parts.append(f"'{escaped[-1]}':*")
+    return " & ".join(parts)
+
+
+def _build_exemption_tsquery(first_token: str, markers: list[str]) -> str:
+    """构建豁免标记 tsquery：'token <4> marker1 | marker1 <4> token | ...'"""
+    first = _escape_tsquery_token(first_token)
+    clauses = []
+    for marker in markers:
+        m = _escape_tsquery_token(marker)
+        clauses.append(f"'{first}' <4> '{m}'")
+        clauses.append(f"'{m}' <4> '{first}'")
+    return " | ".join(clauses) if clauses else ""
 
 
 class ThreadRepository:
@@ -497,6 +526,9 @@ class ThreadRepository:
     ) -> "FTSResultDTO":
         """
         处理 FTS 关键词搜索，返回正选的 thread.id 集合和反选的 thread.id 集合。
+
+        使用 PostgreSQL 全文搜索（search_vector tsvector + @@ tsquery），
+        Python 端通过 rjieba 分词后构建 tsquery 表达式。
         注意：返回的是内部主键 `thread.id` 而不是 Discord 的 `thread_id`
         """
 
@@ -517,9 +549,8 @@ class ThreadRepository:
                 if kw.strip()
             ]
 
-            # 逐个关键词构建 FTS5 MATCH 表达式
-            all_exclude_parts = []
-            # 批量 jieba 分词，减少线程池提交次数
+            all_exclude_tsqueries: list[str] = []
+            # 批量 jieba 分词
             try:
                 all_raw_tokens = await asyncio.wait_for(
                     loop.run_in_executor(None, _batch_cut, exclude_keywords_list),
@@ -530,51 +561,30 @@ class ThreadRepository:
                 all_raw_tokens = [[] for _ in exclude_keywords_list]
 
             for keyword, raw_tokens in zip(exclude_keywords_list, all_raw_tokens):
-                # 清理 token 内部的双引号，防止破坏 FTS5 语法
-                tokens = []
-                for tok in raw_tokens:
-                    clean_tok = tok.strip().replace('"', "")
-                    if clean_tok:
-                        tokens.append(clean_tok)
+                tokens = [t.strip() for t in raw_tokens if t.strip()]
                 if not tokens:
                     continue
 
-                # 构建 FTS5 MATCH 的匹配表达式：
-                # - 前面的分词用精确匹配（双引号包裹），例如 "搬运"
-                # - 最后一个分词用前缀匹配（* 在双引号外面），例如 "工"*
-                # - 所有分词之间用 AND 连接，表示必须同时出现
-                # 例如分词 ["搬运", "工"] → '"搬运" AND "工"*'
-                match_parts = [f'"{tok}"' for tok in tokens[:-1]]
-                match_parts.append(f'"{tokens[-1]}"*')
-                match_expr = " AND ".join(match_parts)
+                # 构建 PostgreSQL tsquery：tokens 用 & 连接，最后一个带 :* 前缀匹配
+                tsquery_and = _tokens_to_tsquery_and(tokens)
 
                 if markers:
-                    # 构建豁免子句：检查排除词的第一个分词是否在 4 个词范围内靠近豁免标记
-                    first_token = tokens[0]
-                    exemption_clauses = [
-                        f'NEAR("{first_token}" "{marker}", 4)' for marker in markers
-                    ]
-                    exemption_match_str = f"({' OR '.join(exemption_clauses)})"
-
-                    # 最终表达式形如：("搬运" AND "工"*) NOT (NEAR("搬运" "禁", 4) OR NEAR("搬运" "🈲", 4))
-                    # 含义：匹配包含"搬运"和"工*"的帖子，但排除"搬运"附近有"禁"或"🈲"的帖子
-                    all_exclude_parts.append(
-                        f"({match_expr}) NOT {exemption_match_str}"
+                    # 构建豁免子句：token <4> marker（双向）
+                    exemption_tsq = _build_exemption_tsquery(tokens[0], markers)
+                    all_exclude_tsqueries.append(
+                        f"({tsquery_and}) &! ({exemption_tsq})"
                     )
                 else:
-                    # 没有豁免标记时，直接用匹配表达式
-                    all_exclude_parts.append(f"({match_expr})")
+                    all_exclude_tsqueries.append(f"({tsquery_and})")
 
-            # 将所有排除词的 MATCH 表达式用 OR 连接
-            # 含义：命中"搬运"或"转载"任意一个的帖子都要排除
-            if all_exclude_parts:
-                final_exclude_expr = " OR ".join(all_exclude_parts)
-                # 在 FTS 虚拟表中执行 MATCH 查询，获取所有命中排除词的帖子 rowid
-                from sqlmodel import select
-
+            # 所有排除词用 | 连接（命中任一即排除）
+            if all_exclude_tsqueries:
+                final_exclude_tsquery = " | ".join(all_exclude_tsqueries)
                 exc_result = await self.session.execute(
-                    select(thread_fts_table.c.rowid).where(
-                        thread_fts_table.c.thread_fts.op("MATCH")(final_exclude_expr)
+                    select(Thread.id).where(
+                        Thread.search_vector.op("@@")(
+                            func.to_tsquery("simple", final_exclude_tsquery)
+                        )
                     )
                 )
                 fts_exclude_ids = set(exc_result.scalars().all())
@@ -610,44 +620,40 @@ class ThreadRepository:
                     _all_raw = [[] for _ in _jieba_inputs]
 
                 for kw, raw_tokens in zip(_jieba_inputs, _all_raw):
-                    tokens = []
-                    for tok in raw_tokens:
-                        clean_tok = tok.strip().replace('"', "")
-                        if clean_tok:
-                            tokens.append(clean_tok)
+                    tokens = [t.strip() for t in raw_tokens if t.strip()]
                     if tokens:
                         _token_map[kw] = tokens
 
             for group in and_groups:
-                # 按斜杠拆分同一组内的 OR 关键词
-                or_keywords = []
+                or_tsquery_parts = []
                 for kw in group.split("/"):
                     kw = kw.strip()
                     if not kw:
                         continue
 
-                    # 支持精确匹配语法：用双引号包裹的关键词不做分词，直接精确匹配
+                    # 精确匹配语法：双引号包裹的关键词使用 phraseto_tsquery
                     if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
                         exact_kw = kw[1:-1].strip().replace('"', "")
                         if exact_kw:
-                            or_keywords.append(f'"{exact_kw}"')
+                            # 用 jieba 分词后做短语匹配
+                            exact_tokens = list(rjieba.cut(exact_kw))
+                            clean_tokens = [t.strip() for t in exact_tokens if t.strip()]
+                            if clean_tokens:
+                                phrase = " <-> ".join(f"'{t}'" for t in clean_tokens)
+                                or_tsquery_parts.append(f"({phrase})")
                     else:
                         tokens = _token_map.get(kw)
                         if tokens:
-                            expr = " ".join(f'"{t}"*' for t in tokens)
-                            or_keywords.append(f"({expr})" if len(tokens) > 1 else expr)
+                            tsq = _tokens_to_tsquery_and(tokens)
+                            or_tsquery_parts.append(f"({tsq})")
 
-                # 同一组内的 OR 关键词用 OR 连接
-                # 例如 "搬运" 和 "转载" → '"搬运"* OR "转载"*'
-                # 含义：命中"搬运"或"转载"任意一个即可
-                if or_keywords:
-                    match_str = " OR ".join(or_keywords)
-                    # 执行 FTS MATCH 查询，获取当前组匹配的帖子 ID 集合
-                    from sqlmodel import select
-
+                if or_tsquery_parts:
+                    group_tsquery = " | ".join(or_tsquery_parts)
                     grp_result = await self.session.execute(
-                        select(thread_fts_table.c.rowid).where(
-                            thread_fts_table.c.thread_fts.op("MATCH")(match_str)
+                        select(Thread.id).where(
+                            Thread.search_vector.op("@@")(
+                                func.to_tsquery("simple", group_tsquery)
+                            )
                         )
                     )
                     group_ids = set(grp_result.scalars().all())

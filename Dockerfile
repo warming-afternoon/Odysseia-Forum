@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl procps libjemalloc2 \
+    && apt-get install -y --no-install-recommends build-essential curl procps libjemalloc2 libpq-dev \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/lib/*/libjemalloc.so.2 /usr/lib/libjemalloc.so.2
 
