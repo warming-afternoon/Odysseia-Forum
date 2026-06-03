@@ -107,7 +107,7 @@ class BatchUpdateService:
             logger.debug(f"批量更新成功写入数据库，影响了 {updated_count} 行。")
 
             # 筛选出 60 天内创建的帖子 ID
-            threshold = datetime.now(timezone.utc) - timedelta(
+            threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
                 days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value
             )
             all_ids = list(updates_to_process.keys())

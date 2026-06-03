@@ -214,7 +214,7 @@ class CollectionRepository:
 
             # 保存统计趋势到 Redis
             if new_ids:
-                threshold = datetime.now(timezone.utc) - timedelta(
+                threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
                     days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value
                 )
                 stmt = select(Thread.thread_id).where(

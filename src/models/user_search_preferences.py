@@ -6,6 +6,8 @@ from sqlmodel import JSON, BigInteger, Column, Field, SQLModel, UniqueConstraint
 class UserSearchPreferences(SQLModel, table=True):
     """用户搜索偏好模型"""
 
+    __tablename__ = "user_search_preferences"  # type: ignore[assignment]
+
     __table_args__ = (
         UniqueConstraint("user_id", "guild_id", name="uk_user_guild_preferences"),
     )

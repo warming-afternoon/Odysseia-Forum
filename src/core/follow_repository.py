@@ -47,7 +47,7 @@ class ThreadFollowRepository:
                 return False
 
             # 创建关注记录
-            now = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             follow = ThreadFollow(
                 user_id=user_id,
                 thread_id=thread_id,
@@ -99,7 +99,7 @@ class ThreadFollowRepository:
                 return 0
 
             # 批量创建关注记录
-            now = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             follows = [
                 ThreadFollow(
                     user_id=user_id,
@@ -168,7 +168,7 @@ class ThreadFollowRepository:
             是否成功更新
         """
         try:
-            now = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
 
             if thread_id is not None:
                 # 更新单个帖子

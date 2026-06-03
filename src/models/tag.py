@@ -1,6 +1,7 @@
 from typing import TYPE_CHECKING, List
 
-from sqlmodel import Field, Relationship, SQLModel
+from sqlalchemy import BigInteger
+from sqlmodel import Column, Field, Relationship, SQLModel
 
 from models import ThreadTagLink
 
@@ -11,7 +12,10 @@ if TYPE_CHECKING:
 class Tag(SQLModel, table=True):
     """标签模型。"""
 
-    id: int = Field(primary_key=True, description="Discord tag的id")
+    id: int = Field(
+        sa_column=Column(BigInteger, primary_key=True),
+        description="Discord tag的id",
+    )
     name: str = Field(index=True)
 
     threads: List["Thread"] = Relationship(

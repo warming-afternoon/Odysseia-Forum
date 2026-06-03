@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -25,7 +25,7 @@ class BannerApplication(SQLModel, table=True):
         default=ApplicationStatus.PENDING.value, index=True, description="申请状态"
     )
     applied_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc), description="申请时间"
+        default_factory=datetime.utcnow, description="申请时间"
     )
     reviewed_at: Optional[datetime] = Field(default=None, description="审核时间")
     reviewer_id: Optional[int] = Field(default=None, description="审核员Discord ID")

@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
-from sqlmodel import Field, SQLModel, UniqueConstraint
+from sqlalchemy import BigInteger
+from sqlmodel import Column, Field, SQLModel, UniqueConstraint
 
 
 class BooklistItem(SQLModel, table=True):
@@ -17,13 +18,19 @@ class BooklistItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     """主键ID"""
 
-    owner_id: int = Field(default=0, index=True, description="所属用户的ID")
+    owner_id: int = Field(
+        default=0,
+        sa_column=Column(BigInteger, index=True),
+        description="所属用户的ID",
+    )
     """所属用户的ID"""
 
     booklist_id: int = Field(index=True, description="所属书单ID")
     """所属书单ID"""
 
-    thread_id: int = Field(index=True, description="关联的帖子ID")
+    thread_id: int = Field(
+        sa_column=Column(BigInteger, index=True), description="关联的帖子ID"
+    )
     """关联的帖子ID"""
 
     display_order: int = Field(default=0, index=True)
@@ -38,17 +45,21 @@ class BooklistItem(SQLModel, table=True):
     )
     """参赛时间（赛事专用）"""
 
-    display_message_id: Optional[int] = Field(default=None, description="展示消息的ID")
+    display_message_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(BigInteger),
+        description="展示消息的ID",
+    )
     """展示消息的 Discord ID"""
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc), description="加入书单的时间"
+        default_factory=datetime.utcnow, description="加入书单的时间"
     )
     """加入书单的时间"""
 
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        sa_column_kwargs={"onupdate": lambda: datetime.now(timezone.utc)},
+        default_factory=datetime.utcnow,
+        sa_column_kwargs={"onupdate": datetime.utcnow},
         description="最后更新时间",
     )
     """最后更新时间"""

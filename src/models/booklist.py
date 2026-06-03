@@ -1,7 +1,8 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
-from sqlmodel import Field, SQLModel
+from sqlalchemy import BigInteger
+from sqlmodel import Column, Field, SQLModel
 
 
 class Booklist(SQLModel, table=True):
@@ -12,7 +13,10 @@ class Booklist(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     """主键ID"""
 
-    owner_id: int = Field(index=True, description="创建该书单的用户Discord ID")
+    owner_id: int = Field(
+        sa_column=Column(BigInteger, index=True),
+        description="创建该书单的用户Discord ID",
+    )
     """创建该书单的用户 Discord ID"""
 
     title: str = Field(index=True, description="书单标题")
@@ -41,7 +45,9 @@ class Booklist(SQLModel, table=True):
     """是否为赛事书单"""
 
     tournament_channel_id: Optional[int] = Field(
-        default=None, index=True, unique=True, description="赛事关联的 Discord 频道ID"
+        default=None,
+        sa_column=Column(BigInteger, index=True, unique=True),
+        description="赛事关联的 Discord 频道ID",
     )
     """赛事关联的 Discord 频道ID"""
 
@@ -61,23 +67,35 @@ class Booklist(SQLModel, table=True):
     """被收藏次数"""
 
     # Discord 展示位置
-    display_thread_id: Optional[int] = Field(default=None, description="展示帖子的ID")
+    display_thread_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(BigInteger),
+        description="展示帖子的ID",
+    )
     """展示帖子的 Discord ID"""
 
-    display_channel_id: Optional[int] = Field(default=None, description="展示频道的ID")
+    display_channel_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(BigInteger),
+        description="展示频道的ID",
+    )
     """展示频道的 Discord ID"""
 
-    display_guild_id: Optional[int] = Field(default=None, description="展示服务器的ID")
+    display_guild_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(BigInteger),
+        description="展示服务器的ID",
+    )
     """展示服务器的 Discord ID"""
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc), description="创建时间"
+        default_factory=datetime.utcnow, description="创建时间"
     )
     """创建时间"""
 
     updated_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
-        sa_column_kwargs={"onupdate": lambda: datetime.now(timezone.utc)},
+        default_factory=datetime.utcnow,
+        sa_column_kwargs={"onupdate": datetime.utcnow},
         description="最后更新时间",
     )
     """最后更新时间"""

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import Index, event, func, inspect
@@ -29,20 +29,28 @@ class Thread(SQLModel, table=True):
     )
     """帖子所属的 Discord 服务器 ID"""
 
-    channel_id: int = Field(index=True)
+    channel_id: int = Field(
+        sa_column=Column(BigInteger, index=True),
+        description="帖子所在频道的 Discord ID",
+    )
     """帖子所在频道的 Discord ID"""
 
-    thread_id: int = Field(index=True, unique=True)
+    thread_id: int = Field(
+        sa_column=Column(BigInteger, index=True, unique=True),
+        description="帖子的 Discord ID",
+    )
     """帖子的 Discord ID"""
 
     title: str
     """帖子标题"""
 
-    author_id: int = Field(index=True)
-    """帖子作者的 Discord ID"""
+    author_id: int = Field(
+        sa_column=Column(BigInteger, index=True),
+        description="帖子作者的 Discord ID",
+    )
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc), nullable=False, index=True
+        default_factory=datetime.utcnow, nullable=False, index=True
     )
     """帖子创建时间 (UTC)"""
 
@@ -61,7 +69,7 @@ class Thread(SQLModel, table=True):
     search_vector: Optional[str] = Field(
         default=None,
         sa_column=Column(TSVECTOR, nullable=True),
-        description="预计算的 PostgreSQL 全文搜索向量（rjieba 分词 + to_tsvector）",
+        description="预计算的 PostgreSQL 全文搜索向量（rjieba 分词 + to_tsvector('simple')），支持 <-> / <N> 邻近搜索",
     )
     """PostgreSQL 全文搜索向量"""
 
@@ -126,8 +134,8 @@ class Thread(SQLModel, table=True):
 @event.listens_for(Thread, "before_insert")
 def _on_thread_before_insert(mapper, connection, target: Thread):
     """INSERT 前自动填充 search_vector。"""
-    tokens = build_search_vector_text(target.title, target.first_message_excerpt)
-    target.search_vector = func.array_to_tsvector(tokens) if tokens else None
+    tokens_text = build_search_vector_text(target.title, target.first_message_excerpt)
+    target.search_vector = func.to_tsvector("simple", tokens_text) if tokens_text else None
 
 
 @event.listens_for(Thread, "before_update")
@@ -138,5 +146,5 @@ def _on_thread_before_update(mapper, connection, target: Thread):
     excerpt_changed = insp.attrs.first_message_excerpt.history.has_changes()
     if not title_changed and not excerpt_changed:
         return
-    tokens = build_search_vector_text(target.title, target.first_message_excerpt)
-    target.search_vector = func.array_to_tsvector(tokens) if tokens else None
+    tokens_text = build_search_vector_text(target.title, target.first_message_excerpt)
+    target.search_vector = func.to_tsvector("simple", tokens_text) if tokens_text else None

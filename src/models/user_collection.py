@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlmodel import BigInteger, Column, Field, SQLModel, UniqueConstraint
@@ -35,7 +35,7 @@ class UserCollection(SQLModel, table=True):
     )
 
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=datetime.utcnow,
         nullable=False,
         description="收藏时间 (UTC)",
     )

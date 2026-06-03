@@ -19,6 +19,10 @@ import asyncio
 import time
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from shared.database import AsyncSessionFactory, init_db, close_db
 from shared.redis_client import RedisManager
 from ThreadManager.cog import ThreadManager
@@ -69,7 +73,11 @@ class MyBot(commands.Bot):
         # 从 Bot 创建时开始计时，防止首次连接失败时 _disconnected_at 为 None
         # 导致看门狗和健康检查双双失效（启动死锁）。
         self._disconnected_at: float | None = time.monotonic()
-        self._heartbeat_path: str = "/app/data/bot_heartbeat.json"  # 与 healthcheck.py 同步
+        # Docker 工作目录为 /app，本地 Windows 为项目根目录
+        self._heartbeat_path: str = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "data", "bot_heartbeat.json"
+        )
+        os.makedirs(os.path.dirname(self._heartbeat_path), exist_ok=True)
         self._max_disconnect_seconds: float = 300.0  # 5 分钟断连后自愈退出
         self._health_exit_code: int = 0
         self._closing: bool = False  # close() 重入守卫
@@ -425,7 +433,7 @@ async def main():
         config = json.load(f)
 
     # 读取配置项并初始化全局Redis连接池
-    redis_url = config.get("redis_url", "redis://odysseia-redis:6379/0")
+    redis_url = os.environ.get("REDIS_URL", config.get("redis_url", "redis://odysseia-redis:6379/0"))
     await RedisManager.init_redis(redis_url)
 
     # 清除上一次运行残留的就绪标志，确保 API 不会在 Bot 重启期间读到过期状态

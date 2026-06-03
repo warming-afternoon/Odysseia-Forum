@@ -82,7 +82,7 @@ class SyncService:
 
         # 默认值
         final_author_id = thread.owner_id or 0
-        final_created_at = thread.created_at
+        final_created_at = thread.created_at.replace(tzinfo=None) if thread.created_at else thread.created_at
         source_user_for_author_service = thread.owner
         excerpt = ""
         thumbnail_urls: List[str] = []
@@ -141,7 +141,7 @@ class SyncService:
                     local_dt = datetime.datetime(
                         year, month, day, hour, minute, tzinfo=local_tz
                     )
-                    final_created_at = local_dt.astimezone(datetime.timezone.utc)
+                    final_created_at = local_dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
             except Exception as e:
                 logger.warning(
                     f"重建帖 {thread.id} 解析作者或时间失败: {e}。中止对其的索引"
@@ -268,9 +268,13 @@ class SyncService:
             "title": thread.name,
             "author_id": final_author_id,
             "created_at": final_created_at,
-            "last_active_at": discord.utils.snowflake_time(thread.last_message_id)
-            if thread.last_message_id
-            else thread.created_at,
+            "last_active_at": (
+                discord.utils.snowflake_time(
+                    thread.last_message_id
+                ).replace(tzinfo=None)
+                if thread.last_message_id
+                else thread.created_at.replace(tzinfo=None) if thread.created_at else thread.created_at
+            ),
             "reaction_count": reaction_count,
             "reply_count": thread.message_count,
             "not_found_count": 0,

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -18,7 +18,7 @@ class BannerCarousel(SQLModel, table=True):
     title: str = Field(description="帖子标题")
 
     start_time: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc),
+        default_factory=datetime.utcnow,
         index=True,
         description="开始展示时间",
     )

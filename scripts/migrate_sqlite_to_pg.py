@@ -2,9 +2,16 @@
 SQLite → PostgreSQL 数据迁移脚本（一次性使用）。
 
 用法：
-    1. 确保 PostgreSQL 容器运行且表已创建（init_db()）
+    1. 确保 PostgreSQL 正在运行
     2. 设置环境变量或修改下方配置
     3. python scripts/migrate_sqlite_to_pg.py
+
+脚本会自动完成：
+    - 建表（若不存在）
+    - 数据导入
+    - search_vector 分词填充
+    - GIN 索引创建
+    - 序列重置
 
 环境变量：
     SQLITE_PATH: SQLite 数据库路径（默认 data/database.db）
@@ -14,10 +21,21 @@ SQLite → PostgreSQL 数据迁移脚本（一次性使用）。
 import asyncio
 import os
 import sqlite3
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import asyncpg
 import rjieba
+
+# 确保 src/ 在 Python 路径中（本地运行时需要）
+_src = Path(__file__).resolve().parent.parent / "src"
+if str(_src) not in sys.path:
+    sys.path.insert(0, str(_src))
+
+from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
+from sqlmodel import SQLModel  # noqa: E402
+import models  # noqa: E402, F401 — 注册所有表到 SQLModel.metadata
 
 # ── 配置 ────────────────────────────────────────────
 
@@ -30,8 +48,11 @@ BATCH_SIZE = 500
 # ── 辅助函数 ────────────────────────────────────────
 
 
-def _build_search_tokens(title: str | None, excerpt: str | None) -> list[str] | None:
-    """用 rjieba 对 title + excerpt 分词。"""
+def _build_search_tokens(title: str | None, excerpt: str | None) -> str | None:
+    """用 rjieba 对 title + excerpt 分词，返回空格连接的 token 字符串。
+
+    配合 to_tsvector('simple', ...) 生成带顺序位置的 search_vector。
+    """
     parts = []
     if title:
         parts.append(title)
@@ -42,24 +63,56 @@ def _build_search_tokens(title: str | None, excerpt: str | None) -> list[str] | 
     combined = " ".join(parts)
     tokens = list(rjieba.cut(combined))
     filtered = [t.lower().strip() for t in tokens if t.strip()]
-    return filtered if filtered else None
+    return " ".join(filtered) if filtered else None
 
 
-def _convert_sqlite_value(val, col_name: str):
+def _convert_sqlite_value(val, col_name: str, col_type: str = ""):
     """将 SQLite 值转换为 PostgreSQL 兼容类型。"""
     if val is None:
         return None
-    # SQLite JSON 列存储为字符串，在 PG 中需转为 JSON 兼容格式
-    if col_name == "thumbnail_urls" and isinstance(val, str):
+    # JSON 列：保持为 JSON 字符串，PG 会自动解析
+    if col_type == "JSON" or col_name in (
+        "thumbnail_urls", "preferred_channels", "include_authors",
+        "exclude_authors", "include_tags", "exclude_tags",
+        "exclude_keyword_exemption_markers",
+    ):
+        if isinstance(val, str):
+            return val if val else "[]"
         import json
-        return json.loads(val) if val else []
+        return json.dumps(val, ensure_ascii=False)
     # SQLite 的布尔值是 0/1，PG 需要 True/False
-    if col_name == "show_flag":
-        return bool(val)
+    if col_type in ("BOOLEAN", "BOOL") or col_name in (
+        "show_flag", "is_public", "is_anonymous", "is_default", "is_tournament",
+    ):
+        if isinstance(val, int):
+            return bool(val)
+        if isinstance(val, str):
+            return val.lower() in ("1", "true", "yes")
+    # SQLite 时间列存储为字符串，PG 需要 datetime 对象
+    if col_type in ("DATETIME", "TIMESTAMP") and isinstance(val, str):
+        # 尝试多种 SQLite 日期格式
+        for fmt in (
+            "%Y-%m-%d %H:%M:%S.%f",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M:%S.%f",
+            "%Y-%m-%dT%H:%M:%S",
+        ):
+            try:
+                return datetime.strptime(val, fmt)
+            except ValueError:
+                continue
+        # 如果无法解析，返回原始字符串（PG 可能能自动转换）
+        return val
     return val
 
 
 # ── 表迁移顺序（按外键依赖） ─────────────────────────
+
+# PG 表名：SQLite 表名映射（生产环境 SQLite 历史遗留命名不一致）
+SQLITE_TABLE_MAP = {
+    "thread_tag_link": "threadtaglink",
+    "user_search_preferences": "usersearchpreferences",
+}
 
 TABLE_ORDER = [
     "author",
@@ -69,7 +122,7 @@ TABLE_ORDER = [
     "thread_tag_link",
     "tag_vote",
     "thread_follow",
-    "usersearchpreferences",
+    "user_search_preferences",
     "user_update_preference",
     "mutex_tag_group",
     "mutex_tag_rule",
@@ -85,9 +138,24 @@ TABLE_ORDER = [
 SEARCH_VECTOR_TABLE = "thread"
 
 
+def _sqlite_name(pg_table: str) -> str:
+    """获取 PG 表名对应的 SQLite 表名（处理历史遗留命名不一致）。"""
+    return SQLITE_TABLE_MAP.get(pg_table, pg_table)
+
+
 async def main():
     print(f"SQLite 源: {SQLITE_PATH}")
     print(f"PostgreSQL 目标: {PG_URL}")
+
+    # ── 0. 建表（若不存在）──
+    print("创建表结构...")
+    # PG_URL 是同步 URL (postgresql://)，转为异步 (postgresql+asyncpg://)
+    async_db_url = PG_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+    _engine = create_async_engine(async_db_url)
+    async with _engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    await _engine.dispose()
+    print("表结构就绪\n")
 
     # ── 1. 连接数据库 ──
     sqlite_conn = sqlite3.connect(SQLITE_PATH)
@@ -96,23 +164,45 @@ async def main():
     pg_conn = await asyncpg.connect(PG_URL)
 
     try:
-        # ── 2. 验证源数据 ──
+        # ── 2. 检查 SQLite 中实际存在的表 ──
+        sqlite_tables = {
+            row[0]
+            for row in sqlite_conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+        missing = [
+            t for t in TABLE_ORDER
+            if _sqlite_name(t) not in sqlite_tables
+        ]
+        if missing:
+            print(f"SQLite 中不存在的表（将跳过）: {', '.join(missing)}")
+
         for table in TABLE_ORDER:
-            count = sqlite_conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
-            print(f"  SQLite.{table}: {count} 行")
+            sq_name = _sqlite_name(table)
+            if sq_name not in sqlite_tables:
+                print(f"  SQLite.{sq_name}: 不存在，跳过")
+                continue
+            count = sqlite_conn.execute(f"SELECT COUNT(*) FROM {sq_name}").fetchone()[0]
+            print(f"  SQLite.{sq_name}: {count} 行")
 
         # ── 3. 迁移每张表 ──
         for table in TABLE_ORDER:
-            print(f"\n迁移表: {table}")
+            sq_name = _sqlite_name(table)
+            if sq_name not in sqlite_tables:
+                print(f"\n迁移表: {table} ← SQLite.{sq_name} 不存在，跳过")
+                continue
+            print(f"\n迁移表: {table} ← SQLite.{sq_name}")
 
-            # 获取列名
-            pragma = sqlite_conn.execute(f"PRAGMA table_info({table})").fetchall()
+            # 获取列名和类型
+            pragma = sqlite_conn.execute(f"PRAGMA table_info({sq_name})").fetchall()
             columns = [row["name"] for row in pragma]
+            col_types = {row["name"]: row["type"] for row in pragma}
             col_list = ", ".join(columns)
             placeholders = ", ".join(f"${i+1}" for i in range(len(columns)))
 
             # 读取数据
-            rows = sqlite_conn.execute(f"SELECT {col_list} FROM {table}").fetchall()
+            rows = sqlite_conn.execute(f"SELECT {col_list} FROM {sq_name}").fetchall()
 
             if not rows:
                 print(f"  空表，跳过")
@@ -125,7 +215,8 @@ async def main():
                 pg_batch = []
                 for row in batch:
                     converted = tuple(
-                        _convert_sqlite_value(row[col], col) for col in columns
+                        _convert_sqlite_value(row[col], col, col_types.get(col, ""))
+                        for col in columns
                     )
                     pg_batch.append(converted)
 
@@ -147,11 +238,11 @@ async def main():
         )
         updated = 0
         for row in thread_rows:
-            tokens = _build_search_tokens(row["title"], row["first_message_excerpt"])
-            if tokens:
+            tokens_text = _build_search_tokens(row["title"], row["first_message_excerpt"])
+            if tokens_text:
                 await pg_conn.execute(
-                    "UPDATE thread SET search_vector = array_to_tsvector($1) WHERE id = $2",
-                    tokens,
+                    "UPDATE thread SET search_vector = to_tsvector('simple', $1) WHERE id = $2",
+                    tokens_text,
                     row["id"],
                 )
                 updated += 1
@@ -177,7 +268,7 @@ async def main():
             except Exception:
                 pass  # 某些表可能没有 id 序列
 
-        print("\n✅ 迁移完成！")
+        print("\n* Migration completed! *")
 
     finally:
         sqlite_conn.close()

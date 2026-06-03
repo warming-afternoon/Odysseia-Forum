@@ -133,12 +133,12 @@ class AuthorCog(commands.Cog, name="Author"):
                 "global_name": None,
                 "display_name": f"未知用户{user_id}",
                 "avatar_url": None,
-                "last_updated": datetime.now(timezone.utc),
+                "last_updated": datetime.now(timezone.utc).replace(tzinfo=None),
             }
             await repo.upsert_author(dummy_author)
             logger.debug(f"用户 {user_id} 无法获取且不在库，已写入占位数据")
             return
-        author.last_updated = datetime.now(timezone.utc)
+        author.last_updated = datetime.now(timezone.utc).replace(tzinfo=None)
         session.add(author)
         await session.commit()
         logger.debug(f"拉取用户 {user_id} 失败，已更新 last_updated 时间以免重复拉取")
@@ -151,7 +151,7 @@ def _build_author_data(user_obj) -> dict:
         "global_name": user_obj.global_name,
         "display_name": user_obj.display_name,
         "avatar_url": user_obj.display_avatar.url if user_obj.display_avatar else None,
-        "last_updated": datetime.now(timezone.utc),
+        "last_updated": datetime.now(timezone.utc).replace(tzinfo=None),
     }
 
 

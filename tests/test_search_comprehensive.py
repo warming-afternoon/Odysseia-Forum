@@ -36,7 +36,7 @@ from core.tag_cache_service import TagCacheService
 # PostgreSQL 测试数据库 URL（可通过环境变量覆盖）
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DB_URL",
-    "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia",
+    "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia_test",
 )
 
 
@@ -45,11 +45,11 @@ TEST_DATABASE_URL = os.environ.get(
 # ──────────────────────────────────────────────
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="function")
 async def db_session_factory() -> AsyncGenerator[
     async_sessionmaker[AsyncSession], None
 ]:
-    """模块级别的 PostgreSQL 数据库引擎 + 会话工厂。"""
+    """函数级别的 PostgreSQL 数据库引擎 + 会话工厂（每测试独立）。"""
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
@@ -63,6 +63,10 @@ async def db_session_factory() -> AsyncGenerator[
 
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     yield factory
+    # 清空所有表，确保每个测试独立
+    async with engine.begin() as conn:
+        for table in reversed(SQLModel.metadata.sorted_tables):
+            await conn.execute(table.delete())
     await engine.dispose()
 
 
@@ -650,6 +654,78 @@ class TestFTSExcludeAndExemption:
         assert "小说推荐" in titles
         assert "关于百合破坏的讨论" not in titles
         assert "纯爱小说分享" not in titles
+
+    @pytest.mark.asyncio
+    async def test_exemption_proximity_near_marker(
+        self, seeded_basic_session, db_session_factory
+    ):
+        """邻近豁免：排除词附近（≤4 词位）有豁免标记时豁免生效。"""
+        tag_cache = _make_tag_cache(db_session_factory)
+        await tag_cache.build_cache()
+        threads, _ = await _search(
+            seeded_basic_session, tag_cache,
+            keywords=None,
+            exclude_keywords="百合破坏",
+            exclude_keyword_exemption_markers=["禁", "🈲"],
+        )
+        titles = _titles(threads)
+        # 标记在 4 词位内 → 豁免
+        assert "🈲百合破坏" in titles, "🈲 紧邻百合破坏，应豁免"
+        assert "禁：请勿讨论百合破坏话题" in titles, "禁与百合相距4词位，应豁免"
+        assert "关于百合破坏的讨论" not in titles, "无豁免标记，应被排除"
+
+    @pytest.mark.asyncio
+    async def test_exemption_proximity_far_marker(
+        self, db_session_factory, empty_db_session
+    ):
+        """邻近豁免：豁免标记距离排除词 >4 词位时不豁免，帖子应被排除。"""
+        tag_cache = _make_tag_cache(db_session_factory)
+        await tag_cache.build_cache()
+
+        # 创建测试线程：标题含排除关键词，摘要末尾含豁免标记（距离远）
+        now = datetime.now()
+        # ~10 个 token 的 padding，使 禁 与 百合 距离 > 4
+        padding = "无关内容一 无关内容二 无关内容三 无关内容四 无关内容五"
+        far_thread = Thread(
+            thread_id=501,
+            channel_id=1,
+            title="关于百合破坏的讨论",
+            first_message_excerpt=f"{padding} 禁",
+            author_id=10,
+            created_at=now,
+        )
+        near_thread = Thread(
+            thread_id=502,
+            channel_id=1,
+            title="禁：请勿讨论百合破坏话题",
+            author_id=11,
+            created_at=now,
+        )
+        clean_thread = Thread(
+            thread_id=503,
+            channel_id=1,
+            title="小说推荐",
+            author_id=12,
+            created_at=now,
+        )
+        empty_db_session.add_all([far_thread, near_thread, clean_thread])
+        await empty_db_session.commit()
+
+        threads, _ = await _search(
+            empty_db_session, tag_cache,
+            keywords=None,
+            exclude_keywords="百合破坏",
+            exclude_keyword_exemption_markers=["禁", "🈲"],
+        )
+        titles = _titles(threads)
+        # 标记近 → 豁免
+        assert "禁：请勿讨论百合破坏话题" in titles
+        # 标记远（>4 词位）→ 不豁免，被排除
+        assert "关于百合破坏的讨论" not in titles, (
+            "禁与百合相距远超4词位，不应触发豁免，应被排除"
+        )
+        # 无关键词的帖子保留
+        assert "小说推荐" in titles
 
 
 # ══════════════════════════════════════════════

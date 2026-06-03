@@ -279,7 +279,7 @@ class BannerService:
             cover_image_url=cover_image_url,
             target_scope=target_scope,
             status=ApplicationStatus.PENDING.value,
-            applied_at=datetime.now(timezone.utc),
+            applied_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         self.session.add(application)
         await self.session.commit()
@@ -313,7 +313,7 @@ class BannerService:
 
         # 更新申请状态
         application.status = ApplicationStatus.APPROVED.value
-        application.reviewed_at = datetime.now(timezone.utc)
+        application.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         application.reviewer_id = reviewer_id
 
         # 判断是全频道还是特定频道
@@ -359,7 +359,7 @@ class BannerService:
             raise ValueError("申请不存在")
 
         application.status = ApplicationStatus.REJECTED.value
-        application.reviewed_at = datetime.now(timezone.utc)
+        application.reviewed_at = datetime.now(timezone.utc).replace(tzinfo=None)
         application.reviewer_id = reviewer_id
         application.reject_reason = reason
 
@@ -375,7 +375,7 @@ class BannerService:
         title: str,
     ):
         """添加到轮播列表"""
-        start_time = datetime.now(timezone.utc)
+        start_time = datetime.now(timezone.utc).replace(tzinfo=None)
         end_time = start_time + timedelta(days=self.BANNER_DURATION_DAYS)
 
         # 获取当前最大position
@@ -427,14 +427,14 @@ class BannerService:
             channel_id=channel_id,
             cover_image_url=cover_image_url,
             title=title,
-            queued_at=datetime.now(timezone.utc),
+            queued_at=datetime.now(timezone.utc).replace(tzinfo=None),
             position=new_position,
         )
         self.session.add(waitlist_item)
 
     async def _get_active_banner_count(self, channel_id: Optional[int]) -> int:
         """获取当前活跃的banner数量"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         result = await self.session.execute(
             select(BannerCarousel).where(
                 and_(
@@ -447,7 +447,7 @@ class BannerService:
 
     async def cleanup_expired_banners(self) -> int:
         """清理过期的banner并从等待列表补充"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         # 查找所有过期的banner
         result = await self.session.execute(
@@ -492,7 +492,7 @@ class BannerService:
         self, channel_id: Optional[int] = None
     ) -> List[BannerCarousel]:
         """获取活跃的banner列表"""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
 
         if channel_id is None:
             # 获取全频道的banner

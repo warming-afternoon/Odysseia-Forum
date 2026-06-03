@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 from typing import List, Optional, Sequence, cast
 
-from sqlalchemy import ColumnElement, case, func, update
+from sqlalchemy import ColumnElement, case, func, literal_column, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import select
@@ -38,20 +38,30 @@ def _tokens_to_tsquery_and(tokens: list[str]) -> str:
     """
     if not tokens:
         return ""
-    escaped = [_escape_tsquery_token(t) for t in tokens]
+    escaped = [_escape_tsquery_token(t.lower()) for t in tokens]
     parts = [f"'{t}'" for t in escaped[:-1]]
     parts.append(f"'{escaped[-1]}':*")
     return " & ".join(parts)
 
 
-def _build_exemption_tsquery(first_token: str, markers: list[str]) -> str:
-    """构建豁免标记 tsquery：'token <4> marker1 | marker1 <4> token | ...'"""
+
+def _build_exemption_tsquery(
+    first_token: str, markers: list[str], proximity: int = 4
+) -> str:
+    """构建豁免标记 tsquery：检查豁免标记是否在排除词 ±N 词位内。
+
+    使用双向 <d> 距离运算符组合（d ∈ [1, proximity]），
+    限制豁免标记仅在排除关键词附近（N 个词位内）才生效。
+    to_tsvector('simple', ...) 按词顺序分配位置，支持邻近搜索。
+    所有字符（包括非 BMP emoji 如 🈲）均可通过 ::tsquery cast 保留。
+    """
     first = _escape_tsquery_token(first_token)
     clauses = []
     for marker in markers:
         m = _escape_tsquery_token(marker)
-        clauses.append(f"'{first}' <4> '{m}'")
-        clauses.append(f"'{m}' <4> '{first}'")
+        for d in range(1, proximity + 1):
+            clauses.append(f"'{first}' <{d}> '{m}'")
+            clauses.append(f"'{m}' <{d}> '{first}'")
     return " | ".join(clauses) if clauses else ""
 
 
@@ -353,7 +363,7 @@ class ThreadRepository:
             update(Thread)
             .where(Thread.thread_id == thread_id)  # type: ignore
             .values(
-                latest_update_at=datetime.now(timezone.utc),
+                latest_update_at=datetime.now(timezone.utc).replace(tzinfo=None),
                 latest_update_link=latest_update_link,
             )
         )
@@ -583,7 +593,7 @@ class ThreadRepository:
                 exc_result = await self.session.execute(
                     select(Thread.id).where(
                         Thread.search_vector.op("@@")(
-                            func.to_tsquery("simple", final_exclude_tsquery)
+                            literal_column(f"$${final_exclude_tsquery}$$::tsquery")
                         )
                     )
                 )
@@ -631,15 +641,14 @@ class ThreadRepository:
                     if not kw:
                         continue
 
-                    # 精确匹配语法：双引号包裹的关键词使用 phraseto_tsquery
+                    # 精确匹配语法：双引号包裹的关键词跳过 jieba 分词，所有 token 需同时存在
                     if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
                         exact_kw = kw[1:-1].strip().replace('"', "")
                         if exact_kw:
-                            # 用 jieba 分词后做短语匹配
                             exact_tokens = list(rjieba.cut(exact_kw))
-                            clean_tokens = [t.strip() for t in exact_tokens if t.strip()]
+                            clean_tokens = [t.strip().lower() for t in exact_tokens if t.strip()]
                             if clean_tokens:
-                                phrase = " <-> ".join(f"'{t}'" for t in clean_tokens)
+                                phrase = " & ".join(f"'{t}'" for t in clean_tokens)
                                 or_tsquery_parts.append(f"({phrase})")
                     else:
                         tokens = _token_map.get(kw)
@@ -652,7 +661,7 @@ class ThreadRepository:
                     grp_result = await self.session.execute(
                         select(Thread.id).where(
                             Thread.search_vector.op("@@")(
-                                func.to_tsquery("simple", group_tsquery)
+                                literal_column(f"$${group_tsquery}$$::tsquery")
                             )
                         )
                     )

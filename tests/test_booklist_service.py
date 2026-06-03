@@ -1,7 +1,7 @@
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
-from datetime import datetime, timezone
+from datetime import datetime
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlmodel import SQLModel, delete
 
@@ -14,21 +14,23 @@ from models import Booklist
 from models import BooklistItem
 from models import Thread
 from models import Author
+from models import ThreadTagLink
+from models import ThreadFollow
 from core.booklist_repository import BooklistRepository
 from core.booklist_item_repository import BooklistItemRepository
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DB_URL",
-    "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia",
+    "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia_test",
 )
 
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="function")
 async def db_session_factory() -> AsyncGenerator[
     async_sessionmaker[AsyncSession], None
 ]:
-    """模块级别的 PostgreSQL 数据库引擎 + 会话工厂。"""
+    """函数级别的 PostgreSQL 数据库引擎 + 会话工厂（每测试独立）。"""
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
@@ -42,6 +44,10 @@ async def db_session_factory() -> AsyncGenerator[
 
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     yield factory
+    # 清空所有表，确保每个测试独立
+    async with engine.begin() as conn:
+        for table in reversed(SQLModel.metadata.sorted_tables):
+            await conn.execute(table.delete())
     await engine.dispose()
 
 
@@ -69,7 +75,7 @@ async def seeded_db_session(
                 thread_id=1001,
                 title="Test Thread 1",
                 author_id=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.utcnow(),
                 reaction_count=5,
                 reply_count=2,
             ),
@@ -78,7 +84,7 @@ async def seeded_db_session(
                 thread_id=1002,
                 title="Test Thread 2",
                 author_id=1,
-                created_at=datetime.now(timezone.utc),
+                created_at=datetime.utcnow(),
                 reaction_count=10,
                 reply_count=3,
             ),
@@ -91,6 +97,8 @@ async def seeded_db_session(
         # 在每个测试结束后清理数据
         await session.execute(delete(BooklistItem))
         await session.execute(delete(Booklist))
+        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(ThreadFollow))
         await session.execute(delete(Thread))
         await session.execute(delete(Author))
         await session.commit()

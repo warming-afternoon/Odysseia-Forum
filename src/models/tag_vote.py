@@ -1,5 +1,6 @@
 from typing import TYPE_CHECKING, Optional
 
+from sqlalchemy import BigInteger, Column, ForeignKey
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 if TYPE_CHECKING:
@@ -17,8 +18,10 @@ class TagVote(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(index=True)
-    tag_id: int = Field(index=True, foreign_key="tag.id")
+    user_id: int = Field(sa_column=Column(BigInteger, index=True))
+    tag_id: int = Field(
+        sa_column=Column(BigInteger, ForeignKey("tag.id"), index=True)
+    )
     thread_id: int = Field(index=True, foreign_key="thread.id")
     vote: int  # 1 代表赞成, -1 代表反对
 

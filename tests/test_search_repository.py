@@ -25,14 +25,14 @@ from core.tag_cache_service import TagCacheService
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DB_URL",
-    "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia",
+    "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia_test",
 )
 
-@pytest_asyncio.fixture(scope="module")
+@pytest_asyncio.fixture(scope="function")
 async def db_session_factory() -> AsyncGenerator[
     async_sessionmaker[AsyncSession], None
 ]:
-    """模块级别的 PostgreSQL 数据库引擎 + 会话工厂。"""
+    """函数级别的 PostgreSQL 数据库引擎 + 会话工厂（每测试独立）。"""
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
@@ -46,6 +46,10 @@ async def db_session_factory() -> AsyncGenerator[
 
     factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     yield factory
+    # 清空所有表，确保每个测试独立
+    async with engine.begin() as conn:
+        for table in reversed(SQLModel.metadata.sorted_tables):
+            await conn.execute(table.delete())
     await engine.dispose()
 
 
@@ -61,23 +65,23 @@ async def seeded_db_session(
         threads_to_create = [
             Thread(
                 channel_id=1, thread_id=101, title="关于百合破坏的讨论",
-                author_id=1, created_at=datetime.now(),
+                author_id=1, created_at=datetime.utcnow(),
             ),
             Thread(
                 channel_id=1, thread_id=102, title="🈲百合破坏",
-                author_id=2, created_at=datetime.now(),
+                author_id=2, created_at=datetime.utcnow(),
             ),
             Thread(
                 channel_id=1, thread_id=103, title="小说推荐",
-                author_id=3, created_at=datetime.now(),
+                author_id=3, created_at=datetime.utcnow(),
             ),
             Thread(
                 channel_id=1, thread_id=104, title="禁：请勿讨论百合破坏话题",
-                author_id=4, created_at=datetime.now(),
+                author_id=4, created_at=datetime.utcnow(),
             ),
             Thread(
                 channel_id=1, thread_id=105, title="纯爱小说分享",
-                author_id=5, created_at=datetime.now(),
+                author_id=5, created_at=datetime.utcnow(),
             ),
         ]
         session.add_all(threads_to_create)

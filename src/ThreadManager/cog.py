@@ -172,7 +172,7 @@ class ThreadManager(commands.Cog):
                     )
                 else:
                     await self.batch_update_service.add_active_at_update(
-                        channel.id, datetime.datetime.now(datetime.timezone.utc)
+                        channel.id, datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
                     )
         except Exception:
             logger.warning("处理消息编辑事件失败", exc_info=True)

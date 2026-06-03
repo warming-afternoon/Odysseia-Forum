@@ -70,7 +70,7 @@ class BooklistService:
             await self.thread_repo.update_collection_counts(net_new_ids, 1)
 
             # 同步 Redis 飙升榜数据：仅统计近期发布的帖子，防止老帖屠榜
-            threshold = datetime.now(timezone.utc) - timedelta(
+            threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
                 days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value
             )
             stmt = select(Thread.thread_id).where(
