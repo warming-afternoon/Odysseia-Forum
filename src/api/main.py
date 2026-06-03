@@ -1,5 +1,9 @@
+import gc
 import json
 import logging
+import os
+import sys
+from collections import Counter
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -176,5 +180,186 @@ async def root():
             "collections": "/v1/collections",
             "booklists": "/v1/booklists",
             "tags": "/v1/tags",
+        },
+    }
+
+
+@app.get("/v1/debug/memory", summary="内存诊断", tags=["系统"])
+async def debug_memory():
+    """调试端点：输出进程内存中 Top 对象类型及模块级内存占用"""
+    # 对象类型统计（数量 + 大小）
+    type_counts: dict[str, int] = {}
+    type_sizes: dict[str, int] = {}
+    module_sizes: dict[str, int] = {}
+    module_counts: dict[str, int] = {}
+
+    for obj in gc.get_objects():
+        t = type(obj)
+        name = t.__name__
+        type_counts[name] = type_counts.get(name, 0) + 1
+
+        try:
+            sz = sys.getsizeof(obj)
+        except Exception:
+            sz = 0
+        type_sizes[name] = type_sizes.get(name, 0) + sz
+
+        mod = getattr(t, "__module__", None)
+        if not isinstance(mod, str):
+            mod = "builtins"
+        parts = mod.split(".")
+        prefix = ".".join(parts[:2]) if len(parts) >= 2 else mod
+        module_sizes[prefix] = module_sizes.get(prefix, 0) + sz
+        module_counts[prefix] = module_counts.get(prefix, 0) + 1
+
+    # 按大小排序
+    top_by_size = sorted(type_sizes.items(), key=lambda x: -x[1])[:20]
+    top_by_count = sorted(type_counts.items(), key=lambda x: -x[1])[:20]
+    top_modules = sorted(module_sizes.items(), key=lambda x: -x[1])[:20]
+
+    # GC
+    gc_stats = gc.get_stats()
+
+    try:
+        with open("/proc/self/status") as f:
+            rss_line = [line for line in f if line.startswith("VmRSS:")]
+        rss = rss_line[0].split()[1] if rss_line else "unknown"
+    except Exception:
+        rss = "unknown"
+
+    return {
+        "rss_kb": rss,
+        "total_objects": sum(type_counts.values()),
+        "total_size_kb": round(sum(type_sizes.values()) / 1024),
+        "top_by_size": [
+            {"type": t, "count": type_counts[t], "size_kb": round(s / 1024)}
+            for t, s in top_by_size
+        ],
+        "top_by_count": [
+            {"type": t, "count": c, "size_kb": round(type_sizes.get(t, 0) / 1024)}
+            for t, c in top_by_count
+        ],
+        "modules_by_size_kb": [
+            {
+                "module": m,
+                "objects": module_counts[m],
+                "size_kb": round(s / 1024),
+            }
+            for m, s in top_modules
+        ],
+        "gc": {
+            "generations": [
+                {
+                    "collections": s["collections"],
+                    "collected": s["collected"],
+                    "uncollectable": s["uncollectable"],
+                }
+                for s in gc_stats
+            ],
+            "thresholds": list(gc.get_threshold()),
+        },
+    }
+
+
+@app.get("/v1/debug/memory/sources", summary="内存来源诊断", tags=["系统"])
+async def debug_memory_sources():
+    """调试端点：按模块来源汇总对象数量，定位泄漏代码路径"""
+    module_counts: dict[str, int] = {}
+    type_module_counts: dict[str, dict[str, int]] = {}
+    total = 0
+
+    for obj in gc.get_objects():
+        total += 1
+        cls = type(obj)
+        type_name = cls.__name__
+        try:
+            module = getattr(cls, "__module__", None)
+            if not isinstance(module, str) or not module:
+                module = "builtins"
+        except Exception:
+            module = "builtins"
+        # 截取到二级模块名
+        parts = module.split(".")
+        prefix = ".".join(parts[:2]) if len(parts) >= 2 else module
+        module_counts[prefix] = module_counts.get(prefix, 0) + 1
+        if prefix not in type_module_counts:
+            type_module_counts[prefix] = {}
+        type_module_counts[prefix][type_name] = (
+            type_module_counts[prefix].get(type_name, 0) + 1
+        )
+
+    top_modules = sorted(module_counts.items(), key=lambda x: -x[1])[:20]
+    sources = []
+    for module, count in top_modules:
+        types_in_module = sorted(
+            type_module_counts[module].items(), key=lambda x: -x[1]
+        )[:10]
+        sources.append(
+            {
+                "module": module,
+                "total_objects": count,
+                "top_types": [
+                    {"type": t, "count": c} for t, c in types_in_module
+                ],
+            }
+        )
+
+    return {"total_objects": total, "sources": sources}
+
+
+@app.get("/v1/debug/memory/force-gc", summary="强制 GC 并对比", tags=["系统"])
+async def debug_force_gc():
+    """调试端点：强制全量 GC，对比回收前后的对象数和 RSS"""
+    def _read_rss():
+        try:
+            with open("/proc/self/status") as f:
+                for line in f:
+                    if line.startswith("VmRSS:"):
+                        return int(line.split()[1])
+        except Exception:
+            return -1
+
+    rss_before = _read_rss()
+    total_before = len(gc.get_objects())
+
+    # 触发全量 GC
+    collected = gc.collect(2)
+    collected += gc.collect(1)
+    collected += gc.collect(0)
+
+    rss_after = _read_rss()
+    total_after = len(gc.get_objects())
+
+    return {
+        "rss_kb_before": rss_before,
+        "rss_kb_after": rss_after,
+        "rss_freed_kb": rss_before - rss_after if rss_before > 0 and rss_after > 0 else -1,
+        "objects_before": total_before,
+        "objects_after": total_after,
+        "objects_freed": total_before - total_after,
+        "gc_collected": collected,
+        "interpretation": (
+            "内存可回收，对象未释放 → 可能缺少 gc.collect() 调用"
+            if total_before - total_after > 1000 and rss_before - rss_after > 1024
+            else (
+                "大量不可回收对象 → 循环引用被持有，或 C 扩展泄漏"
+                if total_before - total_after < 100 and rss_before - rss_after < 1024
+                else "GC 回收了小部分内存"
+            )
+        ),
+    }
+
+
+@app.get("/v1/debug/memory/pools", summary="连接池状态", tags=["系统"])
+async def debug_pools():
+    """调试端点：SQLAlchemy 连接池和 Redis 连接池状态"""
+    pool = AsyncSessionFactory.kw["bind"].pool
+    return {
+        "sqlalchemy": {
+            "pool_size": pool.size(),
+            "checked_in": pool.checkedin(),
+            "checked_out": pool.checkedout(),
+            "overflow": pool.overflow(),
+            "total_connections": pool.checkedin() + pool.checkedout(),
         },
     }
