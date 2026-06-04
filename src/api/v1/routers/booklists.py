@@ -68,7 +68,10 @@ async def _fill_authors_for_booklists(
                 needs_fetch = True
 
         if needs_fetch:
-            await client.sadd("author_fetch_queue", str(owner_id))  # type: ignore
+            try:
+                await client.sadd("author_fetch_queue", str(owner_id))  # type: ignore
+            except Exception:
+                logger.warning("将 owner_id=%s 加入 author_fetch_queue 失败", owner_id, exc_info=True)
 
     return author_map
 
