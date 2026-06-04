@@ -365,11 +365,13 @@ async def debug_pools():
     }
 
 
-@app.get("/v1/debug/memory/dict-owners", summary="追踪 dict 持有者", tags=["系统"])
-async def debug_dict_owners():
-    """调试端点：采样 dict 对象，追踪两层引用链定位泄漏源"""
-    from collections import Counter as _Counter
+RESULT_FILE = "/tmp/dict-owners-result.json"
+
+
+def _analyze_dict_owners():
+    """在后台线程执行 dict 持有者分析，结果写入文件（不阻塞事件循环）"""
     import sys as _sys
+    from collections import Counter as _Counter
 
     chain = _Counter()
     parent_types = _Counter()
@@ -387,34 +389,28 @@ async def debug_dict_owners():
             continue
         large_dicts += 1
 
-        if sampled >= 500:
+        if sampled >= 200:
             continue
         sampled += 1
 
-        # 第一层：谁直接持有 dict
         parents = gc.get_referrers(obj)
-        parent_type = "none"
         for p in parents:
             if p is gc.get_objects:
                 continue
             pt = type(p).__name__
-            pm = getattr(type(p), "__module__", "")
             parent_types[pt] += 1
-            parent_type = pt
 
-            # 第二层：谁持有 parent
             grandparents = gc.get_referrers(p)
             for g in grandparents:
                 if g is gc.get_objects or g is parents:
                     continue
                 gt = type(g).__name__
-                gm = getattr(type(g), "__module__", "")
                 grandparent_types[gt] += 1
                 chain[f"{gt} → {pt} → dict[{len(obj)}]"] += 1
                 break
             break
 
-    return {
+    result = {
         "total_dicts": total_dicts,
         "large_dicts_gt_512b": large_dicts,
         "parent_types": parent_types.most_common(20),
@@ -423,6 +419,43 @@ async def debug_dict_owners():
             {"chain": k, "count": v} for k, v in chain.most_common(30)
         ],
     }
+    import json as _json
+    with open(RESULT_FILE, "w") as f:
+        _json.dump(result, f)
+
+
+@app.get("/v1/debug/memory/dict-owners", summary="追踪 dict 持有者（异步）", tags=["系统"])
+async def debug_dict_owners():
+    """调试端点：在后台线程采样分析，不阻塞请求。完成后结果写入 /tmp/dict-owners-result.json"""
+    import asyncio as _asyncio
+    import os as _os
+
+    # 清除旧结果
+    try:
+        _os.remove(RESULT_FILE)
+    except FileNotFoundError:
+        pass
+
+    loop = _asyncio.get_running_loop()
+    loop.run_in_executor(None, _analyze_dict_owners)
+
+    return {
+        "status": "running",
+        "message": "分析已在后台线程启动，约 10-30 秒完成。结果查看 /v1/debug/memory/dict-owners-result",
+    }
+
+
+@app.get("/v1/debug/memory/dict-owners-result", summary="读取 dict 持有者结果", tags=["系统"])
+async def debug_dict_owners_result():
+    """调试端点：读取上次 dict 持有者分析的结果"""
+    import json as _json
+    import os as _os
+
+    if not _os.path.exists(RESULT_FILE):
+        return {"status": "not_found", "message": "请先 GET /v1/debug/memory/dict-owners 启动分析"}
+
+    with open(RESULT_FILE) as f:
+        return _json.load(f)
 
 
 @app.get("/v1/debug/memory/asyncio-tasks", summary="asyncio 任务诊断", tags=["系统"])
