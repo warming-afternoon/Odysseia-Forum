@@ -3,6 +3,8 @@ from typing import Optional
 
 from sqlmodel import BigInteger, Column, Field, SQLModel, UniqueConstraint
 
+from shared.time_utils import utc_now
+
 from shared.enum import CollectionType
 
 
@@ -35,7 +37,7 @@ class UserCollection(SQLModel, table=True):
     )
 
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=utc_now,
         nullable=False,
         description="收藏时间 (UTC)",
     )

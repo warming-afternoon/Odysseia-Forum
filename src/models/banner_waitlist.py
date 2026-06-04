@@ -3,6 +3,8 @@ from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
+from shared.time_utils import utc_now
+
 
 class BannerWaitlist(SQLModel, table=True):
     """Banner等待列表"""
@@ -18,7 +20,7 @@ class BannerWaitlist(SQLModel, table=True):
     title: str = Field(description="帖子标题")
 
     queued_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=utc_now,
         index=True,
         description="加入队列时间",
     )

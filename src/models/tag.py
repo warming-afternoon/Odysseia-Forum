@@ -19,6 +19,17 @@ class Tag(SQLModel, table=True):
     name: str = Field(index=True)
 
     threads: List["Thread"] = Relationship(
-        back_populates="tags", link_model=ThreadTagLink
+        back_populates="tags",
+        sa_relationship_kwargs={
+            "primaryjoin": "Tag.id == ThreadTagLink.tag_id",
+            "secondaryjoin": "Thread.id == ThreadTagLink.thread_id",
+            "secondary": ThreadTagLink.__table__,
+        },
     )
-    votes: List["TagVote"] = Relationship(back_populates="tag")
+    votes: List["TagVote"] = Relationship(
+        back_populates="tag",
+        sa_relationship_kwargs={
+            "primaryjoin": "Tag.id == TagVote.tag_id",
+            "foreign_keys": "[TagVote.tag_id]",
+        },
+    )

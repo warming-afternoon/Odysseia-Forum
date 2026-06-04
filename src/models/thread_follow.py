@@ -4,6 +4,8 @@ from typing import Optional
 from sqlalchemy import BigInteger
 from sqlmodel import Column, Field, SQLModel
 
+from shared.time_utils import utc_now
+
 
 class ThreadFollow(SQLModel, table=True):
     """用户关注帖子的关联表"""
@@ -18,7 +20,7 @@ class ThreadFollow(SQLModel, table=True):
         sa_column=Column(BigInteger, index=True), description="帖子Discord ID"
     )
     followed_at: datetime = Field(
-        default_factory=datetime.utcnow, description="关注时间"
+        default_factory=utc_now, description="关注时间"
     )
     last_viewed_at: Optional[datetime] = Field(
         default=None, description="最后查看时间，用于计算未读更新"

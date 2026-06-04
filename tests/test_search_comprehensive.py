@@ -20,54 +20,18 @@ import pytest_asyncio
 from typing import AsyncGenerator, List, Set
 from datetime import datetime, timedelta
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlmodel import SQLModel, delete
-
-import sys
-import os
-
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
+from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+from sqlmodel import delete
 
 from models import Thread, Author, Tag, ThreadTagLink
 from search.search_service import SearchService
 from search.qo.thread_search import ThreadSearchQuery
 from core.tag_cache_service import TagCacheService
 
-# PostgreSQL 测试数据库 URL（可通过环境变量覆盖）
-TEST_DATABASE_URL = os.environ.get(
-    "TEST_DB_URL",
-    "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia_test",
-)
-
 
 # ──────────────────────────────────────────────
 # Fixtures
 # ──────────────────────────────────────────────
-
-
-@pytest_asyncio.fixture(scope="function")
-async def db_session_factory() -> AsyncGenerator[
-    async_sessionmaker[AsyncSession], None
-]:
-    """函数级别的 PostgreSQL 数据库引擎 + 会话工厂（每测试独立）。"""
-    engine = create_async_engine(
-        TEST_DATABASE_URL,
-        echo=False,
-        pool_size=5,
-        max_overflow=5,
-        pool_pre_ping=True,
-    )
-
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
-
-    factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    yield factory
-    # 清空所有表，确保每个测试独立
-    async with engine.begin() as conn:
-        for table in reversed(SQLModel.metadata.sorted_tables):
-            await conn.execute(table.delete())
-    await engine.dispose()
 
 
 @pytest_asyncio.fixture(scope="function")

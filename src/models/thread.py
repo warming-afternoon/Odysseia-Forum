@@ -7,6 +7,7 @@ from sqlmodel import JSON, BigInteger, Column, Field, Relationship, SQLModel
 
 from models import ThreadTagLink
 from shared.text_utils import build_search_vector_text
+from shared.time_utils import utc_now
 
 if TYPE_CHECKING:
     from models import Author, Tag, TagVote
@@ -50,7 +51,7 @@ class Thread(SQLModel, table=True):
     )
 
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, nullable=False, index=True
+        default_factory=utc_now, nullable=False, index=True
     )
     """帖子创建时间 (UTC)"""
 
@@ -111,10 +112,23 @@ class Thread(SQLModel, table=True):
     )
     """在搜索结果中的总展示次数"""
 
-    tags: List["Tag"] = Relationship(back_populates="threads", link_model=ThreadTagLink)
+    tags: List["Tag"] = Relationship(
+        back_populates="threads",
+        sa_relationship_kwargs={
+            "primaryjoin": "Thread.id == ThreadTagLink.thread_id",
+            "secondaryjoin": "ThreadTagLink.tag_id == Tag.id",
+            "secondary": ThreadTagLink.__table__,
+        },
+    )
     """帖子关联的标签列表"""
 
-    votes: List["TagVote"] = Relationship(back_populates="thread")
+    votes: List["TagVote"] = Relationship(
+        back_populates="thread",
+        sa_relationship_kwargs={
+            "primaryjoin": "Thread.id == TagVote.thread_id",
+            "foreign_keys": "[TagVote.thread_id]",
+        },
+    )
     """帖子关联的标签投票记录"""
 
     author: Optional["Author"] = Relationship(
@@ -122,7 +136,7 @@ class Thread(SQLModel, table=True):
             "primaryjoin": "Thread.author_id == Author.id",
             "foreign_keys": "[Thread.author_id]",
             "uselist": False,
-            "lazy": "joined",
+            "lazy": "select",
         }
     )
     """帖子作者的关系映射"""

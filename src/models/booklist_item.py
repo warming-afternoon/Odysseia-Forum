@@ -4,6 +4,8 @@ from typing import Optional
 from sqlalchemy import BigInteger
 from sqlmodel import Column, Field, SQLModel, UniqueConstraint
 
+from shared.time_utils import utc_now
+
 
 class BooklistItem(SQLModel, table=True):
     """书单内容关联表 (书单 <-> 帖子)"""
@@ -53,13 +55,13 @@ class BooklistItem(SQLModel, table=True):
     """展示消息的 Discord ID"""
 
     created_at: datetime = Field(
-        default_factory=datetime.utcnow, description="加入书单的时间"
+        default_factory=utc_now, description="加入书单的时间"
     )
     """加入书单的时间"""
 
     updated_at: datetime = Field(
-        default_factory=datetime.utcnow,
-        sa_column_kwargs={"onupdate": datetime.utcnow},
+        default_factory=utc_now,
+        sa_column_kwargs={"onupdate": utc_now},
         description="最后更新时间",
     )
     """最后更新时间"""

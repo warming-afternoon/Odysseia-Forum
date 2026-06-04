@@ -4,6 +4,8 @@ from typing import Optional
 from sqlalchemy.types import Float
 from sqlmodel import BigInteger, Column, Field, SQLModel
 
+from shared.time_utils import utc_now
+
 
 class BotConfig(SQLModel, table=True):
     """存储机器人全局配置，如 UCB1 参数和统计数据"""
@@ -26,8 +28,8 @@ class BotConfig(SQLModel, table=True):
     tips: str = Field(default="", description="该配置的含义或提示")
 
     update_time: datetime = Field(
-        default_factory=datetime.utcnow,
-        sa_column_kwargs={"onupdate": datetime.utcnow},
+        default_factory=utc_now,
+        sa_column_kwargs={"onupdate": utc_now},
         description="最近更新时间 (UTC)",
     )
     update_user_id: Optional[int] = Field(

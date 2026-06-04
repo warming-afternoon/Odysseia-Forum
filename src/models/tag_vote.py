@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import BigInteger, Column, ForeignKey
+from sqlalchemy import BigInteger, Column
 from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
 
 if TYPE_CHECKING:
@@ -20,11 +20,23 @@ class TagVote(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(sa_column=Column(BigInteger, index=True))
     tag_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("tag.id"), index=True)
+        sa_column=Column(BigInteger, index=True)
     )
-    thread_id: int = Field(index=True, foreign_key="thread.id")
+    thread_id: int = Field(index=True)
     vote: int  # 1 代表赞成, -1 代表反对
 
     # 关系定义，用于 ORM 查询，不产生外键约束
-    tag: "Tag" = Relationship(back_populates="votes")
-    thread: "Thread" = Relationship(back_populates="votes")
+    tag: "Tag" = Relationship(
+        back_populates="votes",
+        sa_relationship_kwargs={
+            "primaryjoin": "TagVote.tag_id == Tag.id",
+            "foreign_keys": "[TagVote.tag_id]",
+        },
+    )
+    thread: "Thread" = Relationship(
+        back_populates="votes",
+        sa_relationship_kwargs={
+            "primaryjoin": "TagVote.thread_id == Thread.id",
+            "foreign_keys": "[TagVote.thread_id]",
+        },
+    )

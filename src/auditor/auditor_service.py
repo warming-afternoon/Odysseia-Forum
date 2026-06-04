@@ -2,8 +2,6 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Thread
-from models import ThreadFollow
-from models import ThreadTagLink
 
 
 class AuditorService:

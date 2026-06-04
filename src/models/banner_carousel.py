@@ -3,6 +3,8 @@ from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
+from shared.time_utils import utc_now
+
 
 class BannerCarousel(SQLModel, table=True):
     """Banner轮播列表"""
@@ -18,7 +20,7 @@ class BannerCarousel(SQLModel, table=True):
     title: str = Field(description="帖子标题")
 
     start_time: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=utc_now,
         index=True,
         description="开始展示时间",
     )
