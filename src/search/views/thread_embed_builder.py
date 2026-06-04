@@ -3,7 +3,7 @@ from datetime import timezone
 
 import discord
 
-from models import Thread as ThreadModel
+from dto.thread_dto import ThreadDTO
 
 
 class ThreadEmbedBuilder:
@@ -20,7 +20,7 @@ class ThreadEmbedBuilder:
 
     @staticmethod
     async def build(
-        thread: "ThreadModel",
+        thread: ThreadDTO,
         guild: discord.Guild | None,
         preview_mode: str = "thumbnail",
         keywords_str: str = "",

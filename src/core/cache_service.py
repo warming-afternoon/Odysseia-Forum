@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 
 from core.thread_repository import ThreadRepository
+from dto.bot_config_dto import BotConfigDTO
 from dto.search import SearchConfigDTO
 from models import BotConfig
 from shared.discord_utils import DiscordUtils
@@ -28,7 +29,7 @@ class CacheService:
         self.indexed_channels: dict[int, discord.ForumChannel] = {}
         # guild_id -> {channel_id -> ForumChannel}
         self.guild_channels: dict[int, dict[int, discord.ForumChannel]] = {}
-        self.bot_configs: dict[SearchConfigType, BotConfig] = {}
+        self.bot_configs: dict[SearchConfigType, BotConfigDTO] = {}
         logger.debug("CacheService 已初始化")
 
     async def build_or_refresh_cache(self):
@@ -109,12 +110,12 @@ class CacheService:
             all_configs = result.scalars().all()
 
         self.bot_configs = {
-            SearchConfigType(config.type): config
+            SearchConfigType(config.type): BotConfigDTO.from_orm(config)
             for config in all_configs
             if config.type in SearchConfigType._value2member_map_
         }
 
-    async def get_bot_config(self, config_type: SearchConfigType) -> BotConfig | None:
+    async def get_bot_config(self, config_type: SearchConfigType) -> BotConfigDTO | None:
         """从缓存获取配置；如未命中则自动刷新后重试。"""
         config = self.bot_configs.get(config_type)
         if config is not None:

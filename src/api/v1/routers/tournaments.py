@@ -43,13 +43,13 @@ async def create_tournament(
             service = TournamentService(session)
             booklist, created = await service.create_or_get_tournament(request)
 
-        return TournamentCreateResponse(
-            message="赛事书单创建成功" if created else "赛事书单已存在",
-            booklist_id=booklist.id,  # type: ignore[arg-type]
-            title=booklist.title,
-            tournament_channel_id=request.tournament_channel_id,
-            created=created,
-        )
+            return TournamentCreateResponse(
+                message="赛事书单创建成功" if created else "赛事书单已存在",
+                booklist_id=booklist.id,  # type: ignore[arg-type]
+                title=booklist.title,
+                tournament_channel_id=request.tournament_channel_id,
+                created=created,
+            )
     except Exception as e:
         logger.error(f"创建赛事书单失败: {e}", exc_info=True)
         raise HTTPException(
@@ -176,14 +176,14 @@ async def update_tournament(
             service = TournamentService(session)
             booklist = await service.update_tournament(tournament_channel_id, request)
 
-        return {
-            "message": "赛事书单已更新",
-            "booklist_id": booklist.id,  # type: ignore[arg-type]
-            "title": booklist.title,
-            "description": booklist.description,
-            "cover_image_url": booklist.cover_image_url,
-            "is_public": booklist.is_public,
-        }
+            return {
+                "message": "赛事书单已更新",
+                "booklist_id": booklist.id,  # type: ignore[arg-type]
+                "title": booklist.title,
+                "description": booklist.description,
+                "cover_image_url": booklist.cover_image_url,
+                "is_public": booklist.is_public,
+            }
     except HTTPException:
         raise
     except Exception as e:

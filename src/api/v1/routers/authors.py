@@ -32,14 +32,14 @@ async def get_author_profile(
 
             stats_dict = await service.get_author_stats(author_id)
 
-        return AuthorProfileResponse(
-            id=author.id,
-            name=author.name,
-            global_name=author.global_name,
-            display_name=author.display_name,
-            avatar_url=author.avatar_url,
-            stats=AuthorStats(**stats_dict),
-        )
+            return AuthorProfileResponse(
+                id=author.id,
+                name=author.name,
+                global_name=author.global_name,
+                display_name=author.display_name,
+                avatar_url=author.avatar_url,
+                stats=AuthorStats(**stats_dict),
+            )
 
     except HTTPException:
         raise

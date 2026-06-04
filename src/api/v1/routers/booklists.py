@@ -146,16 +146,17 @@ async def create_booklist(
                 display_type=display_type,
             )
 
-        if booklist.id is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="书单创建失败，未获取到ID",
+            if booklist.id is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="书单创建失败，未获取到ID",
+                )
+            result = BooklistCreateResponse(
+                booklist_id=booklist.id,
+                title=booklist.title,
+                created_at=booklist.created_at,
             )
-        return BooklistCreateResponse(
-            booklist_id=booklist.id,
-            title=booklist.title,
-            created_at=booklist.created_at,
-        )
+        return result
 
     except Exception as e:
         logger.error(f"创建书单失败: {e}", exc_info=True)
@@ -248,16 +249,16 @@ async def list_public_booklists(
             # 为无自定义封面的书单批量获取 fallback 封面
             fallback_covers = await _fill_fallback_covers(session, booklists)
 
-        results = []
-        for b in booklists:
-            detail = BooklistDetail.model_validate(b, from_attributes=True)
-            _apply_anonymous_author(detail, b, user_id, author_map)
+            results = []
+            for b in booklists:
+                detail = BooklistDetail.model_validate(b, from_attributes=True)
+                _apply_anonymous_author(detail, b, user_id, author_map)
 
-            if b.id in collected_booklist_ids:
-                detail.collected_flag = True
-            if not detail.cover_image_url and b.id in fallback_covers:
-                detail.cover_image_url = fallback_covers[b.id]
-            results.append(detail)
+                if b.id in collected_booklist_ids:
+                    detail.collected_flag = True
+                if not detail.cover_image_url and b.id in fallback_covers:
+                    detail.cover_image_url = fallback_covers[b.id]
+                results.append(detail)
 
         return PaginatedResponse(
             total=total, limit=limit, offset=offset, results=results
@@ -351,16 +352,16 @@ async def list_my_booklists(
             # 为无自定义封面的书单批量获取 fallback 封面
             fallback_covers = await _fill_fallback_covers(session, booklists)
 
-        results = []
-        for b in booklists:
-            detail = BooklistDetail.model_validate(b, from_attributes=True)
-            _apply_anonymous_author(detail, b, user_id, author_map)
+            results = []
+            for b in booklists:
+                detail = BooklistDetail.model_validate(b, from_attributes=True)
+                _apply_anonymous_author(detail, b, user_id, author_map)
 
-            if b.id in collected_booklist_ids:
-                detail.collected_flag = True
-            if not detail.cover_image_url and b.id in fallback_covers:
-                detail.cover_image_url = fallback_covers[b.id]
-            results.append(detail)
+                if b.id in collected_booklist_ids:
+                    detail.collected_flag = True
+                if not detail.cover_image_url and b.id in fallback_covers:
+                    detail.cover_image_url = fallback_covers[b.id]
+                results.append(detail)
 
         return PaginatedResponse(
             total=total, limit=limit, offset=offset, results=results
@@ -478,15 +479,16 @@ async def update_booklist(
                     status_code=status.HTTP_404_NOT_FOUND, detail="书单不存在"
                 )
 
-        if not updated.id:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="书单更新失败，未获取到ID",
+            if not updated.id:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="书单更新失败，未获取到ID",
+                )
+            result = BooklistUpdateResponse(
+                booklist_id=updated.id,
+                title=updated.title,
             )
-        return BooklistUpdateResponse(
-            booklist_id=updated.id,
-            title=updated.title,
-        )
+        return result
 
     except HTTPException:
         raise
@@ -567,22 +569,22 @@ async def add_threads_to_booklist(
                 items=request.items,
             )
 
-        response_items = []
-        for item in added_items:
-            if item.id is None:
-                logger.error(f"书单项 {item} 创建后未获得ID。")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="部分书单项创建失败。",
+            response_items = []
+            for item in added_items:
+                if item.id is None:
+                    logger.error(f"书单项 {item} 创建后未获得ID。")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="部分书单项创建失败。",
+                    )
+                response_items.append(
+                    BooklistItemAddResponse(
+                        booklist_item_id=item.id,
+                        booklist_id=item.booklist_id,
+                        thread_id=item.thread_id,
+                        display_order=item.display_order,
+                    )
                 )
-            response_items.append(
-                BooklistItemAddResponse(
-                    booklist_item_id=item.id,
-                    booklist_id=item.booklist_id,
-                    thread_id=item.thread_id,
-                    display_order=item.display_order,
-                )
-            )
         return response_items
 
     except HTTPException:

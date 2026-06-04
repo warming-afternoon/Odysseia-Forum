@@ -9,6 +9,7 @@ from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.preferences_repository import PreferencesRepository
+from dto import ThreadDTO
 from search.dto.search_state import SearchStateDTO
 from search.dto.separated_tags import SeparatedTagsDTO
 from search.qo.thread_search import ThreadSearchQuery
@@ -530,6 +531,8 @@ class Search(commands.Cog):
                     strength_weight=ucb1_config.strength_weight,
                     time_decay=ucb1_config.reddit_hot_time_decay,
                 )
+                # 在 session 内将 ORM 对象转为 DTO，确保 session 关闭后可安全访问
+                thread_dtos = [ThreadDTO.from_orm(t) for t in threads]
 
             # 当排序方法为按创建时间或收藏时间排序时，不记录展示次数
             count_view = not (
@@ -540,11 +543,11 @@ class Search(commands.Cog):
                 )
             )
 
-            if threads and count_view:
-                thread_ids_to_update = [t.id for t in threads if t.id is not None]
+            if thread_dtos and count_view:
+                thread_ids_to_update = [t.id for t in thread_dtos if t.id is not None]
                 await self.impression_cache_service.increment(thread_ids_to_update)
 
-            if not threads:
+            if not thread_dtos:
                 return {"has_results": False, "total": total_threads}
 
             # 为帖子详情 embed 提取用于渲染的虚拟标签关联
@@ -565,10 +568,10 @@ class Search(commands.Cog):
 
             highlight_pattern = self._compile_highlight_regex(search_qo.keywords or "")
             embed_tasks = []
-            for thread in threads:
-                matched_virtual_tags = channel_to_virtual.get(thread.channel_id, [])
+            for thread_dto in thread_dtos:
+                matched_virtual_tags = channel_to_virtual.get(thread_dto.channel_id, [])
                 task = ThreadEmbedBuilder.build(
-                    thread=thread,
+                    thread=thread_dto,
                     guild=interaction.guild,
                     preview_mode=preview_mode,
                     highlight_pattern=highlight_pattern,

@@ -8,6 +8,7 @@ from sqlmodel import select as sm_select
 
 from core.null_bot import NullBot
 from core.thread_repository import ThreadRepository
+from dto.bot_config_dto import BotConfigDTO
 from dto.meta.category_meta import CategoryMeta
 from dto.meta.channel_meta import ChannelMeta
 from dto.meta.guild_meta import GuildMeta
@@ -38,7 +39,7 @@ class ApiCacheService:
         self.indexed_channels: dict[int, ChannelMeta] = {}
         # guild_id -> {channel_id -> ChannelMeta}
         self.guild_channels: dict[int, dict[int, ChannelMeta]] = {}
-        self.bot_configs: dict[SearchConfigType, BotConfig] = {}
+        self.bot_configs: dict[SearchConfigType, BotConfigDTO] = {}
         self._task: asyncio.Task | None = None
         self._is_running = False
         logger.debug("ApiCacheService 已初始化")
@@ -78,7 +79,7 @@ class ApiCacheService:
                 pass
         logger.info("ApiCacheService 定时同步已停止")
 
-    async def get_bot_config(self, config_type: SearchConfigType) -> BotConfig | None:
+    async def get_bot_config(self, config_type: SearchConfigType) -> BotConfigDTO | None:
         """从缓存获取配置；如未命中则自动刷新后重试。"""
         config = self.bot_configs.get(config_type)
         if config is not None:
@@ -143,7 +144,7 @@ class ApiCacheService:
             all_configs = result.scalars().all()
 
         self.bot_configs = {
-            SearchConfigType(config.type): config
+            SearchConfigType(config.type): BotConfigDTO.from_orm(config)
             for config in all_configs
             if config.type in SearchConfigType._value2member_map_
         }

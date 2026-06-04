@@ -90,19 +90,23 @@ class ApplicationFormModal(discord.ui.Modal, title="Banner申请"):
 
                 thread = validation.thread
 
-            if not thread:
-                await interaction.followup.send(
-                    "❌ 无法获取有效的帖子信息，请检查帖子ID或联系管理员。",
-                    ephemeral=True,
-                )
-                return
+                if not thread:
+                    await interaction.followup.send(
+                        "❌ 无法获取有效的帖子信息，请检查帖子ID或联系管理员。",
+                        ephemeral=True,
+                    )
+                    return
+
+                # 在 session 关闭前提取标量值
+                thread_channel_id = thread.channel_id
+                thread_title = thread.title
 
             # 显示频道选择视图
             view = ChannelSelectionView(
                 bot=self.bot,
                 session_factory=self.session_factory,
                 thread_id=thread_id,
-                channel_id=thread.channel_id,
+                channel_id=thread_channel_id,
                 cover_image_url=cover_url,
                 applicant_id=interaction.user.id,
                 config=self.config,
@@ -119,7 +123,7 @@ class ApplicationFormModal(discord.ui.Modal, title="Banner申请"):
             )
             embed.add_field(
                 name="帖子",
-                value=f"[{thread.title[:50]}]({thread_link})",
+                value=f"[{thread_title[:50]}]({thread_link})",
                 inline=False,
             )
             embed.add_field(name="封面图", value=cover_url, inline=False)
