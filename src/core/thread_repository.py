@@ -535,24 +535,26 @@ class ThreadRepository:
         exemption_markers: list[str] | None = None,
     ) -> "FTSResultDTO":
         """
-        处理 FTS 关键词搜索，返回正选的 thread.id 集合和反选的 thread.id 集合。
+        处理 FTS 关键词搜索，返回包含子查询对象的 DTO。
 
         使用 PostgreSQL 全文搜索（search_vector tsvector + @@ tsquery），
-        Python 端通过 rjieba 分词后构建 tsquery 表达式。
-        注意：返回的是内部主键 `thread.id` 而不是 Discord 的 `thread_id`
+        Python 端通过 rjieba 分词后构建 tsquery 表达式，
+        但不再执行查询将 ID 拉到 Python——改为返回 select() 子查询对象，
+        由调用方嵌入 Thread.id.in_(stmt) / Thread.id.not_in(stmt)，
+        让 PostgreSQL 内部完成过滤。
+        注意：子查询中使用的是内部主键 `thread.id` 而不是 Discord 的 `thread_id`
         """
 
         loop = asyncio.get_running_loop()
-        fts_exclude_ids: set[int] = set()
+        exclude_stmt = None
+        include_stmts: list = []
 
-        # ============ 反选关键词处理：找出所有包含排除词的帖子 ID ============
+        # ============ 反选关键词：构建排除子查询 ============
         if exclude_keywords:
-            # 豁免标记：当排除词附近出现这些标记时，该排除词不生效
             markers = (
                 exemption_markers if exemption_markers is not None else ["禁", "🈲"]
             )
 
-            # 将排除关键词字符串按逗号/顿号/斜杠/空白拆分成多个独立关键词
             exclude_keywords_list = [
                 kw.strip()
                 for kw in re.split(r"[,，/\s]+", exclude_keywords)
@@ -560,7 +562,6 @@ class ThreadRepository:
             ]
 
             all_exclude_tsqueries: list[str] = []
-            # 批量 jieba 分词
             try:
                 all_raw_tokens = await asyncio.wait_for(
                     loop.run_in_executor(None, _batch_cut, exclude_keywords_list),
@@ -590,17 +591,14 @@ class ThreadRepository:
             # 所有排除词用 | 连接（命中任一即排除）
             if all_exclude_tsqueries:
                 final_exclude_tsquery = " | ".join(all_exclude_tsqueries)
-                exc_result = await self.session.execute(
-                    select(Thread.id).where(
-                        Thread.search_vector.op("@@")(
-                            literal_column(f"$${final_exclude_tsquery}$$::tsquery")
-                        )
+                exclude_stmt = select(Thread.id).where(
+                    Thread.search_vector.op("@@")(
+                        literal_column(f"$${final_exclude_tsquery}$$::tsquery")
                     )
                 )
-                fts_exclude_ids = set(exc_result.scalars().all())
 
-        # ============ 正选关键词处理：找出包含搜索词的帖子 ID ============
-        fts_include_ids: set[int] | None = None
+        # ============ 正选关键词：每个 AND 组构建一个子查询 ============
+        has_any_include = False
         if keywords:
             # 按逗号拆分为多个 AND 组，各关键词组之间取交集
             keywords_str = keywords.replace("，", ",").replace("／", "/")
@@ -658,23 +656,17 @@ class ThreadRepository:
 
                 if or_tsquery_parts:
                     group_tsquery = " | ".join(or_tsquery_parts)
-                    grp_result = await self.session.execute(
-                        select(Thread.id).where(
-                            Thread.search_vector.op("@@")(
-                                literal_column(f"$${group_tsquery}$$::tsquery")
-                            )
+                    stmt = select(Thread.id).where(
+                        Thread.search_vector.op("@@")(
+                            literal_column(f"$${group_tsquery}$$::tsquery")
                         )
                     )
-                    group_ids = set(grp_result.scalars().all())
+                    include_stmts.append(stmt)
+                    has_any_include = True
 
-                    # 多个 AND 组之间取交集
-                    if fts_include_ids is None:
-                        fts_include_ids = group_ids
-                    else:
-                        fts_include_ids &= group_ids
-
-            # 如果所有 AND 组的交集为空集，说明没有帖子能同时满足所有关键词条件
-            if fts_include_ids is None:
-                fts_include_ids = set()
-
-        return FTSResultDTO(include_ids=fts_include_ids, exclude_ids=fts_exclude_ids)
+        return FTSResultDTO(
+            include_stmts=include_stmts,
+            exclude_stmt=exclude_stmt,
+            has_include=has_any_include,
+            has_exclude=exclude_stmt is not None,
+        )

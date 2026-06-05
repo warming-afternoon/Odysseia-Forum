@@ -1,7 +1,8 @@
 import asyncio
+import json
 import logging
 import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -33,7 +34,7 @@ from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
 from search.suggestion_service import SuggestionService
-from shared.enum import AbyssDefaults, CollectionType, SearchTimeout
+from shared.enum import AbyssDefaults, CacheKeys, CollectionType, ConstantEnum, SearchTimeout
 from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.keyword_parser import KeywordParser
 
@@ -104,11 +105,17 @@ async def execute_search(
 
     # 处理偏好合并：仅在用户已登录且 apply_preferences 为 True 时执行
     if request.apply_preferences and user_id:
-        async with async_session_factory() as session:
-            pref_repo = PreferencesRepository(session)
-            prefs = await pref_repo.get_user_preferences(user_id, main_guild_id)
-            if prefs:
-                _merge_user_preferences(request, prefs)
+        redis_client = getattr(cache_service_instance, '_redis', None)
+        if redis_client:
+            prefs = await _get_user_preferences(
+                redis_client, async_session_factory, user_id, main_guild_id
+            )
+        else:
+            async with async_session_factory() as session:
+                pref_repo = PreferencesRepository(session)
+                prefs = await pref_repo.get_user_preferences(user_id, main_guild_id)
+        if prefs:
+            _merge_user_preferences(request, prefs)
 
     # 解析高级搜索语法，提取作者名和最终搜索词
     author_name, final_keywords, final_exclude_keywords = _parse_search_keywords(
@@ -514,6 +521,40 @@ async def get_search_suggestions(
 # -------------------------
 # 辅助方法
 # -------------------------
+
+
+async def _get_user_preferences(
+    redis_client, session_factory, user_id: int, guild_id: int
+) -> Optional[UserSearchPreferencesDTO]:
+    """从 Redis 缓存读取用户偏好，未命中则查 DB 并回填缓存。"""
+    cache_key = CacheKeys.USER_PREFERENCES.format(user_id=user_id, guild_id=guild_id)
+
+    # 尝试 Redis 命中
+    try:
+        raw = await redis_client.get(cache_key)
+        if raw:
+            data = json.loads(raw)
+            return UserSearchPreferencesDTO(**data)
+    except Exception:
+        pass  # Redis 异常时降级到 DB
+
+    # 缓存未命中，查 DB
+    async with session_factory() as session:
+        pref_repo = PreferencesRepository(session)
+        prefs = await pref_repo.get_user_preferences(user_id, guild_id)
+
+    # 回填缓存
+    if prefs:
+        try:
+            await redis_client.setex(
+                cache_key,
+                int(ConstantEnum.PREF_CACHE_TTL),
+                json.dumps(prefs.model_dump(), default=str),
+            )
+        except Exception:
+            pass
+
+    return prefs
 
 
 def _merge_user_preferences(request: SearchRequest, prefs: UserSearchPreferencesDTO):

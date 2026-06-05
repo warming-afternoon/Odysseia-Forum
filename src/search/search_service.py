@@ -302,24 +302,21 @@ class SearchService:
             # 关键词匹配过滤
             thread_repo = ThreadRepository(self.session)
 
-            # 处理 FTS 关键词搜索，返回正选的 thread.id 集合和反选的 thread.id 集合。
+            # 处理 FTS 关键词搜索，返回子查询对象（不执行，留在 PG 内部）。
             fts_result = await thread_repo.get_fts_matched_thread_ids(
                 keywords=query.keywords,
                 exclude_keywords=query.exclude_keywords,
                 exemption_markers=query.exclude_keyword_exemption_markers,
             )
 
-            if fts_result.has_include_ids:
-                # 有正选关键词
-                final_fts_ids = fts_result.get_final_ids()
-                if not final_fts_ids:
-                    return [], 0
-
-                # 添加过滤条件：帖子 ID 必须在正选关键词（减去排除）的对应 ID 集合中
-                filters.append(Thread.id.in_(final_fts_ids))  # type: ignore
-            elif fts_result.has_exclude_ids:
-                # 没有正选关键词，但有排除关键词：只排除命中排除词的帖子
-                filters.append(Thread.id.not_in(fts_result.exclude_ids))  # type: ignore
+            if fts_result.has_include:
+                # 每个 AND 组是一个独立的 IN (SELECT ...) 子查询
+                for stmt in fts_result.include_stmts:
+                    filters.append(Thread.id.in_(stmt))  # type: ignore
+                if fts_result.has_exclude:
+                    filters.append(Thread.id.not_in(fts_result.exclude_stmt))  # type: ignore
+            elif fts_result.has_exclude:
+                filters.append(Thread.id.not_in(fts_result.exclude_stmt))  # type: ignore
 
             # 收藏搜索过滤器
             if query.user_id_for_collection_search:
@@ -348,19 +345,21 @@ class SearchService:
             if filters:
                 inner_stmt = inner_stmt.where(and_(*filters))
 
-            # --- 步骤 3: 用子查询替代 Python ID 列表 ---
+            # --- 步骤 3: 使用 CTE 物化一次，COUNT 和数据查询复用 ---
 
-            # 在 PG 内部统计满足条件的帖子总数
-            count_stmt = select(func.count()).select_from(inner_stmt.subquery())
+            inner_cte = inner_stmt.cte("matched_ids")
+
+            # 在 PG 内部统计满足条件的帖子总数（复用 CTE）
+            count_stmt = select(func.count()).select_from(inner_cte)
             total_count = (await self.session.execute(count_stmt)).scalar_one()
 
             if total_count == 0:
                 return [], 0
 
-            # --- 步骤 4: 用子查询替代 IN (id1, id2, ...)，获取完整数据并分页 ---
+            # --- 步骤 4: 用 CTE 获取完整数据并分页 ---
             final_select_stmt = (
                 select(Thread)
-                .where(Thread.id.in_(inner_stmt))  # type: ignore
+                .where(Thread.id.in_(select(inner_cte.c.id)))  # type: ignore
                 .options(
                     selectinload(Thread.tags),  # type: ignore
                     joinedload(Thread.author),  # type: ignore

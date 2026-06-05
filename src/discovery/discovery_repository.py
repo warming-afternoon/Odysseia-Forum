@@ -65,16 +65,14 @@ class DiscoveryRepository:
             exemption_markers=prefs.exclude_keyword_exemption_markers,
         )
 
-        if fts_result.has_include_ids:
-            final_fts_ids = fts_result.get_final_ids()
-            if not final_fts_ids:
-                # FTS 有查询词但全被排除或没有满足的，给一个必假条件让此轨道返回空
-                stmt = stmt.where(Thread.id == -1)  # type: ignore
-            else:
-                stmt = stmt.where(Thread.id.in_(final_fts_ids))  # type: ignore
-        elif fts_result.has_exclude_ids:
+        if fts_result.has_include:
+            for include_stmt in fts_result.include_stmts:
+                stmt = stmt.where(Thread.id.in_(include_stmt))  # type: ignore
+            if fts_result.has_exclude:
+                stmt = stmt.where(Thread.id.notin_(fts_result.exclude_stmt))  # type: ignore
+        elif fts_result.has_exclude:
             # 只有排除词
-            stmt = stmt.where(Thread.id.notin_(fts_result.exclude_ids))  # type: ignore
+            stmt = stmt.where(Thread.id.notin_(fts_result.exclude_stmt))  # type: ignore
 
         return stmt
 

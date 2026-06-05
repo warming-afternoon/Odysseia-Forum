@@ -21,3 +21,6 @@ class ConstantEnum(IntEnum):
 
     AUTH_CACHE_TTL = 86400
     """Discord 成员信息缓存 TTL（秒）—— 1 天"""
+
+    PREF_CACHE_TTL = 7200
+    """用户搜索偏好缓存 TTL（秒）—— 2 小时"""
