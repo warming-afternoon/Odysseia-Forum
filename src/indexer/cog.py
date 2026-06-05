@@ -7,7 +7,9 @@ from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from core.thread_repository import ThreadRepository
 from indexer.views import IndexerDashboard
+from shared.permissions import is_admin_or_bot_admin
 from shared.safe_defer import safe_defer
 from ThreadManager.cog import ThreadManager
 
@@ -37,6 +39,7 @@ class Indexer(commands.Cog):
     @app_commands.command(
         name="构建索引", description="对当前论坛频道的所有帖子进行索引"
     )
+    @is_admin_or_bot_admin()
     async def build_index(self, interaction: discord.Interaction):
         await safe_defer(interaction, ephemeral=True)
         if not isinstance(interaction.channel, discord.Thread):
@@ -60,6 +63,59 @@ class Indexer(commands.Cog):
 
         dashboard = IndexerDashboard(self, channel, self.config)
         await dashboard.start(interaction)
+
+    @app_commands.command(
+        name="移除索引", description="移除当前论坛频道的所有帖子索引"
+    )
+    @is_admin_or_bot_admin()
+    async def remove_index(self, interaction: discord.Interaction):
+        """移除当前所在帖子所属论坛频道的全部索引。"""
+        await safe_defer(interaction, ephemeral=True)
+
+        if not isinstance(interaction.channel, discord.Thread):
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: interaction.followup.send(
+                    "请在论坛频道的帖子内使用此命令", ephemeral=True
+                ),
+                priority=1,
+            )
+            return
+
+        channel = interaction.channel.parent
+        if not isinstance(channel, discord.ForumChannel):
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: interaction.followup.send(
+                    "此命令仅适用于论坛频道。", ephemeral=True
+                ),
+                priority=1,
+            )
+            return
+
+        try:
+            async with self.session_factory() as session:
+                repo = ThreadRepository(session)
+                await repo.delete_channel_index(channel.id)
+
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: interaction.followup.send(
+                    f"✅ 已成功移除频道「{channel.name}」的所有索引。",
+                    ephemeral=True,
+                ),
+                priority=1,
+            )
+
+            # 分发全局事件以刷新缓存
+            self.bot.dispatch("index_updated")
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"移除索引时出错: {e}", exc_info=True)
+            await self.bot.api_scheduler.submit(
+                coro_factory=lambda: interaction.followup.send(
+                    f"❌ 移除索引失败: {error_msg}", ephemeral=True
+                ),
+                priority=1,
+            )
 
     async def run_indexer(self, dashboard: IndexerDashboard):
         """运行生产者和消费者任务"""
@@ -259,3 +315,26 @@ class Indexer(commands.Cog):
             logging.error(
                 f"因频道更新事件刷新 TagService 缓存时出错: {e}", exc_info=True
             )
+
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
+        """
+        Cog 级别的应用程序命令错误处理器。
+        """
+        if isinstance(error, app_commands.CheckFailure):
+            await interaction.response.send_message(
+                "❌ 你没有权限使用此命令。需要服务器管理员或被指定为机器人管理员。",
+                ephemeral=True,
+            )
+        else:
+            command_name = interaction.command.name if interaction.command else "未知"
+            logger.error(f"命令 '{command_name}' 发生错误", exc_info=error)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    f"❌ 命令执行时发生未知错误: {error}", ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    f"❌ 命令执行时发生未知错误: {error}", ephemeral=True
+                )

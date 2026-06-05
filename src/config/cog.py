@@ -1,5 +1,5 @@
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from config.general_config_handler import GeneralConfigHandler
 from config.mutex_tags_handler import MutexTagsHandler
+from shared.permissions import is_admin_or_bot_admin
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:
@@ -16,37 +17,6 @@ if TYPE_CHECKING:
 # 获取一个模块级别的 logger
 logger = logging.getLogger(__name__)
 
-
-# 自定义权限检查函数
-def is_admin_or_bot_admin():
-    """
-    一个自定义的检查函数，用于验证用户是否为服务器管理员或在 config.json 中定义的机器人管理员。
-    """
-
-    async def predicate(interaction: discord.Interaction) -> bool:
-        # 为了让类型检查器知道 interaction.client 是我们自定义的 MyBot 类型，这里进行类型转换
-        bot = cast("MyBot", interaction.client)
-
-        # 确保 bot 实例和 config 属性存在
-        if not hasattr(bot, "config"):
-            return False
-
-        # 检查用户是否为在配置文件中指定的机器人管理员
-        bot_admin_ids = bot.config.get("bot_admin_user_ids", [])
-        if interaction.user.id in bot_admin_ids:
-            return True
-
-        # 检查用户是否为服务器管理员
-        # 在服务器（guild）上下文中，interaction.user 是 discord.Member 类型，拥有 guild_permissions 属性
-        if (
-            isinstance(interaction.user, discord.Member)
-            and interaction.user.guild_permissions.administrator
-        ):
-            return True
-
-        return False
-
-    return app_commands.check(predicate)
 
 
 class Configuration(commands.Cog):
@@ -67,6 +37,18 @@ class Configuration(commands.Cog):
         self.general_config_handler = GeneralConfigHandler(bot, self.session_factory)
         logger.info("Config 模块已加载")
 
+    async def _ensure_main_guild(self, interaction: discord.Interaction) -> bool:
+        """确保命令在主服务器使用，否则发送错误并返回 False。"""
+        main_guild_id = self.bot._get_main_guild_id_from_config()
+        if interaction.guild_id != main_guild_id:
+            await interaction.response.send_message(
+                f"❌ 此命令仅限在主服务器使用。\n"
+                f"请前往主服务器：https://discord.com/channels/{main_guild_id}",
+                ephemeral=True,
+            )
+            return False
+        return True
+
     @commands.Cog.listener()
     async def on_config_updated(self):
         """
@@ -82,18 +64,24 @@ class Configuration(commands.Cog):
     @is_admin_or_bot_admin()
     async def general_settings(self, interaction: discord.Interaction):
         """唤出私密的BOT通用配置面板"""
+        if not await self._ensure_main_guild(interaction):
+            return
         await self.general_config_handler.start_flow(interaction)
 
     @config_group.command(name="互斥标签组", description="配置互斥标签组")
     @is_admin_or_bot_admin()
     async def configure_mutex_tags(self, interaction: discord.Interaction):
         """唤出私密的互斥标签组配置面板。"""
+        if not await self._ensure_main_guild(interaction):
+            return
         await self.mutex_handler.start_configuration_flow(interaction)
 
     @config_group.command(name="重载配置", description="重新加载配置文件")
     @is_admin_or_bot_admin()
     async def reload_config(self, interaction: discord.Interaction):
         """重新加载配置文件"""
+        if not await self._ensure_main_guild(interaction):
+            return
         await safe_defer(interaction, ephemeral=True)
 
         try:
@@ -120,6 +108,8 @@ class Configuration(commands.Cog):
     @is_admin_or_bot_admin()
     async def refresh_cache(self, interaction: discord.Interaction):
         """手动刷新所有核心缓存"""
+        if not await self._ensure_main_guild(interaction):
+            return
         await safe_defer(interaction, ephemeral=True)
 
         try:

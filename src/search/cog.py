@@ -15,6 +15,7 @@ from search.dto.separated_tags import SeparatedTagsDTO
 from search.qo.thread_search import ThreadSearchQuery
 from search.search_service import SearchService
 from shared.channel_mapping_utils import ChannelMappingUtils
+from shared.permissions import is_admin_or_bot_admin
 from search.strategies import AuthorSearchStrategy, CollectionSearchStrategy
 from search.views import (
     ChannelSelectionView,
@@ -163,6 +164,7 @@ class Search(commands.Cog):
         name="创建频道搜索", description="在当前帖子内创建频道搜索按钮"
     )
     @app_commands.guild_only()
+    @is_admin_or_bot_admin()
     async def create_channel_search(self, interaction: discord.Interaction):
         """在一个帖子内创建一个持久化的搜索按钮，该按钮将启动一个仅限于该频道的搜索流程。"""
         await safe_defer(interaction, ephemeral=True)
@@ -218,9 +220,10 @@ class Search(commands.Cog):
                 priority=1,
             )
 
-    # @app_commands.command(
-    #     name="创建公开全局搜索", description="在当前频道创建全局搜索面板"
-    # )
+    @app_commands.command(
+        name="创建公开全局搜索", description="在当前频道创建全局搜索面板"
+    )
+    @is_admin_or_bot_admin()
     async def create_global_search(self, interaction: discord.Interaction):
         """在当前频道创建一个持久化的全局搜索按钮。"""
         await safe_defer(interaction, ephemeral=True)
@@ -592,3 +595,32 @@ class Search(commands.Cog):
         except Exception:
             logger.error("在 _search_and_display 中发生错误", exc_info=True)
             return {"has_results": False, "total": 0, "error": True}
+
+    async def cog_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
+        """
+        Cog 级别的应用程序命令错误处理器。
+        """
+        if isinstance(error, app_commands.CheckFailure):
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    "❌ 你没有权限使用此命令。需要服务器管理员或被指定为机器人管理员。",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.followup.send(
+                    "❌ 你没有权限使用此命令。需要服务器管理员或被指定为机器人管理员。",
+                    ephemeral=True,
+                )
+        else:
+            command_name = interaction.command.name if interaction.command else "未知"
+            logger.error(f"命令 '{command_name}' 发生错误", exc_info=error)
+            if not interaction.response.is_done():
+                await interaction.response.send_message(
+                    f"❌ 命令执行时发生未知错误: {error}", ephemeral=True
+                )
+            else:
+                await interaction.followup.send(
+                    f"❌ 命令执行时发生未知错误: {error}", ephemeral=True
+                )

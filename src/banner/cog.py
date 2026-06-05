@@ -1,7 +1,7 @@
 """Banner申请和管理Cog"""
 
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from banner.banner_service import BannerService
 from banner.views.banner_application_button_view import BannerApplicationButtonView
 from banner.views.review_view import ReviewView
+from shared.permissions import is_admin_or_bot_admin
 from shared.safe_defer import safe_defer
 
 if TYPE_CHECKING:
@@ -18,28 +19,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-
-def is_admin_or_bot_admin():
-    """检查用户是否为管理员或bot管理员"""
-
-    async def predicate(interaction: discord.Interaction) -> bool:
-        bot = cast("MyBot", interaction.client)
-        if not hasattr(bot, "config"):
-            return False
-
-        bot_admin_ids = bot.config.get("bot_admin_user_ids", [])
-        if interaction.user.id in bot_admin_ids:
-            return True
-
-        if (
-            isinstance(interaction.user, discord.Member)
-            and interaction.user.guild_permissions.administrator
-        ):
-            return True
-
-        return False
-
-    return app_commands.check(predicate)
 
 
 class BannerManagement(commands.Cog):

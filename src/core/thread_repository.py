@@ -2,14 +2,17 @@ import logging
 from datetime import datetime
 from typing import List, Optional, Sequence, cast
 
-from sqlalchemy import ColumnElement, case, func, literal_column, update
+from sqlalchemy import ColumnElement, case, delete, func, literal_column, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import select
 
 from dto.meta import ChannelThreadCount
 from dto.search.fts_result_dto import FTSResultDTO
-from models import Tag, TagVote, Thread, ThreadTagLink
+from models import Tag, TagVote, Thread, ThreadFollow, ThreadTagLink
+from models.booklist_item import BooklistItem
+from models.user_collection import UserCollection
+from shared.enum import CollectionType
 from ThreadManager.update_data_dto import UpdateData
 
 import asyncio
@@ -123,6 +126,70 @@ class ThreadRepository:
         if db_thread:
             await self.session.delete(db_thread)
             await self.session.commit()
+
+    async def delete_channel_index(self, channel_id: int):
+        """删除指定 Discord 频道下的所有帖子索引及相关关联数据。"""
+        # 查找该频道下所有 Thread 的内部 ID 和 Discord ID
+        statement = select(Thread.id, Thread.thread_id).where(
+            Thread.channel_id == channel_id
+        )
+        result = await self.session.execute(statement)
+        rows = result.all()
+
+        if not rows:
+            logger.info(f"频道 {channel_id} 没有需要删除的索引帖子。")
+            return
+
+        thread_ids = [row[0] for row in rows]       # 内部主键 ID
+        discord_ids = [row[1] for row in rows]       # Discord 帖子 ID
+
+        try:
+            # 删除 ThreadTagLink 记录（依赖 thread internal id）
+            delete_links = delete(ThreadTagLink).where(
+                cast(ColumnElement, ThreadTagLink.thread_id).in_(thread_ids)
+            )
+            await self.session.execute(delete_links)
+
+            # 删除 TagVote 记录
+            delete_votes = delete(TagVote).where(
+                cast(ColumnElement, TagVote.thread_id).in_(thread_ids)
+            )
+            await self.session.execute(delete_votes)
+
+            # 删除 ThreadFollow 记录（依赖 Discord thread_id）
+            delete_follows = delete(ThreadFollow).where(
+                cast(ColumnElement, ThreadFollow.thread_id).in_(discord_ids)
+            )
+            await self.session.execute(delete_follows)
+
+            # 删除 BooklistItem 记录（依赖 Discord thread_id）
+            delete_items = delete(BooklistItem).where(
+                cast(ColumnElement, BooklistItem.thread_id).in_(discord_ids)
+            )
+            await self.session.execute(delete_items)
+
+            # 删除 UserCollection 记录（target_type=THREAD，依赖 Discord thread_id）
+            delete_collections = delete(UserCollection).where(
+                UserCollection.target_type == CollectionType.THREAD.value,
+                cast(ColumnElement, UserCollection.target_id).in_(discord_ids),
+            )
+            await self.session.execute(delete_collections)
+
+            # 删除 Thread 记录自身
+            delete_threads = delete(Thread).where(
+                cast(ColumnElement, Thread.id).in_(thread_ids)
+            )
+            await self.session.execute(delete_threads)
+
+            await self.session.commit()
+            logger.info(
+                f"已删除频道 {channel_id} 的所有索引，"
+                f"共 {len(thread_ids)} 个帖子及相关关联记录。"
+            )
+        except Exception:
+            await self.session.rollback()
+            logger.exception(f"删除频道 {channel_id} 的索引时发生数据库错误")
+            raise
 
     async def update_thread_activity(
         self, thread_id: int, last_active_at: datetime, reply_count: int
