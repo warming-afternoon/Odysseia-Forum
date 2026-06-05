@@ -27,7 +27,9 @@ class BooklistItem(SQLModel, table=True):
     )
     """所属用户的ID"""
 
-    booklist_id: int = Field(index=True, description="所属书单ID")
+    booklist_id: int = Field(
+        sa_column=Column(BigInteger, index=True), description="所属书单ID"
+    )
     """所属书单ID"""
 
     thread_id: int = Field(

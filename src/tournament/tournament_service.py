@@ -125,7 +125,7 @@ class TournamentService:
         request: TournamentUpdateRequest,
     ) -> Booklist:
         """更新赛事书单元信息"""
-        booklist = self._get_tournament(tournament_channel_id)
+        booklist = await self._get_tournament(tournament_channel_id)
 
         updated = await self.booklist_repo.update_booklist(
             booklist.id,  # type: ignore[arg-type]

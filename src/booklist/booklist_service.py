@@ -10,7 +10,8 @@ from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 from core.booklist_repository import BooklistRepository
 from core.redis_trend_service import RedisTrendService
 from core.thread_repository import ThreadRepository
-from models import BooklistItem, Thread
+from dto.booklist_item_dto import BooklistItemDTO
+from models import Thread
 from shared.enum import ConstantEnum
 
 logger = logging.getLogger(__name__)
@@ -26,9 +27,11 @@ class BooklistService:
 
     async def add_threads(
         self, user_id: int, booklist_id: int, items: List[BooklistItemAddData]
-    ) -> List[BooklistItem]:
+    ) -> List[BooklistItemDTO]:
         """
         将帖子批量加入书单，并同步帖子的被收藏次数（跨书单去重）
+
+        返回 DTO 列表，确保在 session 外也能安全访问。
         """
         # 权限校验：确认书单存在且属于当前用户
         booklist = await self.booklist_repo.get_booklist(booklist_id)
@@ -51,7 +54,7 @@ class BooklistService:
             user_id, thread_ids
         )
 
-        # 执行书单添加操作（内部已做该书单内去重）
+        # 执行书单添加操作（内部会 commit + refresh，返回 ORM 对象）
         added_items = await self.booklist_repo.add_threads_to_booklist(
             booklist_id, items
         )
@@ -59,14 +62,16 @@ class BooklistService:
         if not added_items:
             return []
 
-        # 筛选出全书单级别的净增帖子（排除已在其他书单中存在的帖子）
-        added_thread_ids = [item.thread_id for item in added_items]
+        # 在第二次 commit 之前立即转为 DTO，避免 update_collection_counts
+        # 内部的 commit 过期 ORM 对象导致 MissingGreenlet
+        item_dtos = [BooklistItemDTO.from_orm(item) for item in added_items]
+        added_thread_ids = [dto.thread_id for dto in item_dtos]
         net_new_ids = list(
             {tid for tid in added_thread_ids if tid not in existing_anywhere}
         )
 
         if net_new_ids:
-            # 更新数据库中的帖子全局收藏数
+            # 更新数据库中的帖子全局收藏数（内部会 commit，但 DTO 不受影响）
             await self.thread_repo.update_collection_counts(net_new_ids, 1)
 
             # 同步 Redis 飙升榜数据：仅统计近期发布的帖子，防止老帖屠榜
@@ -84,7 +89,7 @@ class BooklistService:
                 for tid in valid_ids:
                     await trend_service.record_increment("collection", tid, 1)
 
-        return added_items
+        return item_dtos
 
     async def remove_threads(
         self, user_id: int, booklist_id: int, thread_ids: List[int]

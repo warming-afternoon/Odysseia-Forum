@@ -27,6 +27,7 @@ from pathlib import Path
 
 import asyncpg
 import rjieba
+import sqlalchemy as sa
 
 # 确保 src/ 在 Python 路径中（本地运行时需要）
 _src = Path(__file__).resolve().parent.parent / "src"
@@ -157,6 +158,62 @@ async def main():
     await _engine.dispose()
     print("表结构就绪\n")
 
+    # ── 0.5. 修正列类型（SQLModel create_all 对 BigInteger/Boolean 映射不准）──
+    print("修正列类型 (INTEGER→BIGINT, INTEGER→BOOLEAN)...")
+    _fix_engine = create_async_engine(async_db_url)
+    async with _fix_engine.begin() as conn:
+        # INTEGER ID 列 → BIGINT（Discord Snowflake 是 64 位）
+        await conn.execute(
+            sa.text("""
+                DO $$
+                DECLARE
+                    r RECORD;
+                BEGIN
+                    FOR r IN
+                        SELECT table_name, column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND data_type = 'integer'
+                          AND (column_name LIKE '%_id' OR column_name = 'id'
+                               OR column_name = 'guild_id')
+                    LOOP
+                        EXECUTE format(
+                            'ALTER TABLE %I ALTER COLUMN %I TYPE BIGINT',
+                            r.table_name, r.column_name
+                        );
+                    END LOOP;
+                END $$;
+            """)
+        )
+        # Boolean 列：INTEGER → BOOLEAN
+        await conn.execute(
+            sa.text("""
+                DO $$
+                DECLARE
+                    r RECORD;
+                BEGIN
+                    FOR r IN
+                        SELECT table_name, column_name
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND data_type = 'integer'
+                          AND column_name IN (
+                              'show_flag', 'is_public', 'is_anonymous',
+                              'is_default', 'is_tournament', 'enabled'
+                          )
+                    LOOP
+                        EXECUTE format(
+                            'ALTER TABLE %I ALTER COLUMN %I TYPE BOOLEAN '
+                            'USING (CASE WHEN %I = 0 THEN false ELSE true END)',
+                            r.table_name, r.column_name, r.column_name
+                        );
+                    END LOOP;
+                END $$;
+            """)
+        )
+    await _fix_engine.dispose()
+    print("列类型修正完成\n")
+
     # ── 1. 连接数据库 ──
     sqlite_conn = sqlite3.connect(SQLITE_PATH)
     sqlite_conn.row_factory = sqlite3.Row
@@ -265,8 +322,8 @@ async def main():
                     f"SELECT setval('{table}_id_seq', "
                     f"(SELECT COALESCE(MAX(id), 0) FROM {table}))"
                 )
-            except Exception:
-                pass  # 某些表可能没有 id 序列
+            except Exception as e:
+                print(f"  ⚠ 序列重置失败 {table}_id_seq: {e}")
 
         print("\n* Migration completed! *")
 

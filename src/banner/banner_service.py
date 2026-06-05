@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import selectinload
 from sqlmodel import and_, desc, select
 
 from models import (
@@ -14,6 +15,7 @@ from models import (
     BannerWaitlist,
     Thread,
 )
+from dto.thread_dto import ThreadDTO
 from shared.enum import ApplicationStatus
 
 if TYPE_CHECKING:
@@ -29,7 +31,7 @@ class ApplicationResult:
     success: bool
     message: str
     application: Optional[BannerApplication] = None
-    thread: Optional[Thread] = None
+    thread: Optional[ThreadDTO] = None
 
 
 async def send_review_message(
@@ -180,7 +182,7 @@ class BannerService:
 
         # 验证帖子存在
         result = await self.session.execute(
-            select(Thread).where(Thread.thread_id == thread_id)
+            select(Thread).where(Thread.thread_id == thread_id).options(selectinload(Thread.tags))
         )
         thread = result.scalar_one_or_none()
 
@@ -199,7 +201,7 @@ class BannerService:
         return ApplicationResult(
             success=True,
             message="验证通过",
-            thread=thread,
+            thread=ThreadDTO.from_orm(thread),
         )
 
     async def validate_and_create_application(

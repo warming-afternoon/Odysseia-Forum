@@ -10,7 +10,8 @@ class ThreadTagLink(SQLModel, table=True):
     __tablename__ = "thread_tag_link"  # type: ignore[assignment]
 
     thread_id: Optional[int] = Field(
-        default=None, primary_key=True
+        default=None,
+        sa_column=Column(BigInteger, primary_key=True),
     )
     tag_id: int = Field(
         sa_column=Column(BigInteger, primary_key=True)

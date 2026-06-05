@@ -22,7 +22,7 @@ class TagVote(SQLModel, table=True):
     tag_id: int = Field(
         sa_column=Column(BigInteger, index=True)
     )
-    thread_id: int = Field(index=True)
+    thread_id: int = Field(sa_column=Column(BigInteger, index=True))
     vote: int  # 1 代表赞成, -1 代表反对
 
     # 关系定义，用于 ORM 查询，不产生外键约束

@@ -153,7 +153,7 @@ class ThreadManager(commands.Cog):
             return
 
         if self.is_channel_indexed(thread.parent_id):
-            await self.batch_update_service.add_update(thread.id, message.created_at)
+            await self.batch_update_service.add_update(thread.id, message.created_at.replace(tzinfo=None))
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):

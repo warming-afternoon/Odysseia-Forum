@@ -7,6 +7,7 @@ from sqlalchemy import case, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import and_, delete, desc, func, select
 
 from dto.collection.batch_add_result import BatchAddResult
@@ -397,6 +398,7 @@ class CollectionRepository:
             base_query.order_by(desc(ThreadFollow.followed_at))
             .offset(offset)
             .limit(per_page)
+            .options(selectinload(Thread.tags))
         )
         data_result = await self.session.execute(data_stmt)
         threads = data_result.scalars().all()
@@ -470,7 +472,13 @@ class CollectionRepository:
         total_count = count_result.scalar_one_or_none() or 0
 
         # 获取数据
-        data_stmt = base_query.order_by(sort_order).offset(offset).limit(per_page)
+        data_stmt = (
+            base_query.order_by(sort_order)
+            .offset(offset)
+            .limit(per_page)
+        )
+        if model_class is Thread:
+            data_stmt = data_stmt.options(selectinload(Thread.tags))
         data_result = await self.session.execute(data_stmt)
         targets = data_result.scalars().all()
 

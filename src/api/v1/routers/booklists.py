@@ -397,24 +397,24 @@ async def get_booklist(
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN, detail="无权查看此书单"
                 )
-            # 增加查看次数
-            await service.increment_view_count(booklist_id)
 
             # 检查当前用户是否收藏了该书单
             collected_flag = False
             user_id = int(current_user["id"])
-            if booklist.id is not None:
+            if booklist_id is not None:
                 collection_service = CollectionRepository(session)
                 collected_ids = await collection_service.get_collected_target_ids(
-                    user_id, CollectionType.BOOKLIST, [booklist.id]
+                    user_id, CollectionType.BOOKLIST, [booklist_id]
                 )
-                collected_flag = booklist.id in collected_ids
+                collected_flag = booklist_id in collected_ids
 
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, [booklist])
             detail = BooklistDetail.model_validate(booklist, from_attributes=True)
             detail.collected_flag = collected_flag
             _apply_anonymous_author(detail, booklist, user_id, author_map)
+            # 增加查看次数（放最后，避免 commit 后 booklist 过期导致 MissingGreenlet）
+            await service.increment_view_count(booklist_id)
             return detail
 
     except HTTPException:

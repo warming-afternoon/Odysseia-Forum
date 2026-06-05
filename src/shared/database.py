@@ -15,8 +15,8 @@ DATABASE_URL = os.environ.get(
 async_engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_size=10,
-    max_overflow=10,
+    pool_size=5,
+    max_overflow=8,
     pool_timeout=30,
     pool_pre_ping=True,
     pool_recycle=3600,
