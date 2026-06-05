@@ -343,29 +343,24 @@ class SearchService:
 
             # --- 步骤 2: 组合所有过滤器 ---
 
-            # 构建基础 SELECT 语句，只查 Thread.id（后续步骤再用 ID 列表查完整数据）
-            base_stmt = select(Thread.id).distinct()
-
-            # 将所有已收集的过滤条件用 AND 组合，应用到基础查询语句
+            # 构建子查询：选择满足所有条件的 thread.id
+            inner_stmt = select(Thread.id)
             if filters:
-                base_stmt = base_stmt.where(and_(*filters))
+                inner_stmt = inner_stmt.where(and_(*filters))
 
-            # --- 步骤 3: 执行 ID 查询 ---
+            # --- 步骤 3: 用子查询替代 Python ID 列表 ---
 
-            # 执行组合了所有过滤条件的查询，获取满足所有条件的帖子 ID 列表
-            id_result = await self.session.execute(base_stmt)
-            matched_ids = list(id_result.scalars().all())
-
-            # matched_ids 的长度就是满足所有条件的帖子总数，用于分页计算
-            total_count = len(matched_ids)
+            # 在 PG 内部统计满足条件的帖子总数
+            count_stmt = select(func.count()).select_from(inner_stmt.subquery())
+            total_count = (await self.session.execute(count_stmt)).scalar_one()
 
             if total_count == 0:
                 return [], 0
 
-            # --- 步骤 4: 用满足条件的帖子 ID 列表进行排序，并获取返回分页的关联数据 ---
+            # --- 步骤 4: 用子查询替代 IN (id1, id2, ...)，获取完整数据并分页 ---
             final_select_stmt = (
                 select(Thread)
-                .where(Thread.id.in_(matched_ids))  # type: ignore
+                .where(Thread.id.in_(inner_stmt))  # type: ignore
                 .options(
                     selectinload(Thread.tags),  # type: ignore
                     joinedload(Thread.author),  # type: ignore
