@@ -7,9 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.v1.dependencies.security import require_api_key
 from api.v1.schemas.base import PaginatedResponse
+from api.v1.schemas.booklist import BooklistDetail, BooklistItemDetail
 from api.v1.schemas.booklist.booklist_items_delete_request import (
     BooklistItemsDeleteRequest,
 )
+from api.v1.schemas.search.author_detail import AuthorDetail
 from api.v1.schemas.tournament import (
     TournamentCreateRequest,
     TournamentCreateResponse,
@@ -18,10 +20,45 @@ from api.v1.schemas.tournament import (
     TournamentItemUpdateRequest,
     TournamentUpdateRequest,
 )
+from core.author_repository import AuthorRepository
+from core.booklist_item_repository import BooklistItemRepository
+from core.booklist_repository import BooklistRepository
 from shared.database import AsyncSessionFactory
 from tournament.tournament_service import TournamentService
 
 logger = logging.getLogger(__name__)
+
+
+async def _fill_authors_for_booklists(
+    session: Any, booklists: List[Any]
+) -> Dict[int, Any]:
+    """获取书单的作者映射（bot 场景不处理 Redis 过期队列）"""
+    owner_ids = list(set(b.owner_id for b in booklists if getattr(b, "owner_id", None)))
+    if not owner_ids:
+        return {}
+
+    author_repo = AuthorRepository(session)
+    authors = await author_repo.get_authors_by_ids(owner_ids)
+    return {a.id: a for a in authors}
+
+
+def _apply_author_to_detail(
+    detail: BooklistDetail, booklist: Any, author_map: Dict[int, Any]
+) -> None:
+    """为书单详情填充作者信息。bot 鉴权无 current_user，匿名时始终隐藏。"""
+    if getattr(booklist, "is_anonymous", False):
+        detail.owner_id = 0
+        detail.author = AuthorDetail(
+            id=0,
+            name="匿名用户",
+            global_name=None,
+            display_name="匿名用户",
+            avatar_url="https://cdn.discordapp.com/embed/avatars/0.png",
+        )
+    elif booklist.owner_id in author_map:
+        detail.author = AuthorDetail.model_validate(
+            author_map[booklist.owner_id], from_attributes=True
+        )
 
 router = APIRouter(prefix="/tournament", tags=["赛事"])
 
@@ -58,6 +95,171 @@ async def create_tournament(
         )
 
 
+@router.get(
+    "/list/page",
+    summary="分页获取赛事书单列表",
+    response_model=PaginatedResponse[BooklistDetail],
+)
+async def list_tournaments(
+    tournament_channel_id: Optional[int] = Query(
+        None, description="按赛事频道ID筛选"
+    ),
+    sort_method: int = Query(
+        4,
+        description="排序方法: 1-帖子数, 2-浏览数, 3-收藏数, 4-创建时间, 5-最后更新时间",
+    ),
+    sort_order: str = Query(
+        "desc", description="排序顺序: 'asc'(升序) 或 'desc'(降序)"
+    ),
+    limit: int = Query(
+        default=10,
+        ge=1,
+        le=100,
+        description="每次请求返回的数量 (范围: 1-100)",
+    ),
+    offset: int = Query(default=0, ge=0, description="结果的偏移量，从0开始"),
+    api_key: bool = Depends(require_api_key),
+):
+    """
+    分页获取赛事书单列表。
+
+    - **tournament_channel_id**: 按赛事频道ID筛选（可选）
+    - **sort_method**: 排序方式 (1: 帖子数, 2: 浏览数, 3: 收藏数, 4: 创建时间, 5: 更新时间)
+    - **sort_order**: 排序顺序 ('asc' 或 'desc')
+    - **limit**: 返回数量
+    - **offset**: 偏移量
+    """
+    try:
+        async with AsyncSessionFactory() as session:
+            service = BooklistRepository(session)
+            booklists, total = await service.list_booklists(
+                is_tournament=True,
+                tournament_channel_id=tournament_channel_id,
+                sort_method=sort_method,
+                sort_order=sort_order,
+                limit=limit,
+                offset=offset,
+            )
+
+            author_map = await _fill_authors_for_booklists(session, booklists)
+
+            results = []
+            for b in booklists:
+                detail = BooklistDetail.model_validate(b, from_attributes=True)
+                _apply_author_to_detail(detail, b, author_map)
+                results.append(detail)
+
+        return PaginatedResponse(
+            total=total, limit=limit, offset=offset, results=results
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取赛事书单列表失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取赛事书单列表失败",
+        )
+
+
+@router.get(
+    "/{tournament_channel_id}",
+    summary="获取赛事书单详情",
+    response_model=BooklistDetail,
+)
+async def get_tournament(
+    tournament_channel_id: int,
+    api_key: bool = Depends(require_api_key),
+):
+    """
+    根据赛事频道ID获取赛事书单详情。
+
+    - **tournament_channel_id**: 赛事频道ID
+    """
+    try:
+        async with AsyncSessionFactory() as session:
+            service = BooklistRepository(session)
+            booklist = await service.get_booklist_by_tournament_channel_id(
+                tournament_channel_id
+            )
+            if not booklist:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="赛事书单不存在",
+                )
+
+            author_map = await _fill_authors_for_booklists(session, [booklist])
+            detail = BooklistDetail.model_validate(booklist, from_attributes=True)
+            _apply_author_to_detail(detail, booklist, author_map)
+
+        return detail
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取赛事书单详情失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取赛事书单详情失败",
+        )
+
+
+@router.get(
+    "/{tournament_channel_id}/items",
+    summary="分页获取赛事项",
+    response_model=PaginatedResponse[BooklistItemDetail],
+)
+async def get_tournament_items(
+    tournament_channel_id: int,
+    limit: int = Query(
+        default=50,
+        ge=1,
+        le=100,
+        description="每次请求返回的数量 (范围: 1-100)",
+    ),
+    offset: int = Query(default=0, ge=0, description="结果的偏移量，从0开始"),
+    api_key: bool = Depends(require_api_key),
+):
+    """
+    分页获取赛事书单内的帖子详情。
+
+    - **tournament_channel_id**: 赛事频道ID
+    - **limit**: 返回数量
+    - **offset**: 偏移量
+    """
+    try:
+        async with AsyncSessionFactory() as session:
+            booklist_service = BooklistRepository(session)
+            booklist = await booklist_service.get_booklist_by_tournament_channel_id(
+                tournament_channel_id
+            )
+            if not booklist:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="赛事书单不存在",
+                )
+
+            item_service = BooklistItemRepository(session)
+            items, total = await item_service.get_booklist_items_with_details(
+                booklist_id=booklist.id,  # type: ignore[arg-type]
+                display_type=booklist.display_type,
+                limit=limit,
+                offset=offset,
+            )
+
+        return PaginatedResponse(total=total, limit=limit, offset=offset, results=items)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取赛事项失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取赛事项失败",
+        )
+
+
 @router.post(
     "/{tournament_channel_id}/items/add",
     summary="向赛事添加参赛帖子",
@@ -88,7 +290,7 @@ async def add_tournament_items(
         logger.error(f"添加赛事帖子失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="添加赛事帖子失败",
+            detail="添加赛事帖子失败: {e}",
         )
 
 

@@ -185,6 +185,7 @@ class BooklistRepository:
         keywords: Optional[str] = None,
         included_thread_id: Optional[int] = None,
         collected_by_user_id: Optional[int] = None,
+        tournament_channel_id: Optional[int] = None,
         sort_method: int = 4,
         sort_order: str = "desc",
         limit: int = 10,
@@ -201,6 +202,8 @@ class BooklistRepository:
             query = query.where(Booklist.is_public == is_public)
         if is_tournament is not None:
             query = query.where(Booklist.is_tournament == is_tournament)
+        if tournament_channel_id is not None:
+            query = query.where(Booklist.tournament_channel_id == tournament_channel_id)
         if keywords:
             search_pattern = f"%{keywords}%"
             query = query.where(
