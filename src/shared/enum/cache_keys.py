@@ -7,6 +7,9 @@ class CacheKeys(StrEnum):
     USER_PREFERENCES = "user_prefs:{user_id}:{guild_id}"
     """用户搜索偏好缓存"""
 
+    FTS_TSQUERY_RESULT = "fts:tsquery:result:{prefix}:{hash}"
+    """FTS tsquery 分词结果缓存（避免重复 jieba 分词）"""
+
     def format(self, **kwargs) -> str:
         """填充 Key 中的占位符。"""
         return self.value.format(**kwargs)

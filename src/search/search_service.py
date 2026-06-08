@@ -175,6 +175,7 @@ class SearchService:
         time_decay: float = SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value,
         offset: int = 0,
         exclude_thread_ids: Sequence[int | str] | None = None,
+        redis_client=None,
     ) -> tuple[Sequence[Thread], int]:
         """
         根据搜索条件搜索帖子并分页
@@ -307,6 +308,7 @@ class SearchService:
                 keywords=query.keywords,
                 exclude_keywords=query.exclude_keywords,
                 exemption_markers=query.exclude_keyword_exemption_markers,
+                redis_client=redis_client,
             )
 
             if fts_result.has_include:

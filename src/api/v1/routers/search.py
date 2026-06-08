@@ -174,6 +174,15 @@ async def execute_search(
 
         exclude_thread_ids = request.exclude_thread_ids or []
 
+        # 并发启动 Banner/未读数查询（使用独立 session，与主搜索并行）
+        banner_unread_task = asyncio.create_task(
+            _get_banner_and_unread_async(
+                async_session_factory,
+                request.channel_ids,
+                user_id,
+            )
+        )
+
         async with async_session_factory() as session:
             # 执行搜索查询并更新展示计数（带超时保护）
             threads, total_threads = await asyncio.wait_for(
@@ -233,12 +242,8 @@ async def execute_search(
                 has_mapping,  # type: ignore
             )
 
-            # 获取Banner轮播列表和未读更新数量
-            banner_carousel, unread_count = await _get_banner_and_unread(
-                session,
-                request.channel_ids,
-                user_id,  # type: ignore
-            )
+        # 等待并发 Banner/未读数查询结果
+        banner_carousel, unread_count = await banner_unread_task
 
         return SearchResponse(
             total=total_threads,
@@ -251,12 +256,14 @@ async def execute_search(
             unread_count=unread_count,
         )
     except asyncio.TimeoutError:
+        banner_unread_task.cancel()
         logger.warning(f"搜索超时（{SearchTimeout.SEARCH.value}s），请求参数: {request.model_dump()}")
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=f"搜索请求超时，请尝试缩小搜索范围或稍后重试",
         )
     except Exception as e:
+        banner_unread_task.cancel()
         logger.error(f"搜索时发生内部错误: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -655,6 +662,8 @@ async def _perform_search_and_update_counts(
         tuple: (帖子列表, 总数)
     """
     repo = SearchService(session, tag_cache_service_instance)  # type: ignore[arg-type]
+    # 尝试获取 Redis 客户端用于 FTS tsquery 缓存
+    redis_client = getattr(cache_service_instance, '_redis', None)
     threads, total_threads = await repo.search_threads_with_count(
         query_object,
         limit=limit,
@@ -664,6 +673,7 @@ async def _perform_search_and_update_counts(
         time_decay=ucb1_config.reddit_hot_time_decay,
         offset=offset,
         exclude_thread_ids=exclude_thread_ids,
+        redis_client=redis_client,
     )
 
     # 按创建时间或收藏时间排序时，不记录展示次数，避免影响热度排序
@@ -734,55 +744,60 @@ def _build_available_tags(
     return available_tags, virtual_tags
 
 
-async def _get_banner_and_unread(
-    session: Any,
+async def _get_banner_and_unread_async(
+    session_factory,
     request_channel_ids: List[int | str] | None,
     user_id: int | None,
 ) -> tuple[List[BannerItem], int]:
     """
-    获取Banner轮播列表和用户的未读更新数量。
+    在独立 session 中获取 Banner 轮播列表和用户未读更新数量。
 
-    在同一session中查询Banner列表（用于首页轮播展示）和
-    用户关注帖子的未读更新数量（用于小红点提示）。
+    设计为通过 asyncio.create_task() 与主搜索并发执行，
+    失败时降级返回空列表和 0，不影响主搜索流程。
 
     Returns:
         tuple: (Banner列表, 未读数量)
     """
-    target_channel_id: int | None = (
-        request_channel_ids[0] if request_channel_ids else None
-    )  # type: ignore[assignment]
+    try:
+        async with session_factory() as session:
+            target_channel_id: int | None = (
+                request_channel_ids[0] if request_channel_ids else None
+            )  # type: ignore[assignment]
 
-    # 获取Banner轮播列表
-    banner_service = BannerService(session)
-    banners = await banner_service.get_active_banners(channel_id=target_channel_id)
-    guild_by_thread: dict[int, int] = {}
-    if banners:
-        banner_tids = [b.thread_id for b in banners]
-        guild_rows = await session.execute(
-            select(Thread.thread_id, Thread.guild_id).where(
-                Thread.thread_id.in_(banner_tids)  # type: ignore[arg-type]
-            )
-        )
-        guild_by_thread = {tid: gid for tid, gid in guild_rows.all()}
+            # 获取Banner轮播列表
+            banner_service = BannerService(session)
+            banners = await banner_service.get_active_banners(channel_id=target_channel_id)
+            guild_by_thread: dict[int, int] = {}
+            if banners:
+                banner_tids = [b.thread_id for b in banners]
+                guild_rows = await session.execute(
+                    select(Thread.thread_id, Thread.guild_id).where(
+                        Thread.thread_id.in_(banner_tids)  # type: ignore[arg-type]
+                    )
+                )
+                guild_by_thread = {tid: gid for tid, gid in guild_rows.all()}
 
-    banner_carousel = [
-        BannerItem(
-            thread_id=banner.thread_id,
-            title=banner.title,
-            cover_image_url=banner.cover_image_url,
-            channel_id=banner.channel_id if banner.channel_id else 0,
-            guild_id=guild_by_thread.get(banner.thread_id, 0),
-        )
-        for banner in banners
-    ]
+            banner_carousel = [
+                BannerItem(
+                    thread_id=banner.thread_id,
+                    title=banner.title,
+                    cover_image_url=banner.cover_image_url,
+                    channel_id=banner.channel_id if banner.channel_id else 0,
+                    guild_id=guild_by_thread.get(banner.thread_id, 0),
+                )
+                for banner in banners
+            ]
 
-    # 读取未读更新数量（失败时返回0不影响主流程）
-    unread_count = 0
-    if user_id is not None:
-        try:
-            follow_service = ThreadFollowRepository(session)
-            unread_count = await follow_service.get_unread_count(user_id=user_id)
-        except Exception:
+            # 读取未读更新数量（失败时返回0不影响主流程）
             unread_count = 0
+            if user_id is not None:
+                try:
+                    follow_service = ThreadFollowRepository(session)
+                    unread_count = await follow_service.get_unread_count(user_id=user_id)
+                except Exception:
+                    unread_count = 0
 
-    return banner_carousel, unread_count
+            return banner_carousel, unread_count
+    except Exception:
+        logger.warning("并发获取 Banner/未读数失败，降级返回空值", exc_info=True)
+        return [], 0

@@ -16,9 +16,11 @@ from shared.enum import CollectionType
 from ThreadManager.update_data_dto import UpdateData
 
 import asyncio
+import hashlib
+import json
 import rjieba
 import re
-from shared.enum import SearchTimeout
+from shared.enum import CacheKeys, SearchTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -601,6 +603,7 @@ class ThreadRepository:
         keywords: str | None,
         exclude_keywords: str | None,
         exemption_markers: list[str] | None = None,
+        redis_client=None,
     ) -> "FTSResultDTO":
         """
         处理 FTS 关键词搜索，返回包含子查询对象的 DTO。
@@ -611,11 +614,61 @@ class ThreadRepository:
         由调用方嵌入 Thread.id.in_(stmt) / Thread.id.not_in(stmt)，
         让 PostgreSQL 内部完成过滤。
         注意：子查询中使用的是内部主键 `thread.id` 而不是 Discord 的 `thread_id`
+
+        通过 redis_client 缓存分词后的 tsquery 字符串（TTL 1h），
+        避免重复 jieba 分词开销。
         """
+
+        # ── 尝试从 Redis 缓存读取已构建的 tsquery 字符串 ──
+        cache_key = None
+        if redis_client and (keywords or exclude_keywords):
+            raw = (
+                (keywords or "")
+                + "|"
+                + (exclude_keywords or "")
+                + "|"
+                + ",".join(exemption_markers or [])
+            )
+            prefix = (keywords or "none")[:5]
+            cache_key = CacheKeys.FTS_TSQUERY_RESULT.format(
+                prefix=prefix,
+                hash=hashlib.md5(raw.encode()).hexdigest(),
+            )
+            try:
+                cached = await redis_client.get(cache_key)
+                if cached:
+                    data = json.loads(cached)
+                    include_stmts: list = []
+                    for tsq in data.get("ig", []):
+                        stmt = select(Thread.id).where(
+                            Thread.search_vector.op("@@")(
+                                literal_column(f"$${tsq}$$::tsquery")
+                            )
+                        )
+                        include_stmts.append(stmt)
+                    exclude_stmt = None
+                    if data.get("eg"):
+                        exclude_stmt = select(Thread.id).where(
+                            Thread.search_vector.op("@@")(
+                                literal_column(f"$${data['eg']}$$::tsquery")
+                            )
+                        )
+                    return FTSResultDTO(
+                        include_stmts=include_stmts,
+                        exclude_stmt=exclude_stmt,
+                        has_include=bool(include_stmts),
+                        has_exclude=exclude_stmt is not None,
+                    )
+            except Exception:
+                pass  # 缓存失败不影响搜索，继续走正常流程
 
         loop = asyncio.get_running_loop()
         exclude_stmt = None
         include_stmts: list = []
+
+        # 收集构建的 tsquery 字符串，用于回填缓存
+        cached_include_tsqueries: list[str] = []
+        cached_exclude_tsquery: str | None = None
 
         # ============ 反选关键词：构建排除子查询 ============
         if exclude_keywords:
@@ -659,6 +712,7 @@ class ThreadRepository:
             # 所有排除词用 | 连接（命中任一即排除）
             if all_exclude_tsqueries:
                 final_exclude_tsquery = " | ".join(all_exclude_tsqueries)
+                cached_exclude_tsquery = final_exclude_tsquery
                 exclude_stmt = select(Thread.id).where(
                     Thread.search_vector.op("@@")(
                         literal_column(f"$${final_exclude_tsquery}$$::tsquery")
@@ -724,6 +778,7 @@ class ThreadRepository:
 
                 if or_tsquery_parts:
                     group_tsquery = " | ".join(or_tsquery_parts)
+                    cached_include_tsqueries.append(group_tsquery)
                     stmt = select(Thread.id).where(
                         Thread.search_vector.op("@@")(
                             literal_column(f"$${group_tsquery}$$::tsquery")
@@ -731,6 +786,18 @@ class ThreadRepository:
                     )
                     include_stmts.append(stmt)
                     has_any_include = True
+
+        # ── 回填 Redis 缓存 ──
+        if cache_key and redis_client:
+            try:
+                cache_data: dict = {"ig": cached_include_tsqueries}
+                if cached_exclude_tsquery:
+                    cache_data["eg"] = cached_exclude_tsquery
+                await redis_client.setex(
+                    cache_key, 3600, json.dumps(cache_data, ensure_ascii=False)
+                )
+            except Exception:
+                pass
 
         return FTSResultDTO(
             include_stmts=include_stmts,
