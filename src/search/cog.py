@@ -150,7 +150,7 @@ class Search(commands.Cog):
             return None
 
         # 同时按逗号和斜杠分割，并去除空白
-        raw_keywords = re.split(r"[，,/\s]+", keywords_str)
+        raw_keywords = re.split(r"[，,/\\\s]+", keywords_str)
         cleaned_keywords = {kw.strip() for kw in raw_keywords if kw.strip()}
 
         if not cleaned_keywords:

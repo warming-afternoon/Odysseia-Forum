@@ -29,8 +29,9 @@ def _batch_cut(keywords: list[str]) -> list[list[str]]:
 
 
 def _escape_tsquery_token(token: str) -> str:
-    """转义 token 中可能破坏 PostgreSQL tsquery 语法的单引号。"""
-    return token.replace("'", "''")
+    """转义 token 中可能破坏 PostgreSQL tsquery 语法的单引号和反斜杠。"""
+    token = token.replace("\\", "\\\\")  # 先转义反斜杠
+    return token.replace("'", "''")      # 再转义单引号
 
 
 def _tokens_to_tsquery_and(tokens: list[str]) -> str:
@@ -624,7 +625,7 @@ class ThreadRepository:
 
             exclude_keywords_list = [
                 kw.strip()
-                for kw in re.split(r"[,，/\s]+", exclude_keywords)
+                for kw in re.split(r"[,，/\\\s]+", exclude_keywords)
                 if kw.strip()
             ]
 
@@ -668,7 +669,7 @@ class ThreadRepository:
         has_any_include = False
         if keywords:
             # 按逗号拆分为多个 AND 组，各关键词组之间取交集
-            keywords_str = keywords.replace("，", ",").replace("／", "/")
+            keywords_str = keywords.replace("，", ",").replace("／", "/").replace("\\", "/")
             and_groups = [
                 group.strip() for group in keywords_str.split(",") if group.strip()
             ]
