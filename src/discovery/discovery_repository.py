@@ -10,9 +10,14 @@ from core.thread_repository import ThreadRepository
 class DiscoveryRepository:
     """提供发现页所需的底层数据拉取功能"""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        exclude_channel_ids: Optional[List[int]] = None,
+    ):
         self.session = session
         self.thread_repo = ThreadRepository(session)
+        self.exclude_channel_ids = exclude_channel_ids or []
 
     async def _apply_preferences_filter(
         self, stmt, prefs: Optional[UserSearchPreferencesDTO]
@@ -84,6 +89,10 @@ class DiscoveryRepository:
             Thread.not_found_count == 0, Thread.show_flag.is_(True)
         )  # type: ignore
 
+        # 过滤广场推荐忽略频道
+        if self.exclude_channel_ids:
+            stmt = stmt.where(Thread.channel_id.notin_(self.exclude_channel_ids))  # type: ignore
+
         # 应用偏好过滤器并 await
         stmt = await self._apply_preferences_filter(stmt, prefs)
 
@@ -105,6 +114,10 @@ class DiscoveryRepository:
             Thread.not_found_count == 0,
             Thread.show_flag.is_(True),  # type: ignore
         )
+
+        # 过滤广场推荐忽略频道
+        if self.exclude_channel_ids:
+            stmt = stmt.where(Thread.channel_id.notin_(self.exclude_channel_ids))  # type: ignore
 
         # 应用偏好过滤器并 await
         stmt = await self._apply_preferences_filter(stmt, prefs)

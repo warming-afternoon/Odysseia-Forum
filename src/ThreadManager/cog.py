@@ -41,8 +41,14 @@ class ThreadManager(commands.Cog):
         update_interval = self.config.get("performance", {}).get(
             "batch_update_interval", 30
         )
+        discovery_ignore = self.config.get("discovery", {}).get(
+            "ignore_channel_ids", []
+        )
         self.batch_update_service = BatchUpdateService(
-            session_factory, sync_service=self.sync_service, interval=update_interval
+            session_factory,
+            sync_service=self.sync_service,
+            interval=update_interval,
+            ignore_channel_ids=discovery_ignore,
         )
 
         reaction_flush_interval = self.config.get("performance", {}).get(
@@ -217,9 +223,14 @@ class ThreadManager(commands.Cog):
                     )
                     if channel.created_at >= threshold:
                         # 只有 60 天内创建的帖子才记录点赞飙升
-                        await RedisTrendService().record_increment(
-                            "reaction", channel.id, 1
-                        )
+                        # 检查是否在广场推荐忽略频道列表中
+                        discovery_ignore = self.config.get(
+                            "discovery", {}
+                        ).get("ignore_channel_ids", [])
+                        if channel.parent_id not in discovery_ignore:
+                            await RedisTrendService().record_increment(
+                                "reaction", channel.id, 1
+                            )
 
                 await self.reaction_batch_service.add_update(channel.id)
         except Exception:

@@ -9,9 +9,13 @@ from models import Thread
 class DiscoveryService:
     """编排并整合多条轨道的发现页服务"""
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        exclude_channel_ids: Optional[List[int]] = None,
+    ):
         self.session = session
-        self.repo = DiscoveryRepository(session)
+        self.repo = DiscoveryRepository(session, exclude_channel_ids)
         self.trend_service = RedisTrendService()
 
     async def _get_latest_threads_with_retry(
@@ -110,3 +114,24 @@ class DiscoveryService:
             "discussion_surge": discussion_threads,
             "collection_surge": collection_threads,
         }
+
+    async def get_single_rail(
+        self,
+        rail_name: str,
+        limit: int,
+        offset: int,
+        days: int,
+        prefs: Optional[UserSearchPreferencesDTO],
+    ) -> List[Thread]:
+        """获取单条轨道数据，支持 offset 分页（不做补偿重试）"""
+        if rail_name == "latest":
+            return await self.repo.get_latest_threads(limit, offset, prefs)
+
+        metric_map = {
+            "reaction_surge": "reaction",
+            "discussion_surge": "reply",
+            "collection_surge": "collection",
+        }
+        metric = metric_map[rail_name]
+        ids = await self.trend_service.get_top_surging_ids(metric, days, limit, offset)
+        return await self.repo.get_threads_by_ids_ordered(ids, prefs)

@@ -16,8 +16,8 @@ class ConstantEnum(IntEnum):
     CHANNELS_CACHE_EXPIRE_SECONDS = 1800
     """频道元数据缓存过期时间（秒）—— 30 分钟"""
 
-    STATISTICS_THRESHOLD_DAYS = 60
-    """只有最近 60 天内创建的帖子才计入趋势统计"""
+    STATISTICS_THRESHOLD_DAYS = 15
+    """只有最近 15 天内创建的帖子才计入趋势统计"""
 
     AUTH_CACHE_TTL = 86400
     """Discord 成员信息缓存 TTL（秒）—— 1 天"""

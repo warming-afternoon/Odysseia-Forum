@@ -163,5 +163,11 @@
     "_comment_channel_ids": "需要屏蔽的频道ID列表，未授权的用户将看不到这些频道的帖子",
     "required_role_id": "",
     "_comment_required_role_id": "允许查看深渊区的身份组ID，用户需拥有此身份组才能看到被屏蔽频道的帖子"
+  },
+
+  "discovery": {
+    "_comment": "广场推荐配置",
+    "ignore_channel_ids": [],
+    "_comment_ignore_channel_ids": "广场推荐忽略的频道ID列表，列表中的频道帖子不会出现在推荐轨道中，也不会写入Redis趋势数据"
   }
 }

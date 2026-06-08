@@ -87,6 +87,16 @@ def _inject_api_dependencies(
     search_api.abyss_config = abyss_config
     discovery_api.abyss_config = abyss_config
 
+    # 广场推荐忽略频道配置
+    raw_discovery = config.get("discovery", {}) if isinstance(config, dict) else {}
+    discovery_ignore_channel_ids = [
+        int(cid)
+        for cid in raw_discovery.get("ignore_channel_ids", [])
+        if isinstance(cid, (int, str))
+        and str(cid).strip().lstrip("-").isdigit()
+    ]
+    discovery_api.discovery_ignore_channel_ids = discovery_ignore_channel_ids
+
     auth_section = config.get("auth", {}) if isinstance(config, dict) else {}
     fetch_images_api.configure_fetch_images_router(
         session_factory=AsyncSessionFactory,

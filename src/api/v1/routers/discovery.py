@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import get_current_user, require_auth
@@ -26,6 +26,7 @@ abyss_config: Dict[str, Any] = {
     "channel_ids": AbyssDefaults.CHANNEL_IDS,
     "required_role_id": AbyssDefaults.REQUIRED_ROLE_ID,
 }
+discovery_ignore_channel_ids: List[int] = []
 
 router = APIRouter(
     prefix="/discovery", tags=["发现"], dependencies=[Depends(require_auth)]
@@ -58,7 +59,7 @@ async def get_discovery_rails(
 
     try:
         async with async_session_factory() as session:
-            service = DiscoveryService(session)
+            service = DiscoveryService(session, discovery_ignore_channel_ids)
             # 获取四条轨道的原始数据
             rails_data = await service.get_discovery_rails(limit, days, prefs)
 
@@ -205,4 +206,76 @@ async def get_random_threads(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取随机帖子发生异常",
+        )
+
+
+@router.get(
+    "/rails/{rail_name}",
+    response_model=List[ThreadDetail],
+    summary="获取单条轨道数据（分页）",
+)
+async def get_single_rail(
+    rail_name: str = Path(
+        ...,
+        description="轨道名称，可选值: latest / reaction_surge / discussion_surge / collection_surge",
+    ),
+    limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
+    days: int = Query(default=30, ge=1, le=90, description="统计时间跨度(天数)"),
+    offset: int = Query(default=0, ge=0, description="偏移量，用于分页"),
+    apply_preferences: bool = Query(
+        default=True, description="是否应用当前用户的过滤偏好"
+    ),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+):
+    """获取指定单条轨道的数据，支持 offset 分页，用于点击查看更多"""
+    valid_rails = {"latest", "reaction_surge", "discussion_surge", "collection_surge"}
+    if rail_name not in valid_rails:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无效的轨道名称: {rail_name}，可选值: {', '.join(sorted(valid_rails))}",
+        )
+
+    if not async_session_factory:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="数据库尚未初始化",
+        )
+
+    user_id = (
+        int(current_user["id"]) if current_user and "id" in current_user else None
+    )
+    prefs = None
+
+    # 获取用户偏好设置
+    if apply_preferences and user_id:
+        async with async_session_factory() as session:
+            pref_repo = PreferencesRepository(session)
+            prefs = await pref_repo.get_user_preferences(user_id, main_guild_id)
+
+    try:
+        async with async_session_factory() as session:
+            service = DiscoveryService(session, discovery_ignore_channel_ids)
+            threads = await service.get_single_rail(
+                rail_name=rail_name, limit=limit, offset=offset, days=days, prefs=prefs
+            )
+
+            # 批量查询收藏状态
+            collected_ids: Set[int] = set()
+            thread_ids = [t.thread_id for t in threads]
+            if user_id and thread_ids:
+                coll_repo = CollectionRepository(session)
+                collected_ids = await coll_repo.get_collected_target_ids(
+                    user_id, CollectionType.THREAD, thread_ids
+                )
+
+            builder = ThreadDetailBuilder(channel_mappings_config)
+            return builder.build_list(threads, collected_ids)
+
+    except Exception as e:
+        logger.error(
+            f"获取单条轨道数据失败 (rail={rail_name}): {e}", exc_info=True
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="获取轨道数据发生异常",
         )

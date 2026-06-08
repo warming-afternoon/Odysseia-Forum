@@ -4,6 +4,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
@@ -29,10 +30,12 @@ class BatchUpdateService:
         session_factory: async_sessionmaker,
         sync_service: SyncService,
         interval: int = 30,
+        ignore_channel_ids: Optional[List[int]] = None,
     ):
         self.session_factory = session_factory
         self.sync_service = sync_service
         self.interval = interval  # 每隔多少秒写入一次数据库
+        self.ignore_channel_ids = ignore_channel_ids or []
 
         # 待处理的更新
         self.pending_updates: defaultdict[int, UpdateData] = defaultdict(
@@ -112,12 +115,16 @@ class BatchUpdateService:
             )
             all_ids = list(updates_to_process.keys())
 
-            # 从数据库查询在有效期内的帖子ID
+            # 从数据库查询在有效期内的帖子ID，排除广场推荐忽略频道的帖子
             async with self.session_factory() as session:
                 stmt = select(Thread.thread_id).where(
                     Thread.thread_id.in_(all_ids),  # type: ignore
                     Thread.created_at >= threshold,
                 )
+                if self.ignore_channel_ids:
+                    stmt = stmt.where(
+                        Thread.channel_id.notin_(self.ignore_channel_ids)  # type: ignore
+                    )
                 valid_result = await session.execute(stmt)
                 valid_ids = set(valid_result.scalars().all())
 
