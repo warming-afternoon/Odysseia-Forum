@@ -378,12 +378,13 @@ class CollectionRepository:
             BooklistItem.owner_id == user_id
         )
 
-        # 主查询
+        # 主查询（仅活跃关注）
         base_query = (
             select(Thread)
             .join(ThreadFollow, Thread.thread_id == ThreadFollow.thread_id)  # type: ignore
             .where(
                 ThreadFollow.user_id == user_id,
+                ThreadFollow.active_flag == True,  # type: ignore
                 Thread.thread_id.not_in(collected_subquery),  # type: ignore
             )
         )

@@ -81,7 +81,7 @@ class TestAddFollow:
         # 通过 get_user_follows 验证 last_viewed_at 不为 None
         follows, _ = await repo.get_user_follows(user_id=1)
         assert len(follows) == 1
-        assert follows[0]["last_viewed_at"] is not None
+        assert follows[0].last_viewed_at is not None
 
     async def test_add_follow_without_auto_view(self, seeded_follow_session: AsyncSession):
         """auto_view=False（默认）→ last_viewed_at 为 None"""
@@ -89,7 +89,7 @@ class TestAddFollow:
         await repo.add_follow(user_id=1, thread_id=101, auto_view=False)
         follows, _ = await repo.get_user_follows(user_id=1)
         assert len(follows) == 1
-        assert follows[0]["last_viewed_at"] is None
+        assert follows[0].last_viewed_at is None
 
 
 @pytest.mark.asyncio
@@ -148,7 +148,7 @@ class TestLastViewed:
         result = await repo.update_last_viewed(user_id=1, thread_id=101)
         assert result is True
         follows, _ = await repo.get_user_follows(user_id=1)
-        assert follows[0]["last_viewed_at"] is not None
+        assert follows[0].last_viewed_at is not None
 
     async def test_update_last_viewed_all(self, seeded_follow_session: AsyncSession):
         """更新所有关注的已读时间"""
@@ -159,7 +159,7 @@ class TestLastViewed:
         assert result is True
         follows, _ = await repo.get_user_follows(user_id=1)
         for f in follows:
-            assert f["last_viewed_at"] is not None
+            assert f.last_viewed_at is not None
 
     async def test_update_last_viewed_nonexistent(self, seeded_follow_session: AsyncSession):
         """更新未关注帖子的已读时间 → False"""
@@ -190,11 +190,11 @@ class TestGetFollows:
         assert len(follows) == 2
         # 验证字段结构
         for f in follows:
-            assert "thread_id" in f
-            assert "title" in f
-            assert "followed_at" in f
-            assert "last_viewed_at" in f
-            assert "has_update" in f
+            assert hasattr(f, "thread_id")
+            assert hasattr(f, "title")
+            assert hasattr(f, "followed_at")
+            assert hasattr(f, "last_viewed_at")
+            assert hasattr(f, "has_update")
 
     async def test_get_follows_pagination(self, seeded_follow_session: AsyncSession):
         """分页验证"""
@@ -252,3 +252,114 @@ class TestIsFollowing:
         """未关注 → False"""
         repo = ThreadFollowRepository(seeded_follow_session)
         assert not await repo.is_following(1, 101)
+
+    async def test_is_following_inactive_not_counted(self, seeded_follow_session: AsyncSession):
+        """非活跃关注 → active_only=True 时返回 False"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        await repo.batch_mark_inactive(thread_id=101, user_ids=[1])
+        # active_only=True（默认）
+        assert not await repo.is_following(1, 101)
+        # active_only=False 可以查到
+        assert await repo.is_following(1, 101, active_only=False)
+
+
+@pytest.mark.asyncio
+class TestMarkInactive:
+    """批量标记非活跃"""
+
+    async def test_mark_inactive(self, seeded_follow_session: AsyncSession):
+        """正常标记 → 返回受影响行数"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        await repo.add_follow(user_id=2, thread_id=101)
+        count = await repo.batch_mark_inactive(thread_id=101, user_ids=[1, 2])
+        assert count == 2
+        # 确认已是非活跃
+        assert not await repo.is_following(1, 101)
+        assert not await repo.is_following(2, 101)
+
+    async def test_mark_inactive_empty_list(self, seeded_follow_session: AsyncSession):
+        """空列表 → 返回 0"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        count = await repo.batch_mark_inactive(thread_id=101, user_ids=[])
+        assert count == 0
+
+    async def test_mark_inactive_already_inactive(self, seeded_follow_session: AsyncSession):
+        """已是非活跃 → 幂等，返回 0"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        await repo.batch_mark_inactive(thread_id=101, user_ids=[1])
+        # 再次标记应返回 0
+        count = await repo.batch_mark_inactive(thread_id=101, user_ids=[1])
+        assert count == 0
+
+    async def test_mark_inactive_partial(self, seeded_follow_session: AsyncSession):
+        """部分活跃部分不活跃 → 只计活跃的"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        await repo.add_follow(user_id=2, thread_id=101)
+        # 先标记 user 1 为非活跃
+        await repo.batch_mark_inactive(thread_id=101, user_ids=[1])
+        # 再批量标记 [1, 2]，应只影响 user 2
+        count = await repo.batch_mark_inactive(thread_id=101, user_ids=[1, 2])
+        assert count == 1
+
+
+@pytest.mark.asyncio
+class TestReactivateFollow:
+    """重新激活非活跃关注"""
+
+    async def test_reactivate_inactive(self, seeded_follow_session: AsyncSession):
+        """非活跃记录 → add_follow 重新激活，返回 True"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        await repo.batch_mark_inactive(thread_id=101, user_ids=[1])
+        # 重新关注应激活
+        result = await repo.add_follow(user_id=1, thread_id=101)
+        assert result is True
+        assert await repo.is_following(1, 101)
+
+    async def test_reactivate_active_noop(self, seeded_follow_session: AsyncSession):
+        """活跃记录 → add_follow 幂等，返回 False"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        result = await repo.add_follow(user_id=1, thread_id=101)
+        assert result is False
+
+
+@pytest.mark.asyncio
+class TestGetFollowsActiveFilter:
+    """active_flag 筛选"""
+
+    async def test_filter_active(self, seeded_follow_session: AsyncSession):
+        """active_flag=True → 仅活跃"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        await repo.add_follow(user_id=1, thread_id=102)
+        await repo.batch_mark_inactive(thread_id=102, user_ids=[1])
+
+        follows, total = await repo.get_user_follows(user_id=1, active_flag=True)
+        assert total == 1
+        assert follows[0].thread_id == 101
+
+    async def test_filter_inactive(self, seeded_follow_session: AsyncSession):
+        """active_flag=False → 仅过去关注"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        await repo.add_follow(user_id=1, thread_id=102)
+        await repo.batch_mark_inactive(thread_id=102, user_ids=[1])
+
+        follows, total = await repo.get_user_follows(user_id=1, active_flag=False)
+        assert total == 1
+        assert follows[0].thread_id == 102
+
+    async def test_filter_all(self, seeded_follow_session: AsyncSession):
+        """active_flag=None → 全部"""
+        repo = ThreadFollowRepository(seeded_follow_session)
+        await repo.add_follow(user_id=1, thread_id=101)
+        await repo.add_follow(user_id=1, thread_id=102)
+        await repo.batch_mark_inactive(thread_id=102, user_ids=[1])
+
+        follows, total = await repo.get_user_follows(user_id=1, active_flag=None)
+        assert total == 2

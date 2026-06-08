@@ -12,6 +12,7 @@ from core.thread_repository import ThreadRepository
 from shared.safe_defer import safe_defer
 from shared.enum import ConstantEnum
 from ThreadManager.batch_update_service import BatchUpdateService
+from ThreadManager.inactive_follow_buffer import InactiveFollowBuffer
 from ThreadManager.reaction_batch_service import ReactionBatchService
 from ThreadManager.thread_logic import ThreadLogic
 from ThreadManager.views.visibility_view import ThreadVisibilityView
@@ -61,6 +62,12 @@ class ThreadManager(commands.Cog):
             interval=reaction_flush_interval,
         )
 
+        # 初始化非活跃关注 Redis 缓冲
+        self.inactive_follow_buffer = InactiveFollowBuffer(
+            session_factory,
+            interval=update_interval,
+        )
+
         # 实例化业务逻辑处理器
         self.logic = ThreadLogic(bot, session_factory, config, self.sync_service)
         logger.info("ThreadManager 模块已加载")
@@ -69,6 +76,7 @@ class ThreadManager(commands.Cog):
         """当 Cog 加载时，启动后台任务，并注册持久化视图。"""
         self.batch_update_service.start()
         self.reaction_batch_service.start()
+        self.inactive_follow_buffer.start()
         # 注册可见性切换的持久化视图
         self.bot.add_view(ThreadVisibilityView(self.bot, self.session_factory))
 
@@ -76,6 +84,7 @@ class ThreadManager(commands.Cog):
         """当 Cog 卸载时，确保所有数据都被写入。"""
         await self.batch_update_service.stop()
         await self.reaction_batch_service.stop()
+        await self.inactive_follow_buffer.stop()
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道是否已索引"""
@@ -127,6 +136,25 @@ class ThreadManager(commands.Cog):
                 )
         except Exception as e:
             logger.error(f"用户加入帖子自动关注失败: {e}", exc_info=True)
+
+    @commands.Cog.listener()
+    async def on_thread_member_remove(self, member: discord.ThreadMember):
+        """成员被移出帖子时：将关注标记为过去关注（经 Redis 缓冲批量写入 DB）。"""
+        try:
+            thread = member.thread
+            if not thread or not self.is_channel_indexed(thread.parent_id):
+                return
+
+            # 跳过 bot
+            user = thread.guild.get_member(member.id) or self.bot.get_user(member.id)
+            if user and user.bot:
+                return
+
+            await self.inactive_follow_buffer.add(
+                thread_id=thread.id, user_id=member.id
+            )
+        except Exception as e:
+            logger.error(f"处理成员移除事件失败: {e}", exc_info=True)
 
     @commands.Cog.listener()
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):

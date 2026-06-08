@@ -31,6 +31,7 @@ from api.v1.routers import (
     tags as tags_api,
     discovery as discovery_api,
     booklists as booklists_api,
+    follows as follows_api,
 )
 from api.main import app as fastapi_app
 from api.v1.dependencies.security import initialize_api_security
@@ -67,6 +68,8 @@ def _inject_api_dependencies(
     discovery_api.main_guild_id = main_guild_id
     discovery_api.cache_service_instance = cache_service
 
+    follows_api.cache_service_instance = cache_service
+
     banner_api.async_session_factory = AsyncSessionFactory
     banner_api.banner_config = config.get("banner", {})
 
@@ -76,6 +79,7 @@ def _inject_api_dependencies(
     tags_api.channel_mappings_config = channel_mappings_config
     discovery_api.channel_mappings_config = channel_mappings_config
     booklists_api.channel_mappings_config = channel_mappings_config
+    follows_api.channel_mappings_config = channel_mappings_config
 
     raw_abyss = config.get("abyss", {}) if isinstance(config, dict) else {}
     abyss_config = {

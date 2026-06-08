@@ -95,7 +95,7 @@ class Auditor(commands.Cog):
         except Exception as e:
             logger.error(f"审计循环发生严重错误: {e}", exc_info=True)
         finally:
-            if not self.audit_loop.is_being_cancelled():
+            if not self.audit_loop.is_being_cancelled(): # type: ignore
                 logger.debug("本轮审计周期完成，将在1分钟后开始下一轮。")
                 await sleep(60)
 

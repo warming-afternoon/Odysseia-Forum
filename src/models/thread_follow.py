@@ -25,6 +25,9 @@ class ThreadFollow(SQLModel, table=True):
     last_viewed_at: Optional[datetime] = Field(
         default=None, description="最后查看时间，用于计算未读更新"
     )
+    active_flag: bool = Field(
+        default=True, description="是否为当前关注（False表示过去关注）"
+    )
 
     class Config:
         pass

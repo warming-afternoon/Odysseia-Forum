@@ -1,23 +1,46 @@
 """关注列表相关路由"""
 
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional, Union
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel, Field
 
 from api.v1.dependencies.security import get_current_user
+from api.v1.schemas.follows import FollowedThreadResponse
 from shared.database import AsyncSessionFactory
+from shared.channel_mapping_utils import ChannelMappingUtils
+from core.cache_service import CacheService
 from core.follow_repository import ThreadFollowRepository
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/follows", tags=["关注列表"])
 
+# 全局变量，将在应用启动时由 api_main.py 注入
+channel_mappings_config: Dict[int, List[Dict]] = {}
+cache_service_instance: Optional[CacheService] = None
 
-@router.get("/", summary="获取用户的关注列表")
+
+class FollowsListResponse(BaseModel):
+    """关注列表的 API 响应体"""
+
+    total: int = Field(description="关注总数")
+    threads: List[FollowedThreadResponse] = Field(description="帖子列表")
+    limit: int = Field(description="返回数量限制")
+    offset: int = Field(description="偏移量")
+
+
+@router.get("/", summary="获取用户的关注列表", response_model=FollowsListResponse)
 async def get_follows(
     limit: int = 10000,
     offset: int = 0,
+    active_flag: Optional[bool] = Query(
+        default=None, description="True=当前关注，False=过去关注，不传=全部"
+    ),
+    channel_ids: Optional[List[Union[int, str]]] = Query(
+        default=None, description="频道ID列表（可选，用于按频道筛选）"
+    ),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
@@ -25,6 +48,8 @@ async def get_follows(
 
     - **limit**: 返回数量限制（默认10000）
     - **offset**: 偏移量（默认0）
+    - **active_flag**: 筛选关注状态（True=当前关注，False=过去关注，不传=全部）
+    - **channel_ids**: 频道ID列表（可选，用于按频道筛选）
 
     返回格式：
     ```json
@@ -42,14 +67,43 @@ async def get_follows(
     try:
         user_id = int(current_user["id"])
 
+        # 将前端可能传入的字符串雪花 ID 统一转为 int
+        effective_channel_ids: Optional[List[int]] = None
+        if channel_ids:
+            try:
+                effective_channel_ids = [int(cid) for cid in channel_ids]
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="无效的频道ID格式",
+                )
+
+            # 通过频道映射解析，将父频道展开为实际子频道 ID 列表
+            if cache_service_instance:
+                all_indexed_channels = cache_service_instance.get_indexed_channel_ids_list()
+                channel_result = ChannelMappingUtils(channel_mappings_config).resolve(
+                    channel_ids=effective_channel_ids,
+                    include_tags=[],
+                    exclude_tags=[],
+                    tag_logic="or",
+                    all_indexed_channels=all_indexed_channels,
+                )
+                effective_channel_ids = channel_result.effective_channel_ids
+
         async with AsyncSessionFactory() as session:
             follow_service = ThreadFollowRepository(session)
             threads, total = await follow_service.get_user_follows(
-                user_id=user_id, limit=limit, offset=offset
+                user_id=user_id,
+                limit=limit,
+                offset=offset,
+                active_flag=active_flag,
+                channel_ids=effective_channel_ids,
             )
 
         return {"total": total, "threads": threads, "limit": limit, "offset": offset}
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"获取关注列表失败: {e}", exc_info=True)
         raise HTTPException(
