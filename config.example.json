@@ -118,6 +118,7 @@
   "backup": {
     "enabled": false,
     "_comment_enabled": "是否启用数据库定时备份到 S3 兼容对象存储（如 Cloudflare R2）",
+    "_comment_encryption_key": "如需加密备份 config.json 和 .env，请在 .env 文件中设置 BACKUP_ENCRYPTION_KEY（Base64 编码的 32 字节密钥）",
 
     "endpoint_url": "https://<your-account-id>.r2.cloudflarestorage.com",
     "_comment_endpoint_url": "S3 兼容对象存储的端点 URL",

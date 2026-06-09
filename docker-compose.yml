@@ -40,6 +40,7 @@ services:
     working_dir: /app
     volumes:
       - ./config.json:/app/config.json:ro
+      - ./.env:/app/.env:ro
       - ./data:/app/data
       - ./logs:/app/logs
     depends_on:
@@ -52,6 +53,7 @@ services:
       BOT_TOKEN: "${BOT_TOKEN}"
       REDIS_URL: redis://odysseia-redis:6379/0
       DATABASE_URL: "postgresql+asyncpg://odysseia:${PG_PASSWORD:-changeme}@odysseia-postgres:5432/odysseia"
+      BACKUP_ENCRYPTION_KEY: "${BACKUP_ENCRYPTION_KEY:-}"
     logging:
       driver: "json-file"
       options:
