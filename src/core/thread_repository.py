@@ -460,6 +460,22 @@ class ThreadRepository:
             await self.session.rollback()
             raise
 
+    async def get_thread_guild_id(self, thread_id: int) -> Optional[int]:
+        """获取帖子的所属服务器 ID"""
+        stmt = select(Thread.guild_id).where(Thread.thread_id == thread_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def get_thread_with_tags(self, thread_id: int) -> Optional[Thread]:
+        """获取帖子及其标签（预加载）。"""
+        stmt = (
+            select(Thread)
+            .where(Thread.thread_id == thread_id)
+            .options(selectinload(Thread.tags))  # type: ignore[arg-type]
+        )
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_all_indexed_channel_ids(self) -> Sequence[int]:
         """从数据库获取所有已索引的频道ID"""
         statement = select(Thread.channel_id).distinct()

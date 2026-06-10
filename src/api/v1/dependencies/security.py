@@ -4,7 +4,7 @@ import sys
 from typing import Any, Dict, Optional
 
 from fastapi import Depends, HTTPException, Request, status
-from fastapi.security import APIKeyHeader
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from api.v1.utils.jwt_utils import verify_jwt
 
@@ -42,8 +42,13 @@ def initialize_api_security():
 # 定义 API 密钥在请求头中的名称
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
+bearer_scheme = HTTPBearer(auto_error=False)
 
-async def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
+
+async def get_current_user(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(bearer_scheme),
+) -> Optional[Dict[str, Any]]:
     """
     从请求中提取并验证 JWT token，返回用户信息
     优先从 Authorization Bearer 中读取，回退到 Cookie
@@ -55,10 +60,7 @@ async def get_current_user(request: Request) -> Optional[Dict[str, Any]]:
         )
 
     # 1) 优先从 Authorization Bearer 中读取
-    token = None
-    auth_header = request.headers.get("Authorization", "")
-    if auth_header.startswith("Bearer "):
-        token = auth_header[7:].strip()
+    token = credentials.credentials if credentials else None
 
     # 2) 回退到 Cookie 会话
     if not token:

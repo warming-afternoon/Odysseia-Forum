@@ -784,6 +784,8 @@ async def _get_banner_and_unread_async(
                     cover_image_url=banner.cover_image_url,
                     channel_id=banner.channel_id if banner.channel_id else 0,
                     guild_id=guild_by_thread.get(banner.thread_id, 0),
+                    start_time=banner.start_time,
+                    end_time=banner.end_time,
                 )
                 for banner in banners
             ]

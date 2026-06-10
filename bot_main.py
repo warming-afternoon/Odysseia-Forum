@@ -36,7 +36,7 @@ from preferences.cog import Preferences
 from auditor.cog import Auditor
 from config.cog import Configuration
 from banner.cog import BannerManagement
-from banner.banner_service import send_review_message
+from banner.listeners.banner_event_listener import BannerEventListener
 from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
 from update_detector.cog import UpdateDetector
@@ -198,6 +198,11 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
             ),
+            BannerEventListener(
+                bot=self,
+                session_factory=AsyncSessionFactory,
+                config=self.config.get("banner", {}),
+            ),
             CollectionCog(
                 bot=self,
                 session_factory=AsyncSessionFactory,
@@ -220,9 +225,6 @@ class MyBot(commands.Bot):
 
         # 注册全局事件监听器
         self.add_listener(self.on_index_updated_global, "on_index_updated")
-
-        # 启动 Banner 审核消息队列消费者
-        asyncio.create_task(self._consume_banner_review_queue())
 
         # 启动健康监控后台任务
         asyncio.create_task(self._heartbeat_writer())
@@ -361,48 +363,6 @@ class MyBot(commands.Bot):
             )
             return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
-    async def _consume_banner_review_queue(self):
-        """后台任务：消费 banner 审核消息队列，将审核消息发送到 Discord。"""
-        import json
-
-        from sqlmodel import select as sm_select
-        from models.banner_application import BannerApplication
-
-        redis = RedisManager.get_client()
-        banner_conf = self.config.get("banner", {})
-        logger.info("Banner 审核队列消费者已启动")
-        while not self.is_closed():
-            try:
-                result = await redis.brpop("banner:review:queue", timeout=5)  # pyright: ignore[reportGeneralTypeIssues]
-                if result is None:
-                    continue
-                _, payload = result
-                data = json.loads(payload)
-                application_id = data["application_id"]
-
-                async with AsyncSessionFactory() as session:
-                    stmt = sm_select(BannerApplication).where(
-                        BannerApplication.id == application_id
-                    )
-                    r = await session.execute(stmt)
-                    application = r.scalar_one_or_none()
-                    if application is None:
-                        logger.warning(
-                            f"审核队列中的申请已不存在: {application_id}"
-                        )
-                        continue
-
-                    await send_review_message(
-                        bot=self,
-                        session_factory=AsyncSessionFactory,
-                        application=application,
-                        config=banner_conf,
-                    )
-            except asyncio.CancelledError:
-                break
-            except Exception:
-                logger.error("消费 Banner 审核队列时出错", exc_info=True)
-                await asyncio.sleep(5)
 
 
 async def main():
@@ -434,7 +394,7 @@ async def main():
 
     # 读取配置项并初始化全局Redis连接池
     redis_url = os.environ.get("REDIS_URL", config.get("redis_url", "redis://odysseia-redis:6379/0"))
-    await RedisManager.init_redis(redis_url)
+    await RedisManager.init_redis(redis_url)  # type: ignore[arg-type]
 
     # 清除上一次运行残留的就绪标志，确保 API 不会在 Bot 重启期间读到过期状态
     try:
@@ -454,7 +414,7 @@ async def main():
     try:
         async with bot:
             token = os.environ.get("BOT_TOKEN", config.get("token"))
-            await bot.start(token)
+            await bot.start(token)  # type: ignore[arg-type]
     finally:
         # 服务关闭时切断与Redis的连接
         # 使用嵌套 try/finally 确保即使 close_redis() 抛出异常，

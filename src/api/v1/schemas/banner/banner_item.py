@@ -1,5 +1,8 @@
 """Banner项目Schema"""
 
+from datetime import datetime
+from typing import Optional
+
 from pydantic import BaseModel, Field, field_serializer
 
 
@@ -13,6 +16,12 @@ class BannerItem(BaseModel):
     guild_id: int = Field(
         default=0,
         description="帖子所属服务器 ID（从索引帖读取，用于前端生成 Discord 链接）",
+    )
+    start_time: Optional[datetime] = Field(
+        default=None, description="Banner 展示开始时间"
+    )
+    end_time: Optional[datetime] = Field(
+        default=None, description="Banner 展示结束时间"
     )
 
     class Config:

@@ -2,14 +2,20 @@
 
 import json
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import get_current_user, require_auth
-from api.v1.schemas.banner import BannerApplicationRequest, BannerApplicationResponse
+from api.v1.schemas.banner import (
+    BannerApplicationRequest,
+    BannerApplicationResponse,
+    BannerItem,
+)
 from banner.banner_service import BannerService
+from models.thread import Thread
 from shared.redis_client import RedisManager
 
 logger = logging.getLogger(__name__)
@@ -71,7 +77,7 @@ async def apply_banner(
             if banner_config and application:
                 try:
                     redis = RedisManager.get_client()
-                    await redis.lpush(
+                    await redis.lpush(  # type: ignore[return-type]
                         "banner:review:queue",
                         json.dumps({"application_id": application.id}),
                     )
@@ -96,15 +102,20 @@ async def apply_banner(
         )
 
 
-@router.get("/active", summary="获取当前活跃的Banner列表")
+@router.get(
+    "/active",
+    response_model=List[BannerItem],
+    summary="获取当前活跃的Banner列表",
+)
 async def get_active_banners(
-    channel_id: Optional[int] = None,
+    channel_id: Optional[int] = Query(default=None, description="频道ID，不传则获取全频道Banner"),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
     """
-    获取当前活跃的Banner列表
+    获取当前活跃的Banner轮播列表
 
-    - channel_id: 可选，指定频道ID获取该频道的Banner
+    - channel_id: 可选，指定频道ID获取该频道+全频道的Banner
+    - 返回的 guild_id + thread_id 可用于前端构建 Discord 跳转链接
     """
     if not async_session_factory:
         raise HTTPException(
@@ -116,23 +127,29 @@ async def get_active_banners(
             service = BannerService(session)
             banners = await service.get_active_banners(channel_id=channel_id)
 
-            return {
-                "banners": [
-                    {
-                        "thread_id": banner.thread_id,
-                        "title": banner.title,
-                        "cover_image_url": banner.cover_image_url,
-                        "channel_id": banner.channel_id,
-                        "start_time": banner.start_time.isoformat()
-                        if banner.start_time
-                        else None,
-                        "end_time": banner.end_time.isoformat()
-                        if banner.end_time
-                        else None,
-                    }
-                    for banner in banners
-                ]
-            }
+            # 批量查询 guild_id，用于前端构建 Discord 跳转链接
+            guild_by_thread: dict[int, int] = {}
+            if banners:
+                banner_tids = [b.thread_id for b in banners]
+                guild_rows = await session.execute(
+                    select(Thread.thread_id, Thread.guild_id).where(  # type: ignore[arg-type]
+                        Thread.thread_id.in_(banner_tids)  # type: ignore[arg-type]
+                    )
+                )
+                guild_by_thread = {tid: gid for tid, gid in guild_rows.all()}
+
+            return [
+                BannerItem(
+                    thread_id=banner.thread_id,
+                    title=banner.title,
+                    cover_image_url=banner.cover_image_url,
+                    channel_id=banner.channel_id if banner.channel_id else 0,
+                    guild_id=guild_by_thread.get(banner.thread_id, 0),
+                    start_time=banner.start_time,
+                    end_time=banner.end_time,
+                )
+                for banner in banners
+            ]
     except Exception as e:
         logger.error(f"获取Banner列表时出错: {e}", exc_info=True)
         raise HTTPException(

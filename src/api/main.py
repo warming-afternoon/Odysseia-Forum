@@ -76,6 +76,9 @@ app = FastAPI(
     docs_url=docs_url,
     redoc_url=redoc_url,
     default_response_class=ORJSONResponse,
+    swagger_ui_parameters={
+        "persistAuthorization": True,
+    },
 )
 
 # 配置 CORS
