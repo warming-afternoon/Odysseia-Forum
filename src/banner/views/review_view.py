@@ -7,6 +7,7 @@ import discord
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from banner.banner_service import BannerService
+from shared.permissions import check_is_admin_or_bot_admin
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -180,6 +181,14 @@ class ReviewView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """处理同意按钮"""
+        # 权限检查：需要服务器管理员或Bot管理员
+        if not await check_is_admin_or_bot_admin(interaction):
+            await interaction.response.send_message(
+                "❌ 您没有审核权限。需要服务器管理员或Bot管理员权限。",
+                ephemeral=True,
+            )
+            return
+
         await interaction.response.defer(ephemeral=True)
 
         try:
@@ -279,6 +288,14 @@ class ReviewView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """处理拒绝按钮"""
+        # 权限检查：需要服务器管理员或Bot管理员
+        if not await check_is_admin_or_bot_admin(interaction):
+            await interaction.response.send_message(
+                "❌ 您没有审核权限。需要服务器管理员或Bot管理员权限。",
+                ephemeral=True,
+            )
+            return
+
         try:
             # 通过消息 ID 查询申请信息
             async with self.session_factory() as session:
@@ -325,7 +342,10 @@ class ReviewView(discord.ui.View):
     async def _archive_review(self, application, status: str, reviewer_id: int):
         """在存档频道留档"""
         try:
-            archive_channel = self.bot.fetch_channel(self.archive_thread_id)
+            archive_channel = self.bot.get_channel(self.archive_thread_id)
+            if archive_channel is None:
+                # 缓存未命中时尝试 API 获取
+                archive_channel = await self.bot.fetch_channel(self.archive_thread_id)
             if archive_channel is None:
                 logger.error("存档频道不存在，无法发送审核记录")
                 return

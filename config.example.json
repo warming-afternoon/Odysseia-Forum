@@ -140,13 +140,13 @@
     "_comment_applicant_role_ids": "允许申请Banner的身份组ID，多个用逗号分隔",
     
     "reviewer_role_ids": "role_id_1,role_id_2,role_id_3",
-    "_comment_reviewer_role_ids": "审核员身份组ID，多个用逗号分隔",
+    "_comment_reviewer_role_ids": "【已废弃】审核权限现由 bot_admin_user_ids + 服务器管理员权限决定，不再使用此身份组配置",
     
     "review_thread_id": 0,
     "_comment_review_thread_id": "接收审核申请的Thread ID",
     
     "archive_thread_id": 0,
-    "_comment_archive_thread_id": "审核记录存档的Forum频道ID",
+    "_comment_archive_thread_id": "审核记录存档的频道ID",
     
     "available_channels": {
       "1374474903981527082": "纯净区",

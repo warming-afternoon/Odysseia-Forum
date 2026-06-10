@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 from sqlmodel import and_, desc, select
 
+from banner.dto.delete_banner_result import DeleteBannerResult
 from models import (
     BannerApplication,
     BannerCarousel,
@@ -468,6 +469,104 @@ class BannerService:
 
         await self.session.commit()
         return cleaned_count
+
+    async def delete_banner_by_thread(
+        self, thread_id: int
+    ) -> DeleteBannerResult:
+        """
+        根据 thread_id 从轮播或等待列表中删除 Banner。
+
+        如果 Banner 在轮播中，删除后会尝试从等待队列晋升替补。
+        """
+        # 查询轮播列表
+        carousel_result = await self.session.execute(
+            select(BannerCarousel).where(BannerCarousel.thread_id == thread_id)
+        )
+        carousel_items = carousel_result.scalars().all()
+
+        # 查询等待列表
+        waitlist_result = await self.session.execute(
+            select(BannerWaitlist).where(BannerWaitlist.thread_id == thread_id)
+        )
+        waitlist_items = waitlist_result.scalars().all()
+
+        # 无匹配
+        if not carousel_items and not waitlist_items:
+            return DeleteBannerResult(
+                success=False,
+                message="未找到该帖子ID对应的Banner记录，请在轮播列表或等待列表中确认。",
+            )
+
+        # 多条匹配（数据一致性的安全网）
+        if len(carousel_items) + len(waitlist_items) > 1:
+            parts = []
+            for item in carousel_items:
+                scope = "全频道" if item.channel_id is None else f"频道 {item.channel_id}"
+                parts.append(f"  • 轮播列表: {item.title[:40]} (范围: {scope})")
+            for item in waitlist_items:
+                scope = "全频道" if item.channel_id is None else f"频道 {item.channel_id}"
+                parts.append(f"  • 等待列表: {item.title[:40]} (范围: {scope})")
+            return DeleteBannerResult(
+                success=False,
+                message=f"该帖子ID对应多条Banner记录，删除时存在歧义：\n" + "\n".join(parts),
+            )
+
+        # 在轮播中找到
+        if carousel_items:
+            banner = carousel_items[0]
+            channel_id = banner.channel_id
+            title = banner.title
+            scope_label = "全频道" if channel_id is None else f"频道 {channel_id}"
+
+            # 删除前检查是否有等待项可晋升
+            has_waiting = await self._has_waitlist_item(channel_id)
+
+            await self.session.delete(banner)
+
+            # 从等待队列晋升
+            if has_waiting:
+                await self._promote_from_waitlist(channel_id)
+
+            await self.session.commit()
+
+            return DeleteBannerResult(
+                success=True,
+                message=f"已从轮播列表中删除Banner「{title}」",
+                deleted_from="carousel",
+                thread_id=thread_id,
+                banner_title=title,
+                scope_label=scope_label,
+                promoted_from_waitlist=has_waiting,
+            )
+
+        # 在等待列表中找到
+        if waitlist_items:
+            banner = waitlist_items[0]
+            channel_id = banner.channel_id
+            title = banner.title
+            scope_label = "全频道" if channel_id is None else f"频道 {channel_id}"
+
+            await self.session.delete(banner)
+            await self.session.commit()
+
+            return DeleteBannerResult(
+                success=True,
+                message=f"已从等待列表中删除Banner「{title}」",
+                deleted_from="waitlist",
+                thread_id=thread_id,
+                banner_title=title,
+                scope_label=scope_label,
+                promoted_from_waitlist=False,
+            )
+
+    async def _has_waitlist_item(self, channel_id: Optional[int]) -> bool:
+        """检查等待列表中是否有指定频道的项"""
+        result = await self.session.execute(
+            select(BannerWaitlist)
+            .where(BannerWaitlist.channel_id == channel_id)
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def _promote_from_waitlist(self, channel_id: Optional[int]):
         """从等待列表提升一个banner到轮播列表"""

@@ -247,6 +247,85 @@ class BannerManagement(commands.Cog):
                 f"❌ 命令执行失败: {error}", ephemeral=True
             )
 
+    @banner_group.command(
+        name="删除轮播",
+        description="从轮播或等待列表中删除指定Banner（管理员）",
+    )
+    @app_commands.describe(
+        thread_id="要删除的Banner对应的帖子ID（使用 /banner 查看状态 获取ID）"
+    )
+    @is_admin_or_bot_admin()
+    async def delete_carousel_banner(
+        self, interaction: discord.Interaction, thread_id: str
+    ):
+        """从轮播或等待列表中删除指定的Banner"""
+        await safe_defer(interaction, ephemeral=True)
+
+        # 验证帖子ID格式
+        if not thread_id.isdigit():
+            await interaction.followup.send(
+                "❌ 帖子ID必须是纯数字。请使用 `/banner 查看状态` 获取正确的帖子ID。",
+                ephemeral=True,
+            )
+            return
+
+        tid = int(thread_id)
+
+        try:
+            async with self.session_factory() as session:
+                service = BannerService(session)
+                result = await service.delete_banner_by_thread(tid)
+
+                if not result.success:
+                    await interaction.followup.send(
+                        f"❌ {result.message}", ephemeral=True
+                    )
+                    return
+
+                # 构建成功 Embed
+                location_label = (
+                    "轮播列表" if result.deleted_from == "carousel" else "等待列表"
+                )
+                embed = discord.Embed(
+                    title="✅ Banner已删除",
+                    description=(
+                        f"已从 **{location_label}** 中移除Banner\n"
+                        f"**帖子ID**: `{result.thread_id}`\n"
+                        f"**标题**: {result.banner_title}\n"
+                        f"**范围**: {result.scope_label}"
+                    ),
+                    color=discord.Color.green(),
+                )
+                if result.promoted_from_waitlist:
+                    embed.add_field(
+                        name="🔄 自动补充",
+                        value="已将等待列表中的下一个Banner提升至轮播列表",
+                        inline=False,
+                    )
+
+                await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"删除Banner时出错: {e}", exc_info=True)
+            await interaction.followup.send(
+                f"❌ 删除Banner时发生错误: {str(e)}", ephemeral=True
+            )
+
+    @delete_carousel_banner.error
+    async def on_delete_carousel_banner_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ):
+        if isinstance(error, app_commands.CheckFailure):
+            await interaction.response.send_message(
+                "❌ 您没有权限使用此命令。需要服务器管理员或bot管理员权限。",
+                ephemeral=True,
+            )
+        else:
+            logger.error("删除轮播命令出错", exc_info=error)
+            await interaction.response.send_message(
+                f"❌ 命令执行失败: {error}", ephemeral=True
+            )
+
 
 async def setup(bot: "MyBot"):
     """设置Cog"""

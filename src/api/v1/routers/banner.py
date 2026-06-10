@@ -5,10 +5,10 @@ import logging
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import get_current_user, require_auth
+from api.v1.schemas.banner import BannerApplicationRequest, BannerApplicationResponse
 from banner.banner_service import BannerService
 from shared.redis_client import RedisManager
 
@@ -17,24 +17,6 @@ logger = logging.getLogger(__name__)
 # 全局变量，将在应用启动时注入
 async_session_factory: async_sessionmaker | None = None
 banner_config: dict | None = None
-
-
-class BannerApplicationRequest(BaseModel):
-    """Banner申请请求模型"""
-
-    thread_id: str = Field(
-        ..., description="帖子ID（纯数字字符串）", min_length=17, max_length=20
-    )
-    cover_image_url: str = Field(..., description="封面图URL")
-    target_scope: str = Field(..., description="展示范围：'global' 或频道ID")
-
-
-class BannerApplicationResponse(BaseModel):
-    """Banner申请响应模型"""
-
-    success: bool
-    message: str
-    application_id: Optional[int] = None
 
 
 router = APIRouter(

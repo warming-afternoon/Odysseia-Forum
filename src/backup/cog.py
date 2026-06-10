@@ -95,7 +95,7 @@ class BackupCog(commands.Cog):
             with open(dest_path, "wb") as f:
                 f.write(nonce + ciphertext)
 
-            logger.info(f"配置文件已加密: {source_path} → {dest_path}")
+            logger.debug(f"配置文件已加密: {source_path} → {dest_path}")
             return True
         except Exception as e:
             logger.error(f"加密配置文件失败 {source_path}: {e}")
