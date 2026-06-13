@@ -38,6 +38,7 @@ class BannerWaitlistRepository:
         channel_id: Optional[int],
         cover_image_url: str,
         title: str,
+        target_type: int = 1,
     ) -> None:
         """插入一条等待记录（含 position 计算）。"""
         now = datetime.now().replace(microsecond=0)
@@ -58,6 +59,7 @@ class BannerWaitlistRepository:
             channel_id=channel_id,
             cover_image_url=cover_image_url,
             title=title,
+            target_type=target_type,
             queued_at=now,
             position=new_position,
         )

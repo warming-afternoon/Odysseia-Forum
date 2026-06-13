@@ -1,134 +1,207 @@
-# migrate.py
-import sqlite3
-import sys
-import shutil
-import subprocess
-from datetime import datetime, timezone
-from pathlib import Path
+"""PostgreSQL 数据库迁移脚本。
 
-# --- 配置 ---
-# 使用 pathlib 确保跨平台路径兼容性
+1. 检查数据库可达
+2. 可选 pg_dump 备份（BACKUP_BEFORE_MIGRATE=1）
+3. 执行 alembic upgrade head
+4. 若 data/follow_bot.db 存在，迁移旧收藏数据到 booklist_item
+"""
+
+import os
+import subprocess
+import sys
+from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
+
 PROJECT_ROOT = Path(__file__).parent.resolve()
 DATA_DIR = PROJECT_ROOT / "data"
-DB_PATH = DATA_DIR / "database.db"
-CACHE_PATH = DATA_DIR / "username_cache.json"
-# --- 结束配置 ---
 
 
-# 用于在终端输出彩色文本的辅助函数
-def print_color(text, color_code):
-    """在终端打印彩色文本"""
-    print(f"\033[{color_code}m{text}\033[0m")
+# ── 终端输出辅助 ──────────────────────────────────────────
+
+def print_info(msg: str) -> None:
+    print(f"\033[94m[INFO] {msg}\033[0m")
 
 
-def print_info(message):
-    print_color(f"ℹ️  {message}", "94")  # Blue
+def print_success(msg: str) -> None:
+    print(f"\033[92m[OK] {msg}\033[0m")
 
 
-def print_success(message):
-    print_color(f"✅ {message}", "92")  # Green
+def print_warning(msg: str) -> None:
+    print(f"\033[93m[WARN] {msg}\033[0m")
 
 
-def print_warning(message):
-    print_color(f"⚠️  {message}", "93")  # Yellow
+def print_error(msg: str) -> None:
+    print(f"\033[91m[ERR] {msg}\033[0m")
 
 
-def print_error(message):
-    print_color(f"❌ {message}", "91")  # Red
+# ── PostgreSQL 工具 ────────────────────────────────────────
+
+def _pg_components(db_url: str) -> tuple[str, str, str, str, str]:
+    """从 DATABASE_URL 解析 (host, port, dbname, user, password)。"""
+    u = urlparse(db_url)
+    return (
+        u.hostname or "localhost",
+        str(u.port or 5432),
+        u.path.lstrip("/"),
+        u.username or "",
+        u.password or "",
+    )
 
 
-def adapt_datetime(dt_obj):
-    """将 datetime 对象转换为 'YYYY-MM-DD HH:MM:SS.ffffff' 格式的字符串，以匹配 SQLAlchemy 的默认格式。"""
-    return dt_obj.strftime("%Y-%m-%d %H:%M:%S.%f")
-
-
-def parse_iso_datetime_with_timezone(s):
-    """解析带 '+00:00' 时区后缀的日期时间字符串"""
-    # Python 3.11+ 的 fromisoformat可以直接处理 'Z' 和 '+00:00'
-    # 为了兼容性，我们手动处理
+def check_db_reachable(db_url: str) -> bool:
+    """用 pg_isready 检查数据库可达。"""
+    host, port, dbname, user, _ = _pg_components(db_url)
     try:
-        # 移除可能存在的时区信息，因为 sqlite3 会存储 naive datetime
-        s_str = s.decode("utf-8")
-        if "+" in s_str:
-            return datetime.fromisoformat(s_str.split("+")[0])
-        return datetime.fromisoformat(s_str)
-    except (ValueError, TypeError):
+        subprocess.run(
+            [
+                "pg_isready", "-h", host, "-p", port,
+                "-d", dbname, "-U", user, "-t", "10",
+            ],
+            check=True, capture_output=True, text=True,
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+
+def backup_db(db_url: str) -> Path | None:
+    """用 pg_dump 备份数据库，返回备份文件路径。"""
+    host, port, dbname, user, password = _pg_components(db_url)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = DATA_DIR / f"pre_migrate_backup_{ts}.sql"
+    try:
+        subprocess.run(
+            [
+                "pg_dump", "-h", host, "-p", port,
+                "-d", dbname, "-U", user,
+                "--no-owner", "--no-acl", "-f", str(backup_path),
+            ],
+            check=True, capture_output=True, text=True,
+            env={**os.environ, "PGPASSWORD": password},
+        )
+        return backup_path
+    except (subprocess.CalledProcessError, FileNotFoundError) as e:
+        print_warning(f"pg_dump 备份失败: {e}")
         return None
 
 
-def migrate_favorites_from_follow_bot():
-    """将旧 follow_bot.db 的 thread_favorites 迁移到当前系统的默认书单 (BooklistItem)"""
+# ── Alembic 迁移 ───────────────────────────────────────────
+
+def run_alembic_migration() -> None:
+    """执行 alembic upgrade head。"""
+    print_info("执行 alembic upgrade head ...")
+    print_warning("请勿中断此过程。")
+    try:
+        result = subprocess.run(
+            ["alembic", "upgrade", "head"],
+            check=True, capture_output=True, text=True, encoding="utf-8",
+        )
+        print(result.stdout)
+        print_success("Alembic 迁移完成")
+    except FileNotFoundError:
+        print_error("alembic 命令未找到，请确认依赖已安装")
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        print_error("Alembic 迁移失败")
+        print(e.stderr)
+        sys.exit(1)
+
+    # 输出版本
+    result = subprocess.run(
+        ["alembic", "current"],
+        check=True, capture_output=True, text=True, encoding="utf-8",
+    )
+    print_info(f"当前数据库版本: {result.stdout.strip()}")
+
+
+# ── 旧收藏数据迁移（SQLite follow_bot.db → PostgreSQL booklist_item） ──
+
+def migrate_favorites_from_follow_bot() -> None:
+    """将旧 follow_bot.db 的 thread_favorites 迁移到当前系统的默认书单。
+
+    仅当 data/follow_bot.db 存在时执行。使用 sqlite3 直接读取旧库，
+    写入当前 PostgreSQL 数据库（通过 DATABASE_URL）。
+    """
+    import sqlite3
+
+    import psycopg2
+    import psycopg2.extras
+
     old_db_path = DATA_DIR / "follow_bot.db"
     if not old_db_path.exists():
-        print_info("未找到旧的收藏数据库 (follow_bot.db)，跳过数据迁移。")
+        print_info("未找到 follow_bot.db，跳过旧收藏数据迁移。")
         return
 
     print_info("=" * 50)
-    print_info("检测到旧的收藏数据库，开始迁移数据...")
+    print_info("检测到 follow_bot.db，开始迁移旧收藏数据...")
 
-    batch_size = 100  # 每次从旧库分批读取的记录数
-    total_attempted = 0  # 旧库中尝试迁移的总记录数
-    total_migrated = 0  # 成功迁移（非重复）的记录数
-    old_conn = None  # 旧数据库连接
-    main_conn = None  # 主数据库连接
+    db_url = os.environ.get("DATABASE_URL", "")
+    if not db_url:
+        print_warning("DATABASE_URL 未设置，跳过旧收藏迁移")
+        return
+
+    # 同步 PostgreSQL 连接
+    sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
+
+    batch_size = 100
+    total_attempted = 0
+    total_migrated = 0
+    old_conn = None
+    pg_conn = None
 
     try:
-        sqlite3.register_adapter(datetime, adapt_datetime)
-        sqlite3.register_converter("timestamp", parse_iso_datetime_with_timezone)
-
-        old_conn = sqlite3.connect(
-            old_db_path,
-            detect_types=sqlite3.PARSE_DECLTYPES | sqlite3.PARSE_COLNAMES,
-        )
+        old_conn = sqlite3.connect(str(old_db_path))
         old_cursor = old_conn.cursor()
 
-        main_conn = sqlite3.connect(DB_PATH)
-        main_cursor = main_conn.cursor()
+        pg_conn = psycopg2.connect(sync_url)
+        pg_cursor = pg_conn.cursor()
 
-        # Step 1: 查询旧库中所有收藏用户 ID
+        # 查询旧库中所有收藏用户 ID
         old_cursor.execute("SELECT DISTINCT user_id FROM thread_favorites")
         old_user_ids = [row[0] for row in old_cursor.fetchall()]
         if not old_user_ids:
-            print_info("旧数据库中没有收藏记录，跳过数据迁移。")
+            print_info("旧数据库中没有收藏记录，跳过。")
             return
-        print_info(f"旧数据库中共有 {len(old_user_ids)} 个不同的用户有收藏记录。")
+        print_info(f"旧库中共 {len(old_user_ids)} 个用户有收藏记录。")
 
-        # Step 2: 批量查询这些用户在当前库中的默认书单
-        placeholders = ",".join("?" * len(old_user_ids))
-        main_cursor.execute(
-            f"SELECT id, owner_id FROM booklist WHERE owner_id IN ({placeholders}) AND is_default = 1",
-            old_user_ids,
+        # 查询这些用户在当前库中的默认书单
+        pg_cursor.execute(
+            "SELECT id, owner_id FROM booklist WHERE owner_id = ANY(%s) AND is_default = true",
+            (old_user_ids,),
         )
-        existing_booklists = {
-            row[1]: row[0] for row in main_cursor.fetchall()
-        }  # owner_id -> booklist_id
+        existing_booklists = {row[1]: row[0] for row in pg_cursor.fetchall()}
         print_info(f"其中 {len(existing_booklists)} 个用户已有默认书单。")
 
-        # Step 3: 为没有默认书单的用户批量创建默认书单
+        # 为没有默认书单的用户创建
         users_without_booklist = [
             uid for uid in old_user_ids if uid not in existing_booklists
         ]
         if users_without_booklist:
-            now = datetime.now(timezone.utc)
-            for user_id in users_without_booklist:
-                main_cursor.execute(
-                    "INSERT INTO booklist (owner_id, title, description, is_public,"
-                    " is_default, display_type, item_count, collection_count,"
-                    " view_count, created_at, updated_at)"
-                    " VALUES (?, '默认收藏', '默认收藏夹', 0, 1, 1, 0, 0, 0, ?, ?)",
-                    (user_id, now, now),
-                )
-                existing_booklists[user_id] = main_cursor.lastrowid
-            main_conn.commit()
+            now = datetime.now()
+            psycopg2.extras.execute_values(
+                pg_cursor,
+                "INSERT INTO booklist (owner_id, title, description, is_public,"
+                " is_default, display_type, item_count, collection_count,"
+                " view_count, created_at, updated_at)"
+                " VALUES %s RETURNING id, owner_id",
+                [
+                    (uid, "默认收藏", "默认收藏夹", False, True, 1, 0, 0, 0, now, now)
+                    for uid in users_without_booklist
+                ],
+                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            )
+            for row in pg_cursor.fetchall():
+                existing_booklists[row[1]] = row[0]
+            pg_conn.commit()
             print_success(f"为 {len(users_without_booklist)} 个用户创建了默认书单。")
 
-        # Step 4: 分批读取旧收藏数据，按用户分组后批量插入
+        # 分批读取旧收藏数据
         old_cursor.execute(
             "SELECT user_id, thread_id, added_at FROM thread_favorites"
             " ORDER BY user_id, added_at"
         )
 
-        # 缓存每个书单当前的 max(display_order)，避免逐批重复查询
         booklist_max_order: dict[int, int] = {}
 
         while True:
@@ -136,7 +209,6 @@ def migrate_favorites_from_follow_bot():
             if not batch:
                 break
 
-            # 按 user_id 分组
             grouped: dict = {}
             for user_id, thread_id, added_at in batch:
                 grouped.setdefault(user_id, []).append((thread_id, added_at))
@@ -149,36 +221,31 @@ def migrate_favorites_from_follow_bot():
 
                 thread_ids = [item[0] for item in items]
 
-                # 查询该书单中已存在的 thread_id（去重）
-                ph = ",".join("?" * len(thread_ids))
-                main_cursor.execute(
-                    f"SELECT thread_id FROM booklist_item"
-                    f" WHERE booklist_id = ? AND thread_id IN ({ph})",
-                    [booklist_id] + thread_ids,
+                # 去重
+                pg_cursor.execute(
+                    "SELECT thread_id FROM booklist_item"
+                    " WHERE booklist_id = %s AND thread_id = ANY(%s)",
+                    (booklist_id, thread_ids),
                 )
-                existing_thread_ids = set(row[0] for row in main_cursor.fetchall())
+                existing_thread_ids = set(row[0] for row in pg_cursor.fetchall())
 
-                # 过滤出待插入的新项
                 new_items = [
                     item for item in items if item[0] not in existing_thread_ids
                 ]
                 total_attempted += len(items)
 
                 if new_items:
-                    # 获取该书单当前的最大 display_order
                     if booklist_id not in booklist_max_order:
-                        main_cursor.execute(
-                            "SELECT MAX(display_order) FROM booklist_item"
-                            " WHERE booklist_id = ?",
+                        pg_cursor.execute(
+                            "SELECT COALESCE(MAX(display_order), 0) FROM booklist_item"
+                            " WHERE booklist_id = %s",
                             (booklist_id,),
                         )
-                        row = main_cursor.fetchone()
-                        booklist_max_order[booklist_id] = (
-                            row[0] if row[0] is not None else 0
-                        )
+                        row = pg_cursor.fetchone()
+                        booklist_max_order[booklist_id] = row[0] if row else 0
 
                     insert_data = []
-                    for i, (thread_id, added_at) in enumerate(new_items):
+                    for _, (thread_id, added_at) in enumerate(new_items):
                         booklist_max_order[booklist_id] += 1
                         insert_data.append(
                             (
@@ -191,29 +258,30 @@ def migrate_favorites_from_follow_bot():
                             )
                         )
 
-                    main_cursor.executemany(
+                    psycopg2.extras.execute_values(
+                        pg_cursor,
                         "INSERT INTO booklist_item"
                         " (booklist_id, thread_id, owner_id, display_order,"
                         " created_at, updated_at)"
-                        " VALUES (?, ?, ?, ?, ?, ?)",
+                        " VALUES %s",
                         insert_data,
+                        template="(%s, %s, %s, %s, %s, %s)",
                     )
                     total_migrated += len(new_items)
 
-                    # 更新对应书单的 item_count
-                    main_cursor.execute(
-                        "UPDATE booklist SET item_count = item_count + ? WHERE id = ?",
+                    pg_cursor.execute(
+                        "UPDATE booklist SET item_count = item_count + %s WHERE id = %s",
                         (len(new_items), booklist_id),
                     )
 
-            main_conn.commit()
+            pg_conn.commit()
 
         total_ignored = total_attempted - total_migrated
         print_success(
-            f"成功迁移 {total_migrated} 条收藏记录 (忽略了 {total_ignored} 条重复记录)。"
+            f"成功迁移 {total_migrated} 条收藏记录（忽略 {total_ignored} 条重复）。"
         )
 
-        # Step 5: 更新受影响帖子的收藏计数
+        # 更新帖子收藏计数
         try:
             old_cursor.execute(
                 "SELECT thread_id, COUNT(DISTINCT user_id) FROM thread_favorites"
@@ -222,119 +290,77 @@ def migrate_favorites_from_follow_bot():
             collection_counts = old_cursor.fetchall()
 
             if collection_counts:
-                update_data = [(count, tid) for tid, count in collection_counts]
-                main_cursor.executemany(
-                    "UPDATE thread SET collection_count = collection_count + ?"
-                    " WHERE thread_id = ?",
-                    update_data,
+                psycopg2.extras.execute_values(
+                    pg_cursor,
+                    "UPDATE thread SET collection_count = collection_count + data.v"
+                    " FROM (VALUES %s) AS data(tid, v)"
+                    " WHERE thread.thread_id = data.tid",
+                    collection_counts,
+                    template="(%s, %s)",
                 )
-                main_conn.commit()
-                print_success(f"成功更新了 {len(collection_counts)} 个帖子的收藏计数。")
-            else:
-                print_info("旧数据库中没有收藏记录，无需更新计数。")
-
+                pg_conn.commit()
+                print_success(f"更新了 {len(collection_counts)} 个帖子的收藏计数。")
         except Exception as e:
-            print_error(f"更新帖子收藏计数时出错: {e}")
-            if main_conn:
-                main_conn.rollback()
+            print_error(f"更新收藏计数出错: {e}")
+            pg_conn.rollback()
 
     except Exception as e:
-        if main_conn:
-            main_conn.rollback()
-        print_error(f"从 follow_bot.db 迁移数据时发生错误: {e}")
-        print_warning("数据迁移失败，但不会影响 Alembic 的迁移结果。")
+        if pg_conn:
+            pg_conn.rollback()
+        print_error(f"迁移旧收藏数据时出错: {e}")
+        print_warning("旧收藏数据迁移失败，但不影响 Alembic 迁移结果。")
     finally:
         if old_conn:
             old_conn.close()
-        if main_conn:
-            main_conn.close()
+        if pg_conn:
+            pg_conn.close()
 
     # 迁移完成后删除旧数据库文件
     try:
         old_db_path.unlink()
-        print_success(f"已成功删除旧的收藏数据库 '{old_db_path.name}'。")
+        print_success(f"已删除 {old_db_path.name}。")
     except Exception as e:
-        print_error(f"删除旧的收藏数据库时出错: {e}")
+        print_error(f"删除 {old_db_path.name} 时出错: {e}")
 
-    print_info("旧数据迁移流程结束。")
+    print_info("旧收藏数据迁移结束。")
 
 
-def main():
-    """执行完整的数据库迁移流程"""
+# ── main ───────────────────────────────────────────────────
+
+def main() -> None:
     print_info("=" * 50)
-    print_info("=  数据库自动迁移脚本启动")
+    print_info("  PostgreSQL 数据库迁移脚本")
     print_info("=" * 50)
 
-    # 备份数据库
-    print_info(f"正在备份数据库 '{DB_PATH.name}'...")
-    if not DB_PATH.exists():
-        print_error(f"错误：数据库文件未找到于 '{DB_PATH}'。请确保文件存在。")
+    db_url = os.environ.get("DATABASE_URL", "")
+    if not db_url:
+        print_error("DATABASE_URL 环境变量未设置")
         sys.exit(1)
 
-    try:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"{DB_PATH.stem}.backup_{timestamp}{DB_PATH.suffix}"
-        backup_path = DATA_DIR / backup_filename
+    # pg_isready / pg_dump 需要同步驱动 URL
+    sync_url = db_url.replace("postgresql+asyncpg://", "postgresql://")
 
-        shutil.copy2(DB_PATH, backup_path)  # copy2 会保留元数据
-        print_success(f"数据库已成功备份到: '{backup_path}'")
-    except Exception as e:
-        print_error(f"备份数据库时发生错误: {e}")
+    # 检查数据库可达
+    if not check_db_reachable(sync_url):
+        print_error("数据库不可达，请检查 DATABASE_URL 和网络连接")
         sys.exit(1)
+    print_success("数据库连接正常")
 
-    # 运行 Alembic 迁移
-    print_info("准备执行 Alembic 数据库迁移...")
-    print_warning("这将更新数据库结构。请勿中断此过程。")
+    # 可选 pg_dump 备份
+    if os.environ.get("BACKUP_BEFORE_MIGRATE") == "1":
+        print_info("正在备份数据库...")
+        backup_path = backup_db(sync_url)
+        if backup_path:
+            print_success(f"备份完成: {backup_path}")
 
-    try:
-        # 使用 subprocess.run 来执行命令，check=True 会在命令失败时抛出异常
-        command = ["alembic", "upgrade", "head"]
-        result = subprocess.run(
-            command, check=True, capture_output=True, text=True, encoding="utf-8"
-        )
+    # Alembic 迁移
+    run_alembic_migration()
 
-        # 打印 Alembic 的输出信息
-        print("--- Alembic 输出开始 ---")
-        print(result.stdout)
-        print("--- Alembic 输出结束 ---")
-
-        print_success("数据库迁移成功完成！")
-
-        # 输出当前数据库版本
-        current_cmd = ["alembic", "current"]
-        current_result = subprocess.run(
-            current_cmd, check=True, capture_output=True, text=True, encoding="utf-8"
-        )
-        print_info(f"当前数据库版本: {current_result.stdout.strip()}")
-    except FileNotFoundError:
-        print_error("错误：'alembic' 命令未找到。")
-        print_error("请确保 Alembic 已通过 uv 安装在项目的开发依赖中。")
-        sys.exit(1)
-    except subprocess.CalledProcessError as e:
-        print_error("Alembic 迁移过程中发生错误！")
-        print_error("--- Alembic 错误输出开始 ---")
-        print(e.stderr)
-        print_error("--- Alembic 错误输出结束 ---")
-        print_warning("数据库结构可能处于不一致状态。建议使用备份文件进行恢复。")
-        sys.exit(1)
-    except Exception as e:
-        print_error(f"执行迁移时发生未知错误: {e}")
-        sys.exit(1)
-
-    # 从 follow_bot.db 迁移收藏数据
+    # 旧收藏数据迁移（follow_bot.db）
     migrate_favorites_from_follow_bot()
 
-    try:
-        # 使用标准库 sqlite3 连接数据库
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("VACUUM;")
-        conn.close()
-    except Exception as e:
-        print_error(f"执行 VACUUM 时发生错误: {e}")
-        print_warning("数据库结构已更新，但优化步骤失败。机器人仍可正常运行。")
-
     print_info("=" * 50)
-    print_success(" 所有操作已成功完成！现在可以启动机器人了。")
+    print_success("所有操作已完成，可以启动服务。")
     print_info("=" * 50)
 
 

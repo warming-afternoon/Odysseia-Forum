@@ -1,9 +1,10 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Column
+from sqlalchemy import BigInteger, Column, SmallInteger
 from sqlmodel import Field, SQLModel
 
+from shared.enum import TargetType
 from shared.time_utils import utc_now
 
 
@@ -23,6 +24,11 @@ class BannerCarousel(SQLModel, table=True):
     )
     cover_image_url: str = Field(description="封面图链接")
     title: str = Field(description="帖子标题")
+    target_type: int = Field(
+        default=TargetType.THREAD.value,
+        sa_column=Column(SmallInteger, index=True, nullable=False),
+        description="论坛帖子 / 频道",
+    )
 
     start_time: datetime = Field(
         default_factory=utc_now,

@@ -1,13 +1,29 @@
 """Banner申请请求Schema"""
 
-from pydantic import BaseModel, Field
+from typing import Any
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class BannerApplicationRequest(BaseModel):
     """Banner申请请求模型"""
 
-    thread_id: str = Field(
-        ..., description="帖子ID（纯数字字符串）", min_length=17, max_length=20
+    thread_link: str = Field(
+        ...,
+        min_length=17,
+        max_length=150,
+        description="Discord 跳转链接（https://discord.com/channels/{guild_id}/{id}）或纯数字 ID",
     )
-    cover_image_url: str = Field(..., description="封面图URL")
-    target_scope: str = Field(..., description="展示范围：'global' 或频道ID")
+    cover_image_url: str = Field(..., description="封面图链接")
+    target_scope: str = Field(..., description="目标范围：'global'表示全频道，或具体频道ID")
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_thread_link(cls, data: Any) -> Any:
+        """兼容旧接口：将 thread_id 自动转换为 thread_link"""
+        if isinstance(data, dict):
+            if "thread_id" in data and "thread_link" not in data:
+                data = {**data, "thread_link": data.pop("thread_id")}
+            elif "thread_id" in data:
+                data.pop("thread_id")
+        return data

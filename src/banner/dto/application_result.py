@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 from models import BannerApplication
@@ -13,3 +13,6 @@ class ApplicationResult:
     message: str
     application: Optional[BannerApplication] = None
     thread: Optional[ThreadDTO] = None
+    target_type: int = 1
+    guild_id: int = 0
+    target_name: str = ""

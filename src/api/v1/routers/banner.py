@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,14 +16,45 @@ from api.v1.schemas.banner import (
     BannerItem,
 )
 from banner.banner_service import BannerService
+from banner.channel_sync import ChannelSyncService
 from models.thread import Thread
+from models.channel import Channel
+from shared.enum import TargetType
 from shared.redis_client import RedisManager
 
 logger = logging.getLogger(__name__)
 
+DISCORD_LINK_RE = re.compile(
+    r"^https?://(?:.*\.)?discord\.com/channels/(\d{17,20})/(\d{17,20})/?$"
+)
+
 # 全局变量，将在应用启动时注入
 async_session_factory: async_sessionmaker | None = None
 banner_config: dict | None = None
+main_guild_id: int = 0
+bot_token: str = ""
+
+
+def parse_thread_link(link: str) -> tuple[int, int] | None:
+    """解析 thread_link，返回 (guild_id, target_id) 或 None。
+
+    支持 Discord 链接和纯数字 ID。
+    纯数字 ID 时使用 main_guild_id 拼接。
+    """
+    link = link.strip()
+
+    # Discord URL 解析
+    m = DISCORD_LINK_RE.match(link)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+
+    # 纯数字 ID
+    if link.isdigit():
+        if main_guild_id:
+            return main_guild_id, int(link)
+        return None
+
+    return None
 
 
 router = APIRouter(
@@ -37,39 +69,48 @@ async def apply_banner(
     request: BannerApplicationRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """
-    提交Banner展示位申请
+    """提交Banner展示位申请。
 
-    - 只能为自己的帖子申请
-    - 帖子必须已被索引
-    - 封面图必须是有效的URL
-    - 申请成功后会自动发送审核消息到指定子区
+    支持 Discord 跳转链接或纯数字 ID。
+    传入纯数字 ID 时自动使用主服务器 ID 拼接。
     """
     if not async_session_factory:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="服务尚未初始化"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="服务尚未初始化",
         )
 
-    # 验证帖子ID格式
-    thread_id_str = request.thread_id.strip()
-    if not thread_id_str.isdigit():
-        return BannerApplicationResponse(success=False, message="帖子ID必须是纯数字")
+    # 解析链接
+    parsed = parse_thread_link(request.thread_link)
+    if parsed is None:
+        return BannerApplicationResponse(
+            success=False,
+            message="thread_link 格式无效，请提供 Discord 跳转链接或纯数字ID",
+        )
+    guild_id, target_id = parsed
 
-    thread_id = int(thread_id_str)
     user_id = int(current_user.get("id", 0))
+
+    # 创建 ChannelSyncService（如果有 bot_token）
+    channel_sync = None
+    if bot_token:
+        channel_sync = ChannelSyncService(bot_token)
 
     try:
         async with async_session_factory() as session:
-            service = BannerService(session)
+            service = BannerService(session, channel_sync=channel_sync)
             result = await service.validate_and_create_application(
-                thread_id=thread_id,
+                target_id=target_id,
+                guild_id=guild_id,
                 applicant_id=user_id,
                 cover_image_url=request.cover_image_url,
                 target_scope=request.target_scope,
             )
 
             if not result.success:
-                return BannerApplicationResponse(success=False, message=result.message)
+                return BannerApplicationResponse(
+                    success=False, message=result.message
+                )
 
             application = result.application
 
@@ -108,18 +149,16 @@ async def apply_banner(
     summary="获取当前活跃的Banner列表",
 )
 async def get_active_banners(
-    channel_id: Optional[int] = Query(default=None, description="频道ID，不传则获取全频道Banner"),
+    channel_id: Optional[int] = Query(
+        default=None, description="频道ID，不传则获取全频道Banner"
+    ),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
-    """
-    获取当前活跃的Banner轮播列表
-
-    - channel_id: 可选，指定频道ID获取该频道+全频道的Banner
-    - 返回的 guild_id + thread_id 可用于前端构建 Discord 跳转链接
-    """
+    """获取当前活跃的Banner轮播列表。"""
     if not async_session_factory:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="服务尚未初始化"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="服务尚未初始化",
         )
 
     try:
@@ -127,16 +166,35 @@ async def get_active_banners(
             service = BannerService(session)
             banners = await service.get_active_banners(channel_id=channel_id)
 
-            # 批量查询 guild_id，用于前端构建 Discord 跳转链接
-            guild_by_thread: dict[int, int] = {}
-            if banners:
-                banner_tids = [b.thread_id for b in banners]
+            # 按 target_type 分别查询 guild_id
+            thread_tids = [
+                b.thread_id
+                for b in banners
+                if b.target_type == TargetType.THREAD.value
+            ]
+            channel_ids = [
+                b.thread_id
+                for b in banners
+                if b.target_type == TargetType.CHANNEL.value
+            ]
+
+            guild_map: dict[int, int] = {}
+
+            if thread_tids:
                 guild_rows = await session.execute(
                     select(Thread.thread_id, Thread.guild_id).where(  # type: ignore[arg-type]
-                        Thread.thread_id.in_(banner_tids)  # type: ignore[arg-type]
+                        Thread.thread_id.in_(thread_tids)  # type: ignore[arg-type]
                     )
                 )
-                guild_by_thread = {tid: gid for tid, gid in guild_rows.all()}
+                guild_map.update({tid: gid for tid, gid in guild_rows.all()})
+
+            if channel_ids:
+                channel_rows = await session.execute(
+                    select(Channel.channel_id, Channel.guild_id).where(  # type: ignore[arg-type]
+                        Channel.channel_id.in_(channel_ids)  # type: ignore[arg-type]
+                    )
+                )
+                guild_map.update({cid: gid for cid, gid in channel_rows.all()})
 
             return [
                 BannerItem(
@@ -144,7 +202,8 @@ async def get_active_banners(
                     title=banner.title,
                     cover_image_url=banner.cover_image_url,
                     channel_id=banner.channel_id if banner.channel_id else 0,
-                    guild_id=guild_by_thread.get(banner.thread_id, 0),
+                    guild_id=guild_map.get(banner.thread_id, 0),
+                    target_type=banner.target_type,
                     start_time=banner.start_time,
                     end_time=banner.end_time,
                 )

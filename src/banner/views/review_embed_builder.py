@@ -3,6 +3,8 @@ from typing import TYPE_CHECKING
 
 import discord
 
+from shared.enum import TargetType
+
 if TYPE_CHECKING:
     from models import BannerApplication
 
@@ -36,14 +38,18 @@ class ReviewEmbedBuilder:
         )
         embed.add_field(name="展示范围", value=scope_text, inline=True)
 
+        # 根据 target_type 构建目标链接
+        is_channel = application.target_type == TargetType.CHANNEL.value
+        target_label = "频道" if is_channel else "帖子"
+
         if guild_id:
-            thread_link = (
+            target_link = (
                 f"https://discord.com/channels/{guild_id}/{application.thread_id}"
             )
-            embed.add_field(name="帖子", value=thread_link, inline=False)
+            embed.add_field(name=target_label, value=target_link, inline=False)
         else:
             embed.add_field(
-                name="帖子ID", value=str(application.thread_id), inline=False
+                name=f"{target_label}ID", value=str(application.thread_id), inline=False
             )
 
         embed.set_image(url=application.cover_image_url)
@@ -120,10 +126,19 @@ class ReviewEmbedBuilder:
             logger.error("无法获取存档频道所属服务器信息")
             return
 
-        thread_url = (
-            f"https://discord.com/channels/{guild.id}"
-            f"/{application.channel_id}/{application.thread_id}"
-        )
+        # 根据 target_type 构建链接
+        if application.target_type == TargetType.CHANNEL.value:
+            # 频道链接：guild/channel_id
+            thread_url = (
+                f"https://discord.com/channels/{guild.id}"
+                f"/{application.thread_id}"
+            )
+        else:
+            # 论坛帖子链接：guild/channel_id/thread_id
+            thread_url = (
+                f"https://discord.com/channels/{guild.id}"
+                f"/{application.channel_id}/{application.thread_id}"
+            )
 
         status_display_map = {
             "approved_carousel": "✅ 已同意 - 已加入轮播",

@@ -21,6 +21,7 @@ class BannerApplicationRepository:
         applicant_id: int,
         cover_image_url: str,
         target_scope: str,
+        target_type: int = 1,
     ) -> BannerApplication:
         """插入一条 PENDING 状态的申请记录。"""
         application = BannerApplication(
@@ -29,6 +30,7 @@ class BannerApplicationRepository:
             applicant_id=applicant_id,
             cover_image_url=cover_image_url,
             target_scope=target_scope,
+            target_type=target_type,
             status=ApplicationStatus.PENDING.value,
             applied_at=datetime.now().replace(microsecond=0),
         )

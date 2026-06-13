@@ -72,6 +72,8 @@ def _inject_api_dependencies(
 
     banner_api.async_session_factory = AsyncSessionFactory
     banner_api.banner_config = config.get("banner", {})
+    banner_api.main_guild_id = main_guild_id
+    banner_api.bot_token = config.get("auth", {}).get("bot_token", "")
 
     channel_mappings_config = _build_channel_mappings_config(config)
     search_api.channel_mappings_config = channel_mappings_config

@@ -1,6 +1,7 @@
 from models.author import Author
 from models.banner_application import BannerApplication
 from models.banner_carousel import BannerCarousel
+from models.channel import Channel
 from models.banner_waitlist import BannerWaitlist
 from models.booklist import Booklist
 from models.booklist_item import BooklistItem
@@ -34,4 +35,5 @@ __all__ = [
     "UserCollection",
     "Booklist",
     "BooklistItem",
+    "Channel",
 ]

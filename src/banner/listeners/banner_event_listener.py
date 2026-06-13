@@ -16,6 +16,8 @@ from banner.views.review_embed_builder import ReviewEmbedBuilder
 from banner.views.review_view import ReviewView
 from core.thread_repository import ThreadRepository
 from models.banner_application import BannerApplication
+from models.channel import Channel
+from shared.enum import TargetType
 from shared.redis_client import RedisManager
 
 if TYPE_CHECKING:
@@ -74,8 +76,18 @@ class BannerEventListener(commands.Cog):
                     return
 
                 # 构建审核 Embed 并发送到审核频道
-                repo = ThreadRepository(session)
-                guild_id = await repo.get_thread_guild_id(application.thread_id)
+                # 根据 target_type 获取 guild_id
+                if application.target_type == TargetType.CHANNEL.value:
+                    channel_result = await session.execute(
+                        sm_select(Channel).where(
+                            Channel.channel_id == application.thread_id
+                        )
+                    )
+                    channel = channel_result.scalar_one_or_none()
+                    guild_id = channel.guild_id if channel else None
+                else:
+                    repo = ThreadRepository(session)
+                    guild_id = await repo.get_thread_guild_id(application.thread_id)
                 embed = ReviewEmbedBuilder.build_review_embed(
                     application=application,
                     config=banner_conf,
@@ -120,7 +132,8 @@ class BannerEventListener(commands.Cog):
             async with self.session_factory() as session:
                 service = BannerService(session)
                 validation = await service.validate_application_request(
-                    thread_id=thread_id,
+                    target_id=thread_id,
+                    guild_id=interaction.guild_id or 0,
                     applicant_id=interaction.user.id,
                     cover_image_url=cover_image_url,
                 )
@@ -131,20 +144,23 @@ class BannerEventListener(commands.Cog):
                     )
                     return
 
-                thread = validation.thread
-                if not thread:
+                # 渠道目标使用 target_name，论坛帖子使用 thread.title
+                if validation.target_type == TargetType.CHANNEL.value:
+                    target_title = validation.target_name
+                    target_channel_id = thread_id
+                elif validation.thread:
+                    target_title = validation.thread.title
+                    target_channel_id = validation.thread.channel_id
+                else:
                     await interaction.followup.send(
-                        "❌ 无法获取有效的帖子信息，请检查帖子ID或联系管理员。",
+                        "❌ 无法获取有效的目标信息，请检查ID或联系管理员。",
                         ephemeral=True,
                     )
                     return
 
-                thread_channel_id = thread.channel_id
-                thread_title = thread.title
-
-            # 构建帖子链接
+            # 构建目标链接
             guild_id = interaction.guild_id or 0
-            thread_link = (
+            target_link = (
                 f"https://discord.com/channels/{guild_id}/{thread_id}"
             )
 
@@ -152,11 +168,12 @@ class BannerEventListener(commands.Cog):
             view = ChannelSelectionView(
                 available_channels=self.config.get("available_channels", {}),
                 thread_id=thread_id,
-                channel_id=thread_channel_id,
+                channel_id=target_channel_id,
                 cover_image_url=cover_image_url,
                 applicant_id=interaction.user.id,
-                thread_title=thread_title,
-                thread_link=thread_link,
+                thread_title=target_title,
+                thread_link=target_link,
+                guild_id=guild_id,
             )
             await view.send_to(interaction)
 
@@ -180,6 +197,7 @@ class BannerEventListener(commands.Cog):
         target_scope: str,
         applicant_id: int,
         channel_id: int,
+        guild_id: int = 0,
     ):
         """处理 banner_apply 事件：创建申请 → 发送审核消息 → 通知用户。"""
         try:
@@ -187,7 +205,8 @@ class BannerEventListener(commands.Cog):
                 service = BannerService(session)
 
                 result = await service.validate_and_create_application(
-                    thread_id=thread_id,
+                    target_id=thread_id,
+                    guild_id=guild_id,
                     applicant_id=applicant_id,
                     cover_image_url=cover_image_url,
                     target_scope=target_scope,
@@ -206,9 +225,18 @@ class BannerEventListener(commands.Cog):
                     )
                     return
 
-                # 获取帖子所属服务器 ID
-                repo = ThreadRepository(session)
-                thread_guild_id = await repo.get_thread_guild_id(thread_id)
+                # 获取目标所属服务器 ID
+                if application.target_type == TargetType.CHANNEL.value:
+                    channel_result = await session.execute(
+                        sm_select(Channel).where(
+                            Channel.channel_id == application.thread_id
+                        )
+                    )
+                    channel = channel_result.scalar_one_or_none()
+                    thread_guild_id = channel.guild_id if channel else guild_id
+                else:
+                    repo = ThreadRepository(session)
+                    thread_guild_id = await repo.get_thread_guild_id(thread_id)
 
                 # 构建审核 Embed
                 embed = ReviewEmbedBuilder.build_review_embed(

@@ -2,10 +2,12 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, TYPE_CHECKING
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from banner.channel_sync import ChannelSyncService
 from banner.dto.application_result import ApplicationResult
 from banner.dto.delete_banner_result import DeleteBannerResult
 from core.banner_application_repository import BannerApplicationRepository
@@ -16,8 +18,12 @@ from dto.thread_dto import ThreadDTO
 from models import (
     BannerApplication,
     BannerCarousel,
+    Channel,
 )
-from shared.enum import ApplicationStatus
+from shared.enum import ApplicationStatus, TargetType
+
+if TYPE_CHECKING:
+    from bot_main import MyBot
 
 logger = logging.getLogger(__name__)
 
@@ -32,24 +38,26 @@ class BannerService:
     # Banner展示时长：3天
     BANNER_DURATION_DAYS = 3
 
-    def __init__(self, session: AsyncSession):
+    def __init__(
+        self,
+        session: AsyncSession,
+        channel_sync: Optional[ChannelSyncService] = None,
+    ):
         self.session = session
+        self.channel_sync = channel_sync
         self.app_repo = BannerApplicationRepository(session)
         self.carousel_repo = BannerCarouselRepository(session)
         self.waitlist_repo = BannerWaitlistRepository(session)
 
     async def validate_application_request(
         self,
-        thread_id: int,
+        target_id: int,
+        guild_id: int,
         applicant_id: int,
         cover_image_url: str,
         target_scope: Optional[str] = None,
     ) -> ApplicationResult:
-        """
-        验证Banner申请请求（不创建申请）。
-
-        用于在用户选择展示范围前进行预验证。
-        """
+        """验证Banner申请请求，自动检测目标类型（Thread / Channel / 按需索引）。"""
         # 验证封面图URL格式
         cover_url = cover_image_url.strip()
         if not cover_url.startswith(("http://", "https://")):
@@ -63,48 +71,73 @@ class BannerService:
             scope = target_scope.strip()
             if scope != "global" and not scope.isdigit():
                 return ApplicationResult(
-                    success=False, message="展示范围必须是'global'或有效的频道ID"
+                    success=False,
+                    message="展示范围必须是'global'或有效的频道ID",
                 )
 
-        # 验证帖子存在（通过 ThreadRepository）
-        
-
-        repo = ThreadRepository(self.session)
-        thread = await repo.get_thread_with_tags(thread_id)
-
-        if not thread:
+        # 查 Thread 表 → 找到 → target_type=THREAD，检查作者
+        thread_repo = ThreadRepository(self.session)
+        thread = await thread_repo.get_thread_with_tags(target_id)
+        if thread:
+            if thread.author_id != applicant_id:
+                return ApplicationResult(
+                    success=False,
+                    message="只能为自己的帖子申请Banner",
+                )
             return ApplicationResult(
-                success=False,
-                message="该帖子未被索引，无法申请Banner。请确保帖子ID正确。",
+                success=True,
+                message="验证通过",
+                thread=ThreadDTO.from_orm(thread),
+                target_type=TargetType.THREAD.value,
+                guild_id=thread.guild_id,
+                target_name=thread.title,
             )
 
-        # 验证申请人是帖子作者
-        if thread.author_id != applicant_id:
+        # 查 Channel 表 → 找到 → target_type=CHANNEL，跳过作者检查
+        channel_result = await self.session.execute(
+            select(Channel).where(Channel.channel_id == target_id)
+        )
+        channel = channel_result.scalar_one_or_none()
+        if channel:
             return ApplicationResult(
-                success=False, message="只能为自己的帖子申请Banner"
+                success=True,
+                message="验证通过",
+                target_type=TargetType.CHANNEL.value,
+                guild_id=channel.guild_id,
+                target_name=channel.name,
             )
+
+        # 都没找到 → ChannelSyncService 按需索引
+        if self.channel_sync:
+            channel = await self.channel_sync.fetch_and_index(
+                self.session, target_id
+            )
+            if channel:
+                return ApplicationResult(
+                    success=True,
+                    message="验证通过",
+                    target_type=TargetType.CHANNEL.value,
+                    guild_id=channel.guild_id,
+                    target_name=channel.name,
+                )
 
         return ApplicationResult(
-            success=True,
-            message="验证通过",
-            thread=ThreadDTO.from_orm(thread),
+            success=False,
+            message="该帖子/频道未被索引，无法申请Banner。请确保ID正确。",
         )
 
     async def validate_and_create_application(
         self,
-        thread_id: int,
+        target_id: int,
+        guild_id: int,
         applicant_id: int,
         cover_image_url: str,
         target_scope: str,
     ) -> ApplicationResult:
-        """
-        验证并创建Banner申请。
-
-        完整的申请流程，包括验证帖子存在、申请人是作者、
-        封面图URL格式、展示范围，然后创建申请记录。
-        """
+        """验证并创建Banner申请。"""
         validation = await self.validate_application_request(
-            thread_id=thread_id,
+            target_id=target_id,
+            guild_id=guild_id,
             applicant_id=applicant_id,
             cover_image_url=cover_image_url,
             target_scope=target_scope,
@@ -113,58 +146,57 @@ class BannerService:
         if not validation.success:
             return validation
 
-        thread = validation.thread
-        if thread is None:
-            return ApplicationResult(
-                success=False, message="验证通过但帖子数据丢失，请重试"
-            )
+        # 确定 channel_id：Thread 用帖子所属频道，Channel 用频道自身
+        if validation.target_type == TargetType.CHANNEL.value:
+            channel_id = target_id
+        elif validation.thread:
+            channel_id = validation.thread.channel_id
+        else:
+            channel_id = guild_id
 
         cover_url = cover_image_url.strip()
         scope = target_scope.strip()
 
         application = await self.app_repo.create(
-            thread_id=thread_id,
-            channel_id=thread.channel_id,
+            thread_id=target_id,
+            channel_id=channel_id,
             applicant_id=applicant_id,
             cover_image_url=cover_url,
             target_scope=scope,
+            target_type=validation.target_type,
         )
         await self.session.commit()
         await self.session.refresh(application)
 
         logger.info(
-            f"用户 {applicant_id} 提交了Banner申请，帖子ID: {thread_id}，范围: {scope}"
+            f"用户 {applicant_id} 提交了Banner申请，目标ID: {target_id}，"
+            f"类型: {validation.target_type}，范围: {scope}"
         )
 
-        return ApplicationResult(
-            success=True,
-            message="Banner申请已提交，等待审核",
-            application=application,
-            thread=thread,
-        )
+        validation.application = application
+        return validation
 
     async def approve_application(
         self, application_id: int, reviewer_id: int
     ) -> Tuple[BannerApplication, bool]:
-        """
-        批准申请并将banner加入轮播或等待列表。
-
-        Returns:
-            Tuple[BannerApplication, bool]: (申请记录, 是否直接进入轮播)
-        """
-        from core.thread_repository import ThreadRepository
-
-        # 获取申请
+        """批准申请并将banner加入轮播或等待列表。"""
         application = await self.app_repo.get_by_id(application_id)
         if not application:
             raise ValueError("申请不存在")
 
-        # 获取帖子标题
-        repo = ThreadRepository(self.session)
-        thread_obj = await repo.get_thread_with_tags(application.thread_id)
-        if not thread_obj:
-            raise ValueError("帖子不存在")
-        thread_title = thread_obj.title
+        # 根据 target_type 获取标题
+        if application.target_type == TargetType.CHANNEL.value:
+            channel_result = await self.session.execute(
+                select(Channel).where(Channel.channel_id == application.thread_id)
+            )
+            channel = channel_result.scalar_one_or_none()
+            target_title = channel.name if channel else "未知频道"
+        else:
+            thread_repo = ThreadRepository(self.session)
+            thread_obj = await thread_repo.get_thread_with_tags(application.thread_id)
+            if not thread_obj:
+                raise ValueError("帖子不存在")
+            target_title = thread_obj.title
 
         # 更新申请状态
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -177,7 +209,9 @@ class BannerService:
         channel_id = None if is_global else int(application.target_scope)
 
         # 检查当前轮播列表是否已满
-        max_banners = self.GLOBAL_MAX_BANNERS if is_global else self.CHANNEL_MAX_BANNERS
+        max_banners = (
+            self.GLOBAL_MAX_BANNERS if is_global else self.CHANNEL_MAX_BANNERS
+        )
         current_count = await self.carousel_repo.get_count(channel_id)
 
         if current_count < max_banners:
@@ -185,8 +219,9 @@ class BannerService:
                 thread_id=application.thread_id,
                 channel_id=channel_id,
                 cover_image_url=application.cover_image_url,
-                title=thread_title,
+                title=target_title,
                 duration_days=self.BANNER_DURATION_DAYS,
+                target_type=application.target_type,
             )
             entered_carousel = True
         else:
@@ -194,7 +229,8 @@ class BannerService:
                 thread_id=application.thread_id,
                 channel_id=channel_id,
                 cover_image_url=application.cover_image_url,
-                title=thread_title,
+                title=target_title,
+                target_type=application.target_type,
             )
             entered_carousel = False
 
@@ -239,6 +275,7 @@ class BannerService:
                     cover_image_url=waitlist_item.cover_image_url,
                     title=waitlist_item.title,
                     duration_days=self.BANNER_DURATION_DAYS,
+                    target_type=waitlist_item.target_type,
                 )
 
         await self.session.commit()
@@ -247,36 +284,34 @@ class BannerService:
     async def delete_banner_by_thread(
         self, thread_id: int
     ) -> DeleteBannerResult:
-        """
-        根据 thread_id 从轮播或等待列表中删除 Banner。
-
-        如果 Banner 在轮播中，删除后会尝试从等待队列晋升替补。
-        """
+        """根据 thread_id 从轮播或等待列表中删除 Banner。"""
         carousel_items = await self.carousel_repo.get_by_thread(thread_id)
         waitlist_items = await self.waitlist_repo.get_by_thread(thread_id)
 
-        # 无匹配
         if not carousel_items and not waitlist_items:
             return DeleteBannerResult(
                 success=False,
                 message="未找到该帖子ID对应的Banner记录，请在轮播列表或等待列表中确认。",
             )
 
-        # 多条匹配（数据一致性的安全网）
         if len(carousel_items) + len(waitlist_items) > 1:
             parts = []
             for item in carousel_items:
-                scope = "全频道" if item.channel_id is None else f"频道 {item.channel_id}"
+                scope = (
+                    "全频道" if item.channel_id is None else f"频道 {item.channel_id}"
+                )
                 parts.append(f"  • 轮播列表: {item.title[:40]} (范围: {scope})")
             for item in waitlist_items:
-                scope = "全频道" if item.channel_id is None else f"频道 {item.channel_id}"
+                scope = (
+                    "全频道" if item.channel_id is None else f"频道 {item.channel_id}"
+                )
                 parts.append(f"  • 等待列表: {item.title[:40]} (范围: {scope})")
             return DeleteBannerResult(
                 success=False,
-                message=f"该帖子ID对应多条Banner记录，删除时存在歧义：\n" + "\n".join(parts),
+                message=f"该帖子ID对应多条Banner记录，删除时存在歧义：\n"
+                + "\n".join(parts),
             )
 
-        # 在轮播中找到
         if carousel_items:
             banner = carousel_items[0]
             channel_id = banner.channel_id
@@ -296,6 +331,7 @@ class BannerService:
                         cover_image_url=waitlist_item.cover_image_url,
                         title=waitlist_item.title,
                         duration_days=self.BANNER_DURATION_DAYS,
+                        target_type=waitlist_item.target_type,
                     )
 
             await self.session.commit()
@@ -310,7 +346,6 @@ class BannerService:
                 promoted_from_waitlist=has_waiting,
             )
 
-        # 在等待列表中找到
         if waitlist_items:
             banner = waitlist_items[0]
             channel_id = banner.channel_id
@@ -330,7 +365,6 @@ class BannerService:
                 promoted_from_waitlist=False,
             )
 
-        # 不应到达此处
         return DeleteBannerResult(
             success=False,
             message="删除Banner时发生未预期的错误",
@@ -357,3 +391,88 @@ class BannerService:
     ) -> Optional[BannerApplication]:
         """通过审核消息ID获取申请记录。"""
         return await self.app_repo.get_by_review_message(review_message_id)
+
+
+async def send_review_message(
+    bot: "MyBot",
+    session_factory,
+    application: BannerApplication,
+    config: dict,
+    guild_id: Optional[int] = None,
+) -> bool:
+    """发送审核消息到指定的审核子区。"""
+    import discord
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+
+    from banner.views.review_view import ReviewView
+
+    review_thread_id = config.get("review_thread_id")
+    if not review_thread_id:
+        logger.error("审核Thread ID未配置")
+        return False
+
+    review_thread = bot.get_channel(review_thread_id)
+    if review_thread is None:
+        review_thread = await bot.fetch_channel(review_thread_id)
+    if not isinstance(review_thread, discord.Thread):
+        logger.error(f"审核Thread配置错误: {review_thread_id}")
+        return False
+
+    if not guild_id:
+        guild_id = review_thread.guild.id
+
+    # 获取展示范围名称
+    target_scope = application.target_scope
+    if target_scope == "global":
+        scope_text = "全频道"
+    else:
+        channels_dict = config.get("available_channels", {})
+        scope_text = channels_dict.get(target_scope, f"频道 {target_scope}")
+
+    # 根据 target_type 构建目标链接
+    if application.target_type == TargetType.CHANNEL.value:
+        # 频道链接：https://discord.com/channels/{guild_id}/{channel_id}
+        target_link = f"https://discord.com/channels/{guild_id}/{application.thread_id}"
+        target_label = "频道"
+    else:
+        # 帖子链接：https://discord.com/channels/{guild_id}/{thread_id}
+        target_link = f"https://discord.com/channels/{guild_id}/{application.thread_id}"
+        target_label = "帖子"
+
+    # 构建审核embed
+    embed = discord.Embed(
+        title="🎨 新的Banner申请",
+        color=discord.Color.orange(),
+    )
+    embed.add_field(
+        name="申请人", value=f"<@{application.applicant_id}>", inline=True
+    )
+    embed.add_field(name="展示范围", value=scope_text, inline=True)
+    embed.add_field(name="类型", value=target_label, inline=True)
+    embed.add_field(name=target_label, value=target_link, inline=False)
+    embed.set_image(url=application.cover_image_url)
+    embed.set_footer(text=f"申请ID: {application.id}")
+
+    # 创建审核视图
+    review_view = ReviewView(
+        bot=bot,
+        session_factory=session_factory,
+        config=config,
+    )
+
+    try:
+        review_message = await review_thread.send(embed=embed, view=review_view)
+
+        # 更新申请记录的消息ID
+        async with session_factory() as session:
+            service = BannerService(session)
+            await service.update_review_message_info(
+                application.id, review_message.id, review_thread_id
+            )
+
+        logger.info(f"已发送审核消息，申请ID: {application.id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"发送审核消息失败: {e}", exc_info=True)
+        return False

@@ -19,12 +19,14 @@ class ChannelSelectionView(discord.ui.View):
         applicant_id: int,
         thread_title: str,
         thread_link: str,
+        guild_id: int = 0,
     ):
         super().__init__(timeout=300)
         self._thread_id = thread_id
         self._channel_id = channel_id
         self._cover_image_url = cover_image_url
         self._applicant_id = applicant_id
+        self._guild_id = guild_id
 
         # 构建下拉选项
         options = [
@@ -88,6 +90,7 @@ class ChannelSelectionView(discord.ui.View):
             target_scope,
             self._applicant_id,
             self._channel_id,
+            self._guild_id,
         )
 
     async def on_timeout(self):

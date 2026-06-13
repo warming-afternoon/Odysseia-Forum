@@ -1,5 +1,6 @@
 from shared.enum.collection_type import CollectionType
 from shared.enum.application_status import ApplicationStatus
+from shared.enum.target_type import TargetType
 from shared.enum.default_preferences import DefaultPreferences
 from shared.enum.abyss_defaults import AbyssDefaults
 from shared.enum.constant_enum import ConstantEnum
@@ -22,4 +23,5 @@ __all__ = [
     "SearchConfigDefaultsInt",
     "SearchConfigType",
     "SearchTimeout",
+    "TargetType",
 ]

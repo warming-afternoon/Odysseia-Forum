@@ -34,7 +34,7 @@ from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
 from search.suggestion_service import SuggestionService
-from shared.enum import AbyssDefaults, CacheKeys, CollectionType, ConstantEnum, SearchTimeout
+from shared.enum import AbyssDefaults, CacheKeys, CollectionType, ConstantEnum, SearchTimeout, TargetType
 from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.keyword_parser import KeywordParser
 
@@ -767,15 +767,35 @@ async def _get_banner_and_unread_async(
             # 获取Banner轮播列表
             banner_service = BannerService(session)
             banners = await banner_service.get_active_banners(channel_id=target_channel_id)
-            guild_by_thread: dict[int, int] = {}
+            guild_map: dict[int, int] = {}
             if banners:
-                banner_tids = [b.thread_id for b in banners]
-                guild_rows = await session.execute(
-                    select(Thread.thread_id, Thread.guild_id).where(
-                        Thread.thread_id.in_(banner_tids)  # type: ignore[arg-type]
+                thread_tids = [
+                    b.thread_id
+                    for b in banners
+                    if b.target_type == TargetType.THREAD.value
+                ]
+                channel_ids = [
+                    b.thread_id
+                    for b in banners
+                    if b.target_type == TargetType.CHANNEL.value
+                ]
+
+                if thread_tids:
+                    guild_rows = await session.execute(
+                        select(Thread.thread_id, Thread.guild_id).where(  # type: ignore[arg-type]
+                            Thread.thread_id.in_(thread_tids)  # type: ignore[arg-type]
+                        )
                     )
-                )
-                guild_by_thread = {tid: gid for tid, gid in guild_rows.all()}
+                    guild_map.update({tid: gid for tid, gid in guild_rows.all()})
+
+                if channel_ids:
+                    from models.channel import Channel as ChannelModel
+                    channel_rows = await session.execute(
+                        select(ChannelModel.channel_id, ChannelModel.guild_id).where(  # type: ignore[arg-type]
+                            ChannelModel.channel_id.in_(channel_ids)  # type: ignore[arg-type]
+                        )
+                    )
+                    guild_map.update({cid: gid for cid, gid in channel_rows.all()})
 
             banner_carousel = [
                 BannerItem(
@@ -783,7 +803,8 @@ async def _get_banner_and_unread_async(
                     title=banner.title,
                     cover_image_url=banner.cover_image_url,
                     channel_id=banner.channel_id if banner.channel_id else 0,
-                    guild_id=guild_by_thread.get(banner.thread_id, 0),
+                    guild_id=guild_map.get(banner.thread_id, 0),
+                    target_type=banner.target_type,
                     start_time=banner.start_time,
                     end_time=banner.end_time,
                 )

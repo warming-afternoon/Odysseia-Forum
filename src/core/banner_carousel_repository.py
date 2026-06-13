@@ -88,6 +88,7 @@ class BannerCarouselRepository:
         cover_image_url: str,
         title: str,
         duration_days: int,
+        target_type: int = 1,
     ) -> None:
         """插入一条轮播记录（含 position 计算）。"""
         start_time = datetime.now().replace(microsecond=0)
@@ -110,6 +111,7 @@ class BannerCarouselRepository:
             channel_id=channel_id,
             cover_image_url=cover_image_url,
             title=title,
+            target_type=target_type,
             start_time=start_time,
             end_time=end_time,
             position=new_position,
