@@ -622,14 +622,12 @@ class ThreadRepository:
         redis_client=None,
     ) -> "FTSResultDTO":
         """
-        处理 FTS 关键词搜索，返回包含子查询对象的 DTO。
+        处理 FTS 关键词搜索，返回可直接嵌入 WHERE 的 filter 条件。
 
         使用 PostgreSQL 全文搜索（search_vector tsvector + @@ tsquery），
         Python 端通过 rjieba 分词后构建 tsquery 表达式，
-        但不再执行查询将 ID 拉到 Python——改为返回 select() 子查询对象，
-        由调用方嵌入 Thread.id.in_(stmt) / Thread.id.not_in(stmt)，
-        让 PostgreSQL 内部完成过滤。
-        注意：子查询中使用的是内部主键 `thread.id` 而不是 Discord 的 `thread_id`
+        返回 search_vector @@ tsquery 条件对象，
+        由调用方直接加入 filters 列表，让 PG 优化器能使用 GIN 索引。
 
         通过 redis_client 缓存分词后的 tsquery 字符串（TTL 1h），
         避免重复 jieba 分词开销。
@@ -654,33 +652,29 @@ class ThreadRepository:
                 cached = await redis_client.get(cache_key)
                 if cached:
                     data = json.loads(cached)
-                    include_stmts: list = []
+                    include_conditions: list = []
                     for tsq in data.get("ig", []):
-                        stmt = select(Thread.id).where(
-                            Thread.search_vector.op("@@")(
-                                literal_column(f"$${tsq}$$::tsquery")
-                            )
+                        cond = Thread.search_vector.op("@@")(
+                            literal_column(f"$${tsq}$$::tsquery")
                         )
-                        include_stmts.append(stmt)
-                    exclude_stmt = None
+                        include_conditions.append(cond)
+                    exclude_condition = None
                     if data.get("eg"):
-                        exclude_stmt = select(Thread.id).where(
-                            Thread.search_vector.op("@@")(
-                                literal_column(f"$${data['eg']}$$::tsquery")
-                            )
+                        exclude_condition = Thread.search_vector.op("@@")(
+                            literal_column(f"$${data['eg']}$$::tsquery")
                         )
                     return FTSResultDTO(
-                        include_stmts=include_stmts,
-                        exclude_stmt=exclude_stmt,
-                        has_include=bool(include_stmts),
-                        has_exclude=exclude_stmt is not None,
+                        include_conditions=include_conditions,
+                        exclude_condition=exclude_condition,
+                        has_include=bool(include_conditions),
+                        has_exclude=exclude_condition is not None,
                     )
             except Exception:
                 pass  # 缓存失败不影响搜索，继续走正常流程
 
         loop = asyncio.get_running_loop()
-        exclude_stmt = None
-        include_stmts: list = []
+        exclude_condition = None
+        include_conditions: list = []
 
         # 收集构建的 tsquery 字符串，用于回填缓存
         cached_include_tsqueries: list[str] = []
@@ -729,10 +723,8 @@ class ThreadRepository:
             if all_exclude_tsqueries:
                 final_exclude_tsquery = " | ".join(all_exclude_tsqueries)
                 cached_exclude_tsquery = final_exclude_tsquery
-                exclude_stmt = select(Thread.id).where(
-                    Thread.search_vector.op("@@")(
-                        literal_column(f"$${final_exclude_tsquery}$$::tsquery")
-                    )
+                exclude_condition = Thread.search_vector.op("@@")(
+                    literal_column(f"$${final_exclude_tsquery}$$::tsquery")
                 )
 
         # ============ 正选关键词：每个 AND 组构建一个子查询 ============
@@ -795,12 +787,10 @@ class ThreadRepository:
                 if or_tsquery_parts:
                     group_tsquery = " | ".join(or_tsquery_parts)
                     cached_include_tsqueries.append(group_tsquery)
-                    stmt = select(Thread.id).where(
-                        Thread.search_vector.op("@@")(
-                            literal_column(f"$${group_tsquery}$$::tsquery")
-                        )
+                    cond = Thread.search_vector.op("@@")(
+                        literal_column(f"$${group_tsquery}$$::tsquery")
                     )
-                    include_stmts.append(stmt)
+                    include_conditions.append(cond)
                     has_any_include = True
 
         # ── 回填 Redis 缓存 ──
@@ -816,8 +806,8 @@ class ThreadRepository:
                 pass
 
         return FTSResultDTO(
-            include_stmts=include_stmts,
-            exclude_stmt=exclude_stmt,
+            include_conditions=include_conditions,
+            exclude_condition=exclude_condition,
             has_include=has_any_include,
-            has_exclude=exclude_stmt is not None,
+            has_exclude=exclude_condition is not None,
         )

@@ -21,7 +21,7 @@ from api.v1.schemas.search import (
     ThreadDetail,
     ThreadSuggestion,
 )
-from api.v1.schemas.search.thread_detail import TournamentInfo
+from api.v1.schemas.search.tournament_info import TournamentInfo
 from api.v1.utils import ThreadDetailBuilder
 from banner.banner_service import BannerService
 from core.cache_service import CacheService

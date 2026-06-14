@@ -323,13 +323,11 @@ class SearchService:
             )
 
             if fts_result.has_include:
-                # 每个 AND 组是一个独立的 IN (SELECT ...) 子查询
-                for stmt in fts_result.include_stmts:
-                    filters.append(Thread.id.in_(stmt))  # type: ignore
-                if fts_result.has_exclude:
-                    filters.append(Thread.id.not_in(fts_result.exclude_stmt))  # type: ignore
-            elif fts_result.has_exclude:
-                filters.append(Thread.id.not_in(fts_result.exclude_stmt))  # type: ignore
+                # 每个 AND 组是一个独立的 search_vector @@ tsquery 条件
+                for cond in fts_result.include_conditions:
+                    filters.append(cond)
+            if fts_result.has_exclude:
+                filters.append(~fts_result.exclude_condition)
 
             if debug_timing:
                 t_fts = time.perf_counter()

@@ -1,7 +1,7 @@
 from typing import Any, Dict, List, Optional, Set
 
 from api.v1.schemas.search import AuthorDetail, ThreadDetail
-from api.v1.schemas.search.thread_detail import TournamentInfo
+from api.v1.schemas.search.tournament_info import TournamentInfo
 from shared.channel_mapping_utils import ChannelMappingUtils
 
 

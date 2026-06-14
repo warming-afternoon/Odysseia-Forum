@@ -71,13 +71,10 @@ class DiscoveryRepository:
         )
 
         if fts_result.has_include:
-            for include_stmt in fts_result.include_stmts:
-                stmt = stmt.where(Thread.id.in_(include_stmt))  # type: ignore
-            if fts_result.has_exclude:
-                stmt = stmt.where(Thread.id.notin_(fts_result.exclude_stmt))  # type: ignore
-        elif fts_result.has_exclude:
-            # 只有排除词
-            stmt = stmt.where(Thread.id.notin_(fts_result.exclude_stmt))  # type: ignore
+            for cond in fts_result.include_conditions:
+                stmt = stmt.where(cond)
+        if fts_result.has_exclude:
+            stmt = stmt.where(~fts_result.exclude_condition)
 
         return stmt
 

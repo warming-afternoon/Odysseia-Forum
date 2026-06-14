@@ -7,7 +7,6 @@ from collections import Counter
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse, ORJSONResponse
 from sqlalchemy import text
 
@@ -101,9 +100,6 @@ app.add_middleware(
     expose_headers=["*"],  # 暴露所有headers
     max_age=10800,  # 预检请求缓存3小时
 )
-
-# 启用 GZip 压缩
-app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 # 包含路由
 app.include_router(auth.router, prefix="/v1")
