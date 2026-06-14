@@ -6,6 +6,7 @@ from collections import defaultdict
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select as sm_select
 
+from core.booklist_item_repository import BooklistItemRepository
 from core.null_bot import NullBot
 from core.thread_repository import ThreadRepository
 from dto.bot_config_dto import BotConfigDTO
@@ -15,7 +16,7 @@ from dto.meta.guild_meta import GuildMeta
 from dto.meta.tag_meta import TagMeta
 from dto.search import SearchConfigDTO
 from models import BotConfig
-from shared.enum import SearchConfigDefaults, SearchConfigType
+from shared.enum import CacheKeys, SearchConfigDefaults, SearchConfigType
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +172,59 @@ class ApiCacheService:
     def get_indexed_channel_ids_list(self, guild_id: int | None = None) -> list[int]:
         """从缓存中获取已索引的频道ID列表。可选按 guild_id 过滤。"""
         return list(self.get_indexed_channel_ids_set(guild_id))
+
+    async def get_tournament_info_batch(
+        self, session, thread_ids: list[int]
+    ) -> dict[int, list[dict]]:
+        """
+        批量获取 thread_id → [TournamentInfo] 映射。
+
+        优先 Redis MGET，未命中则 DB 补查并回填。
+        Redis Key: ``tournament:thread:{thread_id}``, TTL 1h。
+        空结果也缓存（"[]"），避免反复穿透。
+        """
+        if not thread_ids:
+            return {}
+
+        keys = [
+            CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
+            for tid in thread_ids
+        ]
+        result: dict[int, list[dict]] = {}
+        miss_ids: list[int] = []
+
+        # ── MGET 批量读 ──
+        try:
+            cached = await self._redis.mget(keys)
+            for tid, val in zip(thread_ids, cached):
+                if val:
+                    result[tid] = json.loads(val)
+                else:
+                    miss_ids.append(tid)
+        except Exception:
+            logger.warning("Redis MGET 赛事缓存失败，降级全走 DB", exc_info=True)
+            miss_ids = thread_ids
+
+        # ── DB 补查未命中 ──
+        if miss_ids:
+            repo = BooklistItemRepository(session)
+            db_map = await repo.get_tournament_info_by_thread_ids(miss_ids)
+
+            # ── 回填 Redis ──
+            for tid in miss_ids:
+                infos = db_map.get(tid, [])
+                key = CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
+                try:
+                    if infos:
+                        await self._redis.setex(key, 3600, json.dumps(infos))
+                    else:
+                        await self._redis.setex(key, 3600, "[]")
+                except Exception:
+                    pass
+
+            result.update(db_map)
+
+        return result
 
     # ── 内部方法 ─────────────────────────────────────────────
 

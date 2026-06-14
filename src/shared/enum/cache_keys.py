@@ -10,6 +10,9 @@ class CacheKeys(StrEnum):
     FTS_TSQUERY_RESULT = "fts:tsquery:result:{prefix}:{hash}"
     """FTS tsquery 分词结果缓存（避免重复 jieba 分词）"""
 
+    TOURNAMENT_THREAD = "tournament:thread:{thread_id}"
+    """帖子赛事信息缓存"""
+
     def format(self, **kwargs) -> str:
         """填充 Key 中的占位符。"""
         return self.value.format(**kwargs)

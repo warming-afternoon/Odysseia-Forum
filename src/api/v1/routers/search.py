@@ -21,6 +21,7 @@ from api.v1.schemas.search import (
     ThreadDetail,
     ThreadSuggestion,
 )
+from api.v1.schemas.search.thread_detail import TournamentInfo
 from api.v1.utils import ThreadDetailBuilder
 from banner.banner_service import BannerService
 from core.cache_service import CacheService
@@ -106,7 +107,7 @@ async def execute_search(
 
     # ── 调试计时 ──
     t_start = t_after_prefs = t_after_parse = t_after_channel = 0.0
-    t_before_db = t_after_db = t_after_build = t_end = 0.0
+    t_before_db = t_after_db = t_after_build = 0.0
     if request.debug_timing:
         t_start = time.perf_counter()
 
@@ -193,15 +194,6 @@ async def execute_search(
 
         exclude_thread_ids = request.exclude_thread_ids or []
 
-        # 并发启动 Banner/未读数查询（使用独立 session，与主搜索并行）
-        banner_unread_task = asyncio.create_task(
-            _get_banner_and_unread_async(
-                async_session_factory,
-                request.channel_ids,
-                user_id,
-            )
-        )
-
         async with async_session_factory() as session:
             # 执行搜索查询并更新展示计数（带超时保护）
             threads, total_threads = await asyncio.wait_for(
@@ -220,14 +212,14 @@ async def execute_search(
             if request.debug_timing:
                 t_after_db = time.perf_counter()
 
-            # 获取当前用户ID用于后续收藏状态和未读数查询
+            # 获取当前用户ID用于后续收藏状态查询
             user_id = (
                 int(current_user["id"])
                 if current_user and "id" in current_user
                 else None
             )
 
-            # 检查用户的收藏状态
+            # 1. 检查用户的收藏状态（直接 DB）
             collected_thread_ids = set()
             if user_id and threads:
                 thread_ids = [t.thread_id for t in threads]
@@ -237,6 +229,18 @@ async def execute_search(
                         user_id, CollectionType.THREAD, thread_ids
                     )
                 )
+
+            # 2. 查询赛事信息（Redis 缓存 + DB 补查）
+            tournament_thread_map: dict[int, list[TournamentInfo]] = {}
+            if threads:
+                result_thread_ids = [t.thread_id for t in threads]
+                raw_map = await cache_service_instance.get_tournament_info_batch(
+                    session, result_thread_ids
+                )
+                tournament_thread_map = {
+                    tid: [TournamentInfo(**info) for info in infos]
+                    for tid, infos in raw_map.items()
+                }
 
             # 使用 ThreadDetailBuilder 转换搜索结果为响应格式
             builder = ThreadDetailBuilder(channel_mappings_config)
@@ -255,7 +259,9 @@ async def execute_search(
 
             # 全站搜索时 channel_to_virtual 为 None，Builder 自动使用全局虚拟标签映射
             results = builder.build_list(
-                threads, collected_thread_ids, channel_to_virtual=channel_to_virtual
+                threads, collected_thread_ids,
+                channel_to_virtual=channel_to_virtual,
+                tournament_thread_map=tournament_thread_map,
             )
 
             # 构建可用的标签列表：虚拟标签置顶 + 实际被搜索频道的真实标签
@@ -267,23 +273,16 @@ async def execute_search(
 
             if request.debug_timing:
                 t_after_build = time.perf_counter()
-
-        # 等待并发 Banner/未读数查询结果
-        banner_carousel, unread_count = await banner_unread_task
-
-        if request.debug_timing:
-            t_end = time.perf_counter()
-            logger.info(
-                f"[计时] 搜索总耗时={(t_end - t_start) * 1000:.0f}ms "
-                f"| 偏好={(t_after_prefs - t_start) * 1000:.0f} "
-                f"解析={(t_after_parse - t_after_prefs) * 1000:.0f} "
-                f"频道={(t_after_channel - t_after_parse) * 1000:.0f} "
-                f"UCB1配置={(t_before_db - t_after_channel) * 1000:.0f} "
-                f"DB={(t_after_db - t_before_db) * 1000:.0f} "
-                f"构建={(t_after_build - t_after_db) * 1000:.0f} "
-                f"横幅={(t_end - t_after_build) * 1000:.0f} "
-                f"| offset={request.offset} limit={request.limit} total={total_threads}"
-            )
+                logger.info(
+                    f"[计时] 搜索总耗时={(t_after_build - t_start) * 1000:.0f}ms "
+                    f"| 偏好={(t_after_prefs - t_start) * 1000:.0f} "
+                    f"解析={(t_after_parse - t_after_prefs) * 1000:.0f} "
+                    f"频道={(t_after_channel - t_after_parse) * 1000:.0f} "
+                    f"UCB1配置={(t_before_db - t_after_channel) * 1000:.0f} "
+                    f"DB={(t_after_db - t_before_db) * 1000:.0f} "
+                    f"构建+收藏+赛事={(t_after_build - t_after_db) * 1000:.0f} "
+                    f"| offset={request.offset} limit={request.limit} total={total_threads}"
+                )
 
         return SearchResponse(
             total=total_threads,
@@ -292,18 +291,14 @@ async def execute_search(
             results=results,
             available_tags=available_tags,
             virtual_tags=virtual_tags,
-            banner_carousel=banner_carousel,
-            unread_count=unread_count,
         )
     except asyncio.TimeoutError:
-        banner_unread_task.cancel()
         logger.warning(f"搜索超时（{SearchTimeout.SEARCH.value}s），请求参数: {request.model_dump()}")
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail=f"搜索请求超时，请尝试缩小搜索范围或稍后重试",
         )
     except Exception as e:
-        banner_unread_task.cancel()
         logger.error(f"搜索时发生内部错误: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

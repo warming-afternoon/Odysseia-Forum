@@ -8,7 +8,7 @@ from sqlmodel import and_, asc, desc, func, select
 from api.v1.schemas.booklist import BooklistItemUpdateRequest
 from api.v1.schemas.booklist.booklist_item_detail import BooklistItemDetail
 from api.v1.schemas.search.author_detail import AuthorDetail
-from models import Author, BooklistItem, Thread
+from models import Author, Booklist, BooklistItem, Thread
 
 logger = logging.getLogger(__name__)
 
@@ -234,3 +234,30 @@ class BooklistItemRepository:
             items.append(item_detail)
 
         return items, total
+
+    async def get_tournament_info_by_thread_ids(
+        self, thread_ids: list[int]
+    ) -> dict[int, list[dict]]:
+        """
+        批量查询 thread_id → 所属赛事书单信息映射。
+
+        只查询 is_tournament=True 的书单，返回 {thread_id: [{booklist_id, booklist_name}, ...]}。
+        """
+        if not thread_ids:
+            return {}
+
+        stmt = (
+            select(BooklistItem.thread_id, Booklist.id, Booklist.title)
+            .join(Booklist, Booklist.id == BooklistItem.booklist_id)  # type: ignore[arg-type]
+            .where(
+                Booklist.is_tournament.is_(True),  # type: ignore[arg-type]
+                BooklistItem.thread_id.in_(thread_ids),  # type: ignore[arg-type]
+            )
+        )
+        rows = (await self.session.execute(stmt)).all()
+        result: dict[int, list[dict]] = {}
+        for tid, bl_id, bl_title in rows:
+            result.setdefault(tid, []).append(
+                {"booklist_id": bl_id, "booklist_name": bl_title}
+            )
+        return result

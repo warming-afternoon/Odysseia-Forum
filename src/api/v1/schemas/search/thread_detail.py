@@ -6,6 +6,21 @@ from pydantic import BaseModel, Field, field_serializer
 from api.v1.schemas.search.author_detail import AuthorDetail
 
 
+class TournamentInfo(BaseModel):
+    """赛事书单简要信息"""
+
+    booklist_id: int = Field(description="赛事书单ID")
+    """赛事书单ID"""
+
+    booklist_name: str = Field(description="赛事书单名")
+    """赛事书单名"""
+
+    @field_serializer("booklist_id")
+    def serialize_id(self, value: int) -> str:
+        """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
+        return str(value)
+
+
 class ThreadDetail(BaseModel):
     """API 响应中单个帖子的详细信息模型"""
 
@@ -64,6 +79,16 @@ class ThreadDetail(BaseModel):
 
     collected_flag: bool = Field(default=False, description="当前用户是否收藏了该帖子")
     """当前用户是否收藏了该帖子"""
+
+    is_tournament: bool = Field(
+        default=False, description="该帖子是否为参赛帖子"
+    )
+    """该帖子是否为参赛帖子"""
+
+    tournament_info_list: List["TournamentInfo"] = Field(
+        default_factory=list, description="所属赛事书单信息列表"
+    )
+    """所属赛事书单信息列表"""
 
     @field_serializer("thread_id", "guild_id", "channel_id")
     def serialize_id(self, value: int) -> str:

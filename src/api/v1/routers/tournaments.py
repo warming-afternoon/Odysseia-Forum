@@ -23,10 +23,14 @@ from api.v1.schemas.tournament import (
 from core.author_repository import AuthorRepository
 from core.booklist_item_repository import BooklistItemRepository
 from core.booklist_repository import BooklistRepository
+from core.cache_service import CacheService
 from shared.database import AsyncSessionFactory
 from tournament.tournament_service import TournamentService
 
 logger = logging.getLogger(__name__)
+
+# 全局变量，将在应用启动时由 bot_main.py 注入
+cache_service_instance: CacheService | None = None
 
 
 async def _fill_authors_for_booklists(
@@ -77,7 +81,7 @@ async def create_tournament(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session)
+            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
             booklist, created = await service.create_or_get_tournament(request)
 
             return TournamentCreateResponse(
@@ -277,7 +281,7 @@ async def add_tournament_items(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session)
+            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
             added = await service.add_items(tournament_channel_id, request.items)
 
         return {
@@ -312,7 +316,7 @@ async def remove_tournament_items(
     try:
         thread_ids = [int(tid) for tid in request.thread_ids]
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session)
+            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
             deleted_count = await service.remove_items(tournament_channel_id, thread_ids)
 
         return {
@@ -341,7 +345,7 @@ async def delete_tournament(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session)
+            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
             success = await service.delete_tournament(tournament_channel_id)
 
         if not success:
@@ -375,7 +379,7 @@ async def update_tournament(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session)
+            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
             booklist = await service.update_tournament(tournament_channel_id, request)
 
             return {
@@ -415,7 +419,7 @@ async def update_tournament_item(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session)
+            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
             updated = await service.update_item(
                 tournament_channel_id, thread_id, update_data
             )

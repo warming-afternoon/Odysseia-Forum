@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Set
 
 from api.v1.schemas.search import AuthorDetail, ThreadDetail
+from api.v1.schemas.search.thread_detail import TournamentInfo
 from shared.channel_mapping_utils import ChannelMappingUtils
 
 
@@ -23,6 +24,7 @@ class ThreadDetailBuilder:
         thread: Any,
         collected_thread_ids: Set[int],
         channel_to_virtual: Optional[Dict[int, List[str]]] = None,
+        tournament_thread_map: Optional[Dict[int, List[TournamentInfo]]] = None,
     ) -> ThreadDetail:
         """构建单个 ThreadDetail。
 
@@ -30,11 +32,14 @@ class ThreadDetailBuilder:
         :param collected_thread_ids: 当前用户已收藏的帖子 ID 集合
         :param channel_to_virtual: 可选的自定义频道到虚拟标签映射。
             如果为 None，使用全局映射。
+        :param tournament_thread_map: thread_id → 所属赛事书单列表。
+            如果为 None，所有帖子视为非参赛帖。
         """
         if channel_to_virtual is None:
             channel_to_virtual = self._global_virtual_tags_map
 
         matched_virtual = channel_to_virtual.get(thread.channel_id, [])
+        t_infos = (tournament_thread_map or {}).get(thread.thread_id, [])
 
         return ThreadDetail(
             thread_id=thread.thread_id,
@@ -57,6 +62,8 @@ class ThreadDetailBuilder:
             else [],
             virtual_tags=list(set(matched_virtual)),
             collected_flag=thread.thread_id in collected_thread_ids,
+            is_tournament=len(t_infos) > 0,
+            tournament_info_list=t_infos,
         )
 
     def build_list(
@@ -64,11 +71,18 @@ class ThreadDetailBuilder:
         threads: List[Any],
         collected_thread_ids: Set[int],
         channel_to_virtual: Optional[Dict[int, List[str]]] = None,
+        tournament_thread_map: Optional[Dict[int, List[TournamentInfo]]] = None,
     ) -> List[ThreadDetail]:
         """批量构建 ThreadDetail 列表。"""
         if channel_to_virtual is None:
             channel_to_virtual = self._global_virtual_tags_map
 
         return [
-            self.build(t, collected_thread_ids, channel_to_virtual) for t in threads
+            self.build(
+                t,
+                collected_thread_ids,
+                channel_to_virtual,
+                tournament_thread_map=tournament_thread_map,
+            )
+            for t in threads
         ]
