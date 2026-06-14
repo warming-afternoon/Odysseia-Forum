@@ -117,6 +117,11 @@ class SearchRequest(BaseModel):
         description="结果的偏移数",
     )
 
+    debug_timing: bool = Field(
+        default=False,
+        description="调试模式：为真时打印各阶段耗时日志，正常请求请勿开启以减少开销",
+    )
+
     # --- 统一转换逻辑 ---
 
     @field_validator(

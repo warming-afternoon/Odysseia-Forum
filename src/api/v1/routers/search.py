@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import time
 import traceback
 from typing import Any, Dict, List, Optional
 
@@ -103,6 +104,12 @@ async def execute_search(
     # 去重
     exclude_channel_ids = list(set(exclude_channel_ids))
 
+    # ── 调试计时 ──
+    t_start = t_after_prefs = t_after_parse = t_after_channel = 0.0
+    t_before_db = t_after_db = t_after_build = t_end = 0.0
+    if request.debug_timing:
+        t_start = time.perf_counter()
+
     # 处理偏好合并：仅在用户已登录且 apply_preferences 为 True 时执行
     if request.apply_preferences and user_id:
         redis_client = getattr(cache_service_instance, '_redis', None)
@@ -117,10 +124,16 @@ async def execute_search(
         if prefs:
             _merge_user_preferences(request, prefs)
 
+    if request.debug_timing:
+        t_after_prefs = time.perf_counter()
+
     # 解析高级搜索语法，提取作者名和最终搜索词
     author_name, final_keywords, final_exclude_keywords = _parse_search_keywords(
         request.keywords, request.exclude_keywords
     )
+
+    if request.debug_timing:
+        t_after_parse = time.perf_counter()
 
     # 处理收藏搜索：仅在启用收藏搜索且用户已登录时返回用户ID
     user_id_for_collection_search = None
@@ -141,6 +154,9 @@ async def execute_search(
     effective_exclude_tags = channel_result.effective_exclude_tags
     searched_channel_ids = channel_result.searched_ids
     has_mapping = channel_result.has_mapping
+
+    if request.debug_timing:
+        t_after_channel = time.perf_counter()
 
     # 构建查询对象，封装所有搜索条件
     query_object = ThreadSearchQuery(
@@ -172,6 +188,9 @@ async def execute_search(
         # 获取搜索配置参数（UCB1排序算法相关配置）
         ucb1_config = await cache_service_instance.get_ucb1_config()
 
+        if request.debug_timing:
+            t_before_db = time.perf_counter()
+
         exclude_thread_ids = request.exclude_thread_ids or []
 
         # 并发启动 Banner/未读数查询（使用独立 session，与主搜索并行）
@@ -193,9 +212,13 @@ async def execute_search(
                     request.limit,
                     exclude_thread_ids,  # type: ignore
                     request.offset,
+                    debug_timing=request.debug_timing,
                 ),
                 timeout=SearchTimeout.SEARCH.value,
             )
+
+            if request.debug_timing:
+                t_after_db = time.perf_counter()
 
             # 获取当前用户ID用于后续收藏状态和未读数查询
             user_id = (
@@ -242,8 +265,25 @@ async def execute_search(
                 has_mapping,  # type: ignore
             )
 
+            if request.debug_timing:
+                t_after_build = time.perf_counter()
+
         # 等待并发 Banner/未读数查询结果
         banner_carousel, unread_count = await banner_unread_task
+
+        if request.debug_timing:
+            t_end = time.perf_counter()
+            logger.info(
+                f"[计时] 搜索总耗时={(t_end - t_start) * 1000:.0f}ms "
+                f"| 偏好={(t_after_prefs - t_start) * 1000:.0f} "
+                f"解析={(t_after_parse - t_after_prefs) * 1000:.0f} "
+                f"频道={(t_after_channel - t_after_parse) * 1000:.0f} "
+                f"UCB1配置={(t_before_db - t_after_channel) * 1000:.0f} "
+                f"DB={(t_after_db - t_before_db) * 1000:.0f} "
+                f"构建={(t_after_build - t_after_db) * 1000:.0f} "
+                f"横幅={(t_end - t_after_build) * 1000:.0f} "
+                f"| offset={request.offset} limit={request.limit} total={total_threads}"
+            )
 
         return SearchResponse(
             total=total_threads,
@@ -654,6 +694,7 @@ async def _perform_search_and_update_counts(
     limit: int,
     exclude_thread_ids: List[int],
     offset: int = 0,
+    debug_timing: bool = False,
 ) -> tuple[Any, int]:
     """
     执行搜索查询并更新帖子展示次数计数。
@@ -674,6 +715,7 @@ async def _perform_search_and_update_counts(
         offset=offset,
         exclude_thread_ids=exclude_thread_ids,
         redis_client=redis_client,
+        debug_timing=debug_timing,
     )
 
     # 按创建时间或收藏时间排序时，不记录展示次数，避免影响热度排序

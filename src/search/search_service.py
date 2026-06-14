@@ -1,4 +1,5 @@
 import logging
+import time
 from typing import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,8 @@ from search.qo.thread_search import ThreadSearchQuery
 from shared.enum import DefaultPreferences, SearchConfigDefaults
 from shared.range_parser import parse_range_string
 from shared.time_parser import parse_time_string
+
+logger = logging.getLogger(__name__)
 
 
 class SearchService:
@@ -176,13 +179,21 @@ class SearchService:
         offset: int = 0,
         exclude_thread_ids: Sequence[int | str] | None = None,
         redis_client=None,
+        debug_timing: bool = False,
     ) -> tuple[Sequence[Thread], int]:
         """
         根据搜索条件搜索帖子并分页
         """
         try:
+            # ── 调试计时 ──
+            if debug_timing:
+                t0 = time.perf_counter()
+
             # 清洗查询数据
             CleanedQo = self._clean_query(query, exclude_thread_ids)
+
+            if debug_timing:
+                t_clean = time.perf_counter()
 
             # --- 步骤 1: 构建过滤器列表 ---
             filters = []
@@ -320,6 +331,9 @@ class SearchService:
             elif fts_result.has_exclude:
                 filters.append(Thread.id.not_in(fts_result.exclude_stmt))  # type: ignore
 
+            if debug_timing:
+                t_fts = time.perf_counter()
+
             # 收藏搜索过滤器
             if query.user_id_for_collection_search:
                 # 查询用户的帖子收藏记录，获取该用户收藏过的所有 thread_id
@@ -355,7 +369,18 @@ class SearchService:
             count_stmt = select(func.count()).select_from(inner_cte)
             total_count = (await self.session.execute(count_stmt)).scalar_one()
 
+            if debug_timing:
+                t_cte = time.perf_counter()
+
             if total_count == 0:
+                if debug_timing:
+                    t_now = time.perf_counter()
+                    logger.info(
+                        f"[计时] DB内部 | clean={(t_clean - t0) * 1000:.0f}ms "
+                        f"fts={(t_fts - t_clean) * 1000:.0f}ms "
+                        f"cte+count={(t_cte - t_fts) * 1000:.0f}ms "
+                        f"select=0ms | matched=0"
+                    )
                 return [], 0
 
             # --- 步骤 4: 用 CTE 获取完整数据并分页 ---
@@ -448,6 +473,16 @@ class SearchService:
 
             result = await self.session.execute(final_select_stmt)
             threads = result.scalars().all()
+
+            if debug_timing:
+                t_select = time.perf_counter()
+                logger.info(
+                    f"[计时] DB内部 | clean={(t_clean - t0) * 1000:.0f}ms "
+                    f"fts={(t_fts - t_clean) * 1000:.0f}ms "
+                    f"cte+count={(t_cte - t_fts) * 1000:.0f}ms "
+                    f"select={(t_select - t_cte) * 1000:.0f}ms "
+                    f"| matched={total_count}"
+                )
 
             return threads, total_count
 
