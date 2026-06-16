@@ -476,6 +476,20 @@ class ThreadRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_threads_by_ids_with_tags(
+        self, thread_ids: list[int]
+    ) -> list[Thread]:
+        """批量获取帖子及其标签（预加载），用于 Banner 等场景。"""
+        if not thread_ids:
+            return []
+        stmt = (
+            select(Thread)
+            .where(Thread.thread_id.in_(thread_ids))  # type: ignore[arg-type]
+            .options(selectinload(Thread.tags))  # type: ignore[arg-type]
+        )
+        result = await self.session.execute(stmt)
+        return list(result.scalars().all())
+
     async def get_all_indexed_channel_ids(self) -> Sequence[int]:
         """从数据库获取所有已索引的频道ID"""
         statement = select(Thread.channel_id).distinct()

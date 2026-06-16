@@ -432,6 +432,340 @@ class TestBannerWaitlistWithTargetType:
             assert item.target_type == TargetType.CHANNEL.value
 
 
+class TestFilterThreadBannersByPrefs:
+    """_filter_thread_banners_by_prefs 偏好筛选单元测试。"""
+
+    @pytest.fixture
+    def sample_banners(self):
+        """构造 3 个 thread 类型的 BannerCarousel 对象。"""
+        from datetime import datetime, timedelta
+        from models import BannerCarousel
+
+        now = datetime.now()
+        later = now + timedelta(days=1)
+        return [
+            BannerCarousel(
+                id=1,
+                thread_id=100,
+                channel_id=None,
+                cover_image_url="https://example.com/1.png",
+                title="Banner A",
+                target_type=TargetType.THREAD.value,
+                start_time=now,
+                end_time=later,
+            ),
+            BannerCarousel(
+                id=2,
+                thread_id=200,
+                channel_id=None,
+                cover_image_url="https://example.com/2.png",
+                title="Banner B",
+                target_type=TargetType.THREAD.value,
+                start_time=now,
+                end_time=later,
+            ),
+            BannerCarousel(
+                id=3,
+                thread_id=300,
+                channel_id=None,
+                cover_image_url="https://example.com/3.png",
+                title="Banner C",
+                target_type=TargetType.THREAD.value,
+                start_time=now,
+                end_time=later,
+            ),
+        ]
+
+    @pytest.fixture
+    def sample_threads(self):
+        """构造 3 个 Thread 对象，含不同 author_id 和 tags。"""
+        from models import Thread as ThreadModel
+        from models import Tag
+
+        tag_a = Tag(id=1, name="赛事")
+        tag_b = Tag(id=2, name="攻略")
+        tag_c = Tag(id=3, name="同人")
+
+        thread_a = ThreadModel(
+            id=1,
+            thread_id=100,
+            guild_id=1,
+            channel_id=10,
+            title="赛事讨论帖",
+            author_id=111,
+            first_message_excerpt="今天的赛事非常精彩",
+        )
+        thread_a.tags = [tag_a, tag_b]
+
+        thread_b = ThreadModel(
+            id=2,
+            thread_id=200,
+            guild_id=1,
+            channel_id=10,
+            title="攻略合集",
+            author_id=222,
+            first_message_excerpt="新手入门攻略",
+        )
+        thread_b.tags = [tag_b]
+
+        thread_c = ThreadModel(
+            id=3,
+            thread_id=300,
+            guild_id=1,
+            channel_id=10,
+            title="同人创作",
+            author_id=333,
+            first_message_excerpt=None,
+        )
+        thread_c.tags = [tag_c]
+
+        return {100: thread_a, 200: thread_b, 300: thread_c}
+
+    @pytest.fixture
+    def empty_prefs(self):
+        """空偏好（无任何排除条件）。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        return UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=None,
+            exclude_tags=None,
+            exclude_keywords="",
+        )
+
+    def _filter(self, banners, thread_map, prefs):
+        from api.v1.routers.banner import _filter_thread_banners_by_prefs
+        return _filter_thread_banners_by_prefs(banners, thread_map, prefs)
+
+    # ── exclude_authors ──
+
+    def test_exclude_author_filters_banner(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """exclude_authors 偏好 → 对应作者的 banner 被过滤。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=[111],
+            exclude_tags=None,
+            exclude_keywords="",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        assert 100 not in thread_ids  # author_id=111 被排除
+        assert 200 in thread_ids
+        assert 300 in thread_ids
+
+    def test_exclude_multiple_authors(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """排除多个作者。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=[111, 333],
+            exclude_tags=None,
+            exclude_keywords="",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        assert 100 not in thread_ids
+        assert 200 in thread_ids  # author_id=222 未被排除
+        assert 300 not in thread_ids
+
+    # ── exclude_tags ──
+
+    def test_exclude_tag_filters_banner(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """exclude_tags 偏好 → 含对应标签的 banner 被过滤。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=None,
+            exclude_tags=["攻略"],
+            exclude_keywords="",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        # Banner A (100): tags=["赛事","攻略"] → 有"攻略" → 排除
+        assert 100 not in thread_ids
+        # Banner B (200): tags=["攻略"] → 排除
+        assert 200 not in thread_ids
+        # Banner C (300): tags=["同人"] → 保留
+        assert 300 in thread_ids
+
+    def test_exclude_tags_case_insensitive(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """exclude_tags 不区分大小写。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=None,
+            exclude_tags=["攻略"],  # 小写
+            exclude_keywords="",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        assert 200 not in thread_ids  # tag "攻略" 匹配
+
+    # ── exclude_keywords ──
+
+    def test_exclude_keyword_in_title_filters_banner(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """exclude_keywords 命中标题 → 过滤。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=None,
+            exclude_tags=None,
+            exclude_keywords="赛事",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        # Banner A: title="赛事讨论帖" → 命中"赛事" → 排除
+        assert 100 not in thread_ids
+        assert 200 in thread_ids
+        assert 300 in thread_ids
+
+    def test_exclude_keyword_in_excerpt_filters_banner(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """exclude_keywords 命中 first_message_excerpt → 过滤。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=None,
+            exclude_tags=None,
+            exclude_keywords="新手",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        # Banner B: excerpt="新手入门攻略" → 命中"新手" → 排除
+        assert 100 in thread_ids
+        assert 200 not in thread_ids
+        assert 300 in thread_ids
+
+    def test_exclude_keywords_multi_word_split(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """exclude_keywords 按空格/逗号分词，分别匹配。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=None,
+            exclude_tags=None,
+            exclude_keywords="赛事,同人",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        # Banner A: 命中"赛事" → 排除
+        assert 100 not in thread_ids
+        # Banner C: 命中"同人" → 排除
+        assert 300 not in thread_ids
+        assert 200 in thread_ids
+
+    def test_exclude_keyword_case_insensitive(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """exclude_keywords 不区分大小写。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=None,
+            exclude_tags=None,
+            exclude_keywords="赛事",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        assert 100 not in thread_ids
+
+    def test_exclude_keyword_no_excerpt(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """首楼摘要为 None 时仅检查标题，不报错。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=None,
+            exclude_tags=None,
+            exclude_keywords="同人",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        # Banner C: title="同人创作", excerpt=None → 命中标题 → 排除
+        assert 300 not in thread_ids
+
+    # ── 组合过滤 ──
+
+    def test_combined_filters(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """同时应用多种排除条件。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=[111],
+            exclude_tags=["同人"],
+            exclude_keywords="新手",
+        )
+        result = self._filter(sample_banners, sample_threads, prefs)
+        thread_ids = {b.thread_id for b in result}
+        # Banner A: author 排除
+        # Banner B: keyword "新手" 命中 excerpt 排除
+        # Banner C: tag "同人" 排除
+        assert len(result) == 0
+
+    # ── 空偏好 / 边界情况 ──
+
+    def test_no_prefs_returns_all(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """空偏好 → 全部保留。"""
+        result = self._filter(sample_banners, sample_threads, empty_prefs)
+        assert len(result) == 3
+
+    def test_thread_not_in_map_preserved(
+        self, sample_banners, sample_threads, empty_prefs
+    ):
+        """thread_map 中不存在的 banner 保留（线程可能已被删除）。"""
+        from dto.preferences import UserSearchPreferencesDTO
+        banners = sample_banners[:1]  # 只取 Banner A
+        # thread_map 不含 thread_id=100
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=[111],
+            exclude_tags=None,
+            exclude_keywords="",
+        )
+        result = self._filter(banners, {}, prefs)
+        # 线程不在 map 中，保留 banner
+        assert len(result) == 1
+        assert result[0].thread_id == 100
+
+    def test_empty_list_returns_empty(
+        self, sample_threads, empty_prefs
+    ):
+        """空 banner 列表 → 返回空列表。"""
+        result = self._filter([], sample_threads, empty_prefs)
+        assert result == []
+
+    def test_channel_banners_not_affected_by_design(self):
+        """channel 类型 banner 不进入此函数 — 由调用方保证。"""
+        # 此测试仅确认函数签名可接受空列表
+        from api.v1.routers.banner import _filter_thread_banners_by_prefs
+        from dto.preferences import UserSearchPreferencesDTO
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            exclude_authors=[111],
+            exclude_tags=["test"],
+            exclude_keywords="test",
+        )
+        result = _filter_thread_banners_by_prefs([], {}, prefs)
+        assert result == []
+
+
 class TestApplicationResult:
     """ApplicationResult dataclass 测试。"""
 
