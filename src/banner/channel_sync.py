@@ -45,10 +45,10 @@ class ChannelSyncService:
         # 构造 Channel 并写入
         channel = Channel(
             channel_id=channel_id,
-            guild_id=channel_data["guild_id"],
+            guild_id=int(channel_data["guild_id"]),
             name=channel_data["name"],
             topic=channel_data.get("topic"),
-            category_id=channel_data.get("parent_id"),
+            category_id=int(channel_data["parent_id"]) if channel_data.get("parent_id") else None,
             created_at=parse_discord_snowflake(channel_id),
         )
 
