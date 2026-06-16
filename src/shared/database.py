@@ -28,6 +28,17 @@ AsyncSessionFactory = async_sessionmaker(
 )
 
 
+def is_deadlock_error(exc: Exception) -> bool:
+    """检测是否是 PostgreSQL 死锁错误 (sqlstate 40P01)。"""
+    orig = getattr(exc, "orig", None)
+    if orig is None:
+        return False
+    return (
+        getattr(orig, "sqlstate", None) == "40P01"
+        or "deadlock" in str(orig).lower()
+    )
+
+
 async def init_db():
     """创建所有表（如果尚不存在）并建立全文搜索索引。"""
     async with async_engine.begin() as conn:
