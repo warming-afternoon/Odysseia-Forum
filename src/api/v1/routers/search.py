@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 
 from api.v1.dependencies.security import get_current_user, require_auth
+from api.v1.dependencies.rate_limit import search_rate_limit
 from api.v1.schemas.banner import BannerItem
 from api.v1.schemas.search import (
     AuthorSuggestion,
@@ -60,13 +61,17 @@ abyss_config: Dict[str, Any] = {
 main_guild_id: int = 0
 
 router = APIRouter(
-    prefix="/search", tags=["帖子搜索"], dependencies=[Depends(require_auth)]
+    prefix="/search",
+    tags=["帖子搜索"],
+    dependencies=[Depends(require_auth)],
 )
 
 
 @router.post("/", response_model=SearchResponse, summary="执行帖子搜索")
 async def execute_search(
-    request: SearchRequest, current_user: Dict[str, Any] = Depends(get_current_user)
+    request: SearchRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    _rate_limit: None = Depends(search_rate_limit),
 ):
     """
     根据指定的条件搜索帖子，并返回包含作者信息的分页结果。

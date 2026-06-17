@@ -35,6 +35,7 @@ from api.v1.routers import (
 )
 from api.main import app as fastapi_app
 from api.v1.dependencies.security import initialize_api_security
+from api.v1.dependencies.rate_limit import initialize_rate_limit
 from api.v1.routers.auth import initialize_auth_config
 
 logger = logging.getLogger(__name__)
@@ -185,6 +186,9 @@ async def main():
     initialize_api_security()
     initialize_auth_config()
 
+    # 初始化频率限制配置
+    initialize_rate_limit(config)
+
     # 创建并构建缓存服务
     cache_service = ApiCacheService(
         session_factory=AsyncSessionFactory,
@@ -216,6 +220,8 @@ async def main():
         host=api_config.get("host", "0.0.0.0"),
         port=api_config.get("port", 10810),
         log_level="warning",
+        proxy_headers=True,
+        forwarded_allow_ips="*",
         ssl_keyfile=api_config.get("ssl_key_path", None)
         if api_config.get("enable_ssl", False)
         else None,

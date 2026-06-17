@@ -22,11 +22,9 @@ class RejectReasonModal(discord.ui.Modal, title="拒绝理由"):
 
     async def on_submit(self, interaction: discord.Interaction):
         """提交拒绝理由 → 分发 banner_review_reject 事件。"""
-        await interaction.response.defer(ephemeral=True)
-
         interaction.client.dispatch(
             "banner_review_reject",
-            self._original_interaction,
+            interaction,
             interaction.user.id,  # reviewer_id
             str(self.reason.value),
         )
