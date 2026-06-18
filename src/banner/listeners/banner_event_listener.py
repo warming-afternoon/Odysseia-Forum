@@ -14,6 +14,7 @@ from banner.banner_service import BannerService
 from banner.views.channel_selection_view import ChannelSelectionView
 from banner.views.review_embed_builder import ReviewEmbedBuilder
 from banner.views.review_view import ReviewView
+from core.banner_application_repository import BannerApplicationRepository
 from core.thread_repository import ThreadRepository
 from models.banner_application import BannerApplication
 from models.channel import Channel
@@ -88,10 +89,17 @@ class BannerEventListener(commands.Cog):
                 else:
                     repo = ThreadRepository(session)
                     guild_id = await repo.get_thread_guild_id(application.thread_id)
+                # 查询历史申请记录
+                app_repo = BannerApplicationRepository(session)
+                history = await app_repo.get_history_by_thread_id(
+                    application.thread_id
+                )
+
                 embed = ReviewEmbedBuilder.build_review_embed(
                     application=application,
                     config=banner_conf,
                     guild_id=guild_id,
+                    history=history if history else None,
                 )
                 review_thread_id = banner_conf.get("review_thread_id")
                 if review_thread_id:
@@ -238,11 +246,18 @@ class BannerEventListener(commands.Cog):
                     repo = ThreadRepository(session)
                     thread_guild_id = await repo.get_thread_guild_id(thread_id)
 
+                # 查询历史申请记录
+                app_repo = BannerApplicationRepository(session)
+                history = await app_repo.get_history_by_thread_id(
+                    application.thread_id
+                )
+
                 # 构建审核 Embed
                 embed = ReviewEmbedBuilder.build_review_embed(
                     application=application,
                     config=self.config,
                     guild_id=thread_guild_id,
+                    history=history if history else None,
                 )
 
                 # 发送到审核频道

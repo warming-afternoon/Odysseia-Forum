@@ -1,9 +1,9 @@
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List, Optional
 
 import discord
 
-from shared.enum import TargetType
+from shared.enum import ApplicationStatus, TargetType
 
 if TYPE_CHECKING:
     from models import BannerApplication
@@ -19,6 +19,7 @@ class ReviewEmbedBuilder:
         application: "BannerApplication",
         config: dict,
         guild_id: int | None,
+        history: Optional[List["BannerApplication"]] = None,
     ) -> discord.Embed:
         """构建审核频道中展示的 Banner 申请 Embed。"""
         # 展示范围文本
@@ -53,6 +54,35 @@ class ReviewEmbedBuilder:
             )
 
         embed.set_image(url=application.cover_image_url)
+
+        # 历史记录
+        if history:
+            lines: list[str] = []
+            for h in history:
+                if h.review_thread_id and h.review_message_id and guild_id:
+                    jump_url = (
+                        f"https://discord.com/channels/{guild_id}"
+                        f"/{h.review_thread_id}/{h.review_message_id}"
+                    )
+                    link = f"[#{h.id}]({jump_url})"
+                else:
+                    link = f"#{h.id}"
+
+                if h.status == ApplicationStatus.APPROVED.value:
+                    status_icon = "✅"
+                elif h.status == ApplicationStatus.REJECTED.value:
+                    status_icon = "❌"
+                else:
+                    status_icon = "❓"
+
+                lines.append(f"{link} — {status_icon} {h.status}")
+
+            embed.add_field(
+                name="📋 历史记录",
+                value="\n".join(lines),
+                inline=False,
+            )
+
         embed.set_footer(text=f"申请ID: {application.id}")
         return embed
 

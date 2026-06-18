@@ -1,8 +1,8 @@
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
+from sqlmodel import desc, select
 
 from models import BannerApplication
 from shared.enum import ApplicationStatus
@@ -55,6 +55,24 @@ class BannerApplicationRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def get_history_by_thread_id(
+        self, thread_id: int
+    ) -> List[BannerApplication]:
+        """查询同一 thread_id 的非 pending 申请，按 applied_at 倒序。
+
+        仅返回有 review_message_id 的记录，确保能生成审核消息跳转链接。
+        """
+        result = await self.session.execute(
+            select(BannerApplication)
+            .where(
+                BannerApplication.thread_id == thread_id,
+                BannerApplication.status != ApplicationStatus.PENDING.value,
+                BannerApplication.review_message_id.is_not(None),
+            )
+            .order_by(desc(BannerApplication.applied_at))
+        )
+        return list(result.scalars().all())
 
     async def update_review_message_info(
         self,
