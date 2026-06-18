@@ -1,9 +1,7 @@
 # 🌐 API 模块
 
 ## 📖 简介
-`api` 模块提供基于 FastAPI 的 RESTful HTTP API 服务，是 Discord Bot 数据对外暴露的统一接口层。前端索引页 (`webpage`) 和第三方集成通过此模块访问帖子搜索、收藏、书单、发现页等功能。
-
-API 与 Bot 共享同一个数据库连接池，通过 uvicorn 在 Bot 进程内或独立进程中运行。
+`api` 模块提供基于 FastAPI 的 RESTful HTTP API 服务，是 Discord Bot 数据对外暴露的统一接口层。索引网页通过此模块访问帖子搜索、收藏、书单、发现页等功能。
 
 ---
 
@@ -50,7 +48,6 @@ api/
 
 ### 中间件
 - **CORS**: 从 `config.json` 的 `api.cors_origins` 和 `auth.frontend_url` 读取允许的源。
-- **GZip**: 响应体超过 1000 字节时自动压缩。
 - **ORJSONResponse**: 使用 orjson 加速 JSON 序列化。
 
 ### 认证机制
@@ -61,16 +58,3 @@ api/
 ### 文档
 - 可通过 `config.json` 的 `api.enable_docs` 控制是否暴露 `/docs` (Swagger) 和 `/redoc`。
 - 生产环境建议关闭。
-
----
-
-## 💡 开发指南
-
-### 添加新路由
-1. 在 `v1/routers/` 下新建文件，使用 `APIRouter` 定义端点。
-2. 在 `v1/routers/__init__.py` 中导出。
-3. 在 `main.py` 中 `include_router` 注册。
-
-### 请求/响应模型
-- 所有 API 的入参和出参都应在 `v1/schemas/` 中定义 Pydantic 模型。
-- 避免直接返回 SQLModel 实体，防止泄露内部字段。
