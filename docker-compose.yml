@@ -42,6 +42,7 @@ services:
     container_name: odysseia-forum-bot
     restart: unless-stopped
     working_dir: /app
+    command: ["uv", "run", "bot_main.py"]
     volumes:
       - ./config.json:/app/config.json:ro
       - ./.env:/app/.env:ro

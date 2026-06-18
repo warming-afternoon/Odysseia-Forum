@@ -12,32 +12,32 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends build-essential curl procps libjemalloc2 libpq-dev postgresql-client \
+    && apt-get install -y --no-install-recommends curl procps libjemalloc2 libpq-dev postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/lib/*/libjemalloc.so.2 /usr/lib/libjemalloc.so.2
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-COPY pyproject.toml uv.lock README.md ./
+COPY pyproject.toml uv.lock ./
+
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-install-project
+
 COPY src ./src
 COPY bot_main.py ./
 COPY healthcheck.py ./
 COPY api_main.py ./
 COPY alembic.ini ./
 COPY alembic ./alembic
-COPY docs ./docs
-COPY config.example.json ./
+
 COPY scripts ./scripts
 
-RUN uv sync --locked --no-dev
-
 RUN mkdir -p /app/data /app/logs
-
-CMD ["uv", "run", "bot_main.py"]
 
 # ============================================================
 # dev — 基于 base，额外安装 dev 依赖（pytest、ruff 等）
 # ============================================================
 FROM base AS dev
 
-RUN uv sync --locked --extra dev
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --extra dev --no-install-project

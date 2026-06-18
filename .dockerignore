@@ -19,7 +19,11 @@ venv/
 .vscode/
 .idea/
 data/
-webpage/node_modules/
-webpage/dist/
 webauth/
 tests/
+temp/
+logs/
+webpage/
+webpage-vue/
+deploy/
+config_production.json
