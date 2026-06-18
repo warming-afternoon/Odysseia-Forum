@@ -56,6 +56,10 @@ async def check_rate_limit(
         RateLimitResult: 包含是否允许、剩余次数、重置倒计时。
     """
     try:
+        # 确保类型为纯 int（调用方可能传入 IntEnum，redis-py 部分版本不兼容）
+        max_requests = int(max_requests)
+        window_seconds = int(window_seconds)
+
         current = await redis.incr(key)
 
         if current == 1:

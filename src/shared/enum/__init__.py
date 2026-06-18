@@ -11,6 +11,7 @@ from shared.enum.search_config_type import (
 )
 from shared.enum.cache_keys import CacheKeys
 from shared.enum.search_timeout import SearchTimeout
+from shared.enum.rate_limit_defaults import RateLimitDefaults
 
 __all__ = [
     "CacheKeys",
@@ -24,4 +25,5 @@ __all__ = [
     "SearchConfigType",
     "SearchTimeout",
     "TargetType",
+    "RateLimitDefaults",
 ]

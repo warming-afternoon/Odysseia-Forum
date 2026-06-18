@@ -6,9 +6,10 @@
 import logging
 from typing import Any, Dict, Optional
 
-from fastapi import Depends, HTTPException, Response, status
+from fastapi import Depends, HTTPException, Request, Response, status
 
 from api.v1.dependencies.security import get_current_user
+from shared.enum.rate_limit_defaults import RateLimitDefaults
 from shared.rate_limiter import RateLimitConfig, check_rate_limit
 from shared.redis_client import RedisManager
 
@@ -25,7 +26,7 @@ def initialize_rate_limit(config: Optional[dict] = None) -> None:
     raw = (config or {}).get("api", {}).get("rate_limit", {}).get("search", {}) or {}
 
     _search_config = RateLimitConfig(
-        max_requests=raw.get("max_requests", 40),
+        max_requests=raw.get("max_requests", RateLimitDefaults.SEARCH_MAX_REQUESTS),
     )
     logger.info(
         "搜索接口频率限制已初始化: %s次/%s秒",
@@ -35,6 +36,7 @@ def initialize_rate_limit(config: Optional[dict] = None) -> None:
 
 
 async def search_rate_limit(
+    request: Request,
     response: Response,
     current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
 ) -> None:
@@ -69,12 +71,28 @@ async def search_rate_limit(
     response.headers["X-RateLimit-Reset"] = str(result.reset_after)
 
     if not result.allowed:
+        # 仅在触发限流时读取请求体（不计入正常请求性能开销）
+        body = "-"
+        try:
+            raw = await request.body()
+            if raw:
+                body = raw.decode("utf-8", errors="replace")[:512]
+        except Exception:
+            pass
+
         logger.warning(
-            "搜索接口触发频率限制: user_id=%s, count=%s/%s, reset=%ss",
+            "搜索接口触发频率限制: user_id=%s, count=%s/%s, reset=%ss | "
+            "method=%s path=%s client=%s ua=%s cf_ip=%s body=%s",
             user_id,
             result.current_count,
             config.max_requests,
             result.reset_after,
+            request.method,
+            request.url.path,
+            request.client.host if request.client else "-",
+            request.headers.get("user-agent", "-"),
+            request.headers.get("cf-connecting-ip", "-"),
+            body,
         )
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,

@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, ORJSONResponse
 from sqlalchemy import text
 
+from api.middleware.rate_limit_middleware import RateLimitMiddleware
 from shared.database import AsyncSessionFactory
 from shared.redis_client import RedisManager
 
@@ -100,6 +101,9 @@ app.add_middleware(
     expose_headers=["*"],  # 暴露所有headers
     max_age=10800,  # 预检请求缓存3小时
 )
+
+# 全局限流中间件（CORS 之后、路由之前）
+app.add_middleware(RateLimitMiddleware)
 
 # 包含路由
 app.include_router(auth.router, prefix="/v1")
