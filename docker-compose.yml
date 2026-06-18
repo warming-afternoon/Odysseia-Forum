@@ -130,7 +130,7 @@ services:
     depends_on:
       odysseia-postgres:
         condition: service_healthy
-    command: ["uv", "run", "migrate.py"]
+    command: ["uv", "run", "scripts/migrate.py"]
 
   odysseia-redis:
     image: redis:alpine

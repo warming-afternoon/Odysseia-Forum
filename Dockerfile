@@ -27,9 +27,7 @@ COPY alembic.ini ./
 COPY alembic ./alembic
 COPY docs ./docs
 COPY config.example.json ./
-COPY migrate.py ./
-COPY migrate_to_multi_server.py ./
-COPY start.sh ./
+COPY scripts ./scripts
 
 RUN uv sync --locked --no-dev
 
