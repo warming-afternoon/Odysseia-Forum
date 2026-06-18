@@ -162,7 +162,7 @@ async def main():
 
     try:
         file_handler = TimedRotatingFileHandler(
-            "/app/logs/api.log", when="midnight", backupCount=15, encoding="utf-8"
+            "/app/logs/api.log", when="midnight", backupCount=7, encoding="utf-8"
         )
         file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
         logging.getLogger().addHandler(file_handler)
