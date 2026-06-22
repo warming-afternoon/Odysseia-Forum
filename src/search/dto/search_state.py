@@ -1,6 +1,6 @@
 from typing import List, Optional, Set
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from shared.enum import DefaultPreferences
 
@@ -80,6 +80,4 @@ class SearchStateDTO(BaseModel):
     tag_page: int = 0
     """当前标签选择界面的分页页码"""
 
-    class Config:
-        arbitrary_types_allowed = True
-        from_attributes = True
+    model_config = ConfigDict(arbitrary_types_allowed=True, from_attributes=True)

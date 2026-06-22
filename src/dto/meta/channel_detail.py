@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from dto.meta.tag_detail import TagDetail
 from dto.meta.virtual_tag_detail import VirtualTagDetail
@@ -65,5 +65,4 @@ class ChannelDetail(BaseModel):
         """序列化频道/服务器 ID 为字符串以防前端 JS 精度丢失"""
         return str(value) if value is not None else None
 
-    class Config:
-        populate_by_name = True
+    model_config = ConfigDict(populate_by_name=True)

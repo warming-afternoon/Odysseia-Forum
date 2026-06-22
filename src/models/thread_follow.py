@@ -28,6 +28,3 @@ class ThreadFollow(SQLModel, table=True):
     active_flag: bool = Field(
         default=True, description="是否为当前关注（False表示过去关注）"
     )
-
-    class Config:
-        pass

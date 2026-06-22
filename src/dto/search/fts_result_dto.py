@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class FTSResultDTO(BaseModel):
@@ -16,5 +16,4 @@ class FTSResultDTO(BaseModel):
     has_include: bool = False
     has_exclude: bool = False
 
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)

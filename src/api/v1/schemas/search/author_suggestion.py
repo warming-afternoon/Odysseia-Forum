@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class AuthorSuggestion(BaseModel):
@@ -16,5 +16,4 @@ class AuthorSuggestion(BaseModel):
         """将 Discord ID 序列化为字符串，避免前端精度丢失"""
         return str(value)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

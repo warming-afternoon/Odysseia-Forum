@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class BooklistSuggestion(BaseModel):
@@ -8,5 +8,4 @@ class BooklistSuggestion(BaseModel):
     title: str = Field(description="书单标题")
     item_count: int = Field(description="帖子数量")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

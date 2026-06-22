@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class ThreadSuggestion(BaseModel):
@@ -13,5 +13,4 @@ class ThreadSuggestion(BaseModel):
     def serialize_id(self, value: int) -> str:
         return str(value)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

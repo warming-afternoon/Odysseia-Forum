@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class UserPreferencesResponse(BaseModel):
@@ -129,5 +129,4 @@ class UserPreferencesResponse(BaseModel):
         # 处理单个值
         return str(value)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

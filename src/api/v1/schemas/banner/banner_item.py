@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 
 class BannerItem(BaseModel):
@@ -27,8 +27,7 @@ class BannerItem(BaseModel):
         default=None, description="Banner 展示结束时间"
     )
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
     @field_serializer("thread_id", "channel_id", "guild_id")
     def serialize_id(self, value: int) -> str:

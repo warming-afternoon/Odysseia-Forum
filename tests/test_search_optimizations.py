@@ -94,7 +94,7 @@ class TestFTSQueryCaching:
         )
         # 验证返回了 FTS 子查询
         assert result.has_include is True
-        assert len(result.include_stmts) > 0
+        assert len(result.include_conditions) > 0
 
         # 验证 Redis setex 被调用（回写缓存）
         mock_redis.setex.assert_called_once()
@@ -134,7 +134,7 @@ class TestFTSQueryCaching:
 
         # 验证两次返回结构一致
         assert result2.has_include == result1.has_include
-        assert len(result2.include_stmts) == len(result1.include_stmts)
+        assert len(result2.include_conditions) == len(result1.include_conditions)
 
         # 验证缓存命中时 get 被调用但 setex 不被调用
         mock_redis_2.get.assert_called_once()
@@ -152,7 +152,7 @@ class TestFTSQueryCaching:
         )
 
         assert result.has_include is True
-        assert len(result.include_stmts) > 0
+        assert len(result.include_conditions) > 0
 
     @pytest.mark.asyncio
     async def test_exclude_keywords_cached(self, seeded_fts_session):
@@ -194,7 +194,7 @@ class TestFTSQueryCaching:
         )
 
         assert result.has_exclude is True
-        assert result.exclude_stmt is not None
+        assert result.exclude_condition is not None
 
     @pytest.mark.asyncio
     async def test_cache_key_includes_markers(self, seeded_fts_session):
@@ -299,7 +299,7 @@ class TestFTSQueryCaching:
             redis_client=mock_redis,
         )
         assert result.has_include is True
-        assert len(result.include_stmts) > 0
+        assert len(result.include_conditions) > 0
 
     @pytest.mark.asyncio
     async def test_redis_write_failure_does_not_block(self, seeded_fts_session):
@@ -315,7 +315,7 @@ class TestFTSQueryCaching:
             redis_client=mock_redis,
         )
         assert result.has_include is True
-        assert len(result.include_stmts) > 0
+        assert len(result.include_conditions) > 0
 
 
 # ══════════════════════════════════════════════

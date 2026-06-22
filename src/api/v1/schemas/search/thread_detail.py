@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from api.v1.schemas.search.author_detail import AuthorDetail
 from api.v1.schemas.search.tournament_info import TournamentInfo
@@ -81,5 +81,4 @@ class ThreadDetail(BaseModel):
         """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
         return str(value)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

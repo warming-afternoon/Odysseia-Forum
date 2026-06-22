@@ -1,6 +1,6 @@
 from typing import List, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class UserSearchPreferencesDTO(BaseModel):
@@ -66,5 +66,4 @@ class UserSearchPreferencesDTO(BaseModel):
     custom_base_sort: str = "comprehensive"
     """自定义排序时使用的基础排序算法"""
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
