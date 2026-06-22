@@ -11,7 +11,11 @@ from urllib.parse import parse_qsl
 
 from api.v1.utils.jwt_utils import verify_jwt
 from shared.enum.rate_limit_defaults import RateLimitDefaults
-from shared.rate_limiter import check_rate_limit
+from shared.rate_limiter import (
+    check_rate_limit,
+    is_user_watched,
+    set_rate_limit_watch,
+)
 from shared.redis_client import RedisManager
 
 logger = logging.getLogger(__name__)
@@ -59,32 +63,106 @@ class RateLimitMiddleware:
             return
 
         key = f"{_KEY_PREFIX}:{user_id}"
+        redis = RedisManager.get_client()
         result = await check_rate_limit(
-            redis=RedisManager.get_client(),
+            redis=redis,
             key=key,
             max_requests=RateLimitDefaults.GLOBAL_MAX_REQUESTS,
             window_seconds=RateLimitDefaults.WINDOW_SECONDS,
         )
 
         if not result.allowed:
+            # 读取 body 用于日志（不需要 replay，直接返回 429）
+            body_bytes, _ = await self._read_and_replay_body(receive)
+
             logger.warning(
                 "全局接口触发频率限制: user_id=%s, count=%s/%s, reset=%ss | "
-                "method=%s path=%s client=%s ua=%s cf_ip=%s",
+                "method=%s path=%s ua=%s body=%s",
                 user_id,
                 result.current_count,
                 RateLimitDefaults.GLOBAL_MAX_REQUESTS,
                 result.reset_after,
                 scope.get("method", "-"),
                 path,
-                scope.get("client", ("-", 0))[0],
                 self._get_header(scope, "user-agent"),
-                self._get_header(scope, "cf-connecting-ip"),
+                self._truncate_body(body_bytes),
             )
+            await set_rate_limit_watch(redis, user_id)
             await self._send_429(send, result.reset_after)
+            return
+
+        # === 放行分支 ===
+
+        # 可疑阈值检查（在放行后执行，避免与上方限流 WARNING 重复打印；
+        # is_user_watched 守卫确保每个用户每 10 分钟仅一次）
+        if (
+            result.current_count >= int(RateLimitDefaults.SUSPICIOUS_THRESHOLD)
+            and not await is_user_watched(redis, user_id)
+        ):
+            logger.warning(
+                "全局可疑高频请求: user_id=%s, count=%s/%s | "
+                "method=%s path=%s ua=%s",
+                user_id,
+                result.current_count,
+                RateLimitDefaults.GLOBAL_MAX_REQUESTS,
+                scope.get("method", "-"),
+                path,
+                self._get_header(scope, "user-agent"),
+            )
+            await set_rate_limit_watch(redis, user_id)
+
+        # WATCH 日志（含 body buffer-replay）
+        if await is_user_watched(redis, user_id):
+            body_bytes, replay_receive = await self._read_and_replay_body(receive)
+            logger.info(
+                "WATCH: user_id=%s method=%s path=%s ua=%s body=%s",
+                user_id,
+                scope.get("method", "-"),
+                path,
+                self._get_header(scope, "user-agent"),
+                self._truncate_body(body_bytes),
+            )
+            await self._send_with_headers(scope, replay_receive, send, result)
             return
 
         # 放行，注入限流状态头
         await self._send_with_headers(scope, receive, send, result)
+
+    @staticmethod
+    async def _read_and_replay_body(receive):
+        """读取 ASGI body 并返回一个可重放的 receive。
+
+        仅对 watched 用户调用，确保下游 FastAPI 仍能正常读取 body。
+        """
+        body_chunks = []
+        more_body = True
+        while more_body:
+            message = await receive()
+            body_chunks.append(message.get("body", b""))
+            more_body = message.get("more_body", False)
+
+        body_bytes = b"".join(body_chunks)
+        replayed = False
+
+        async def _replay_receive():
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {
+                    "type": "http.request",
+                    "body": body_bytes,
+                    "more_body": False,
+                }
+            return await receive()
+
+        return body_bytes, _replay_receive
+
+    @staticmethod
+    def _truncate_body(body_bytes: bytes, max_len: int = 512) -> str:
+        """截断 body 用于日志输出。"""
+        if not body_bytes:
+            return "-"
+        return body_bytes.decode("utf-8", errors="replace")[:max_len]
 
     @staticmethod
     def _get_header(scope, name: str) -> str:

@@ -14,3 +14,9 @@ class RateLimitDefaults(IntEnum):
 
     WINDOW_SECONDS = 60
     """限流窗口时长（秒）"""
+
+    WATCH_TTL_SECONDS = 600
+    """watch 标记有效期（秒），10 分钟"""
+
+    SUSPICIOUS_THRESHOLD = 600
+    """全局每分钟请求数达到此值视为可疑行为"""

@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException, Request, Response, status
 
 from api.v1.dependencies.security import get_current_user
 from shared.enum.rate_limit_defaults import RateLimitDefaults
-from shared.rate_limiter import RateLimitConfig, check_rate_limit
+from shared.rate_limiter import RateLimitConfig, check_rate_limit, set_rate_limit_watch
 from shared.redis_client import RedisManager
 
 logger = logging.getLogger(__name__)
@@ -82,18 +82,17 @@ async def search_rate_limit(
 
         logger.warning(
             "搜索接口触发频率限制: user_id=%s, count=%s/%s, reset=%ss | "
-            "method=%s path=%s client=%s ua=%s cf_ip=%s body=%s",
+            "method=%s path=%s ua=%s body=%s",
             user_id,
             result.current_count,
             config.max_requests,
             result.reset_after,
             request.method,
             request.url.path,
-            request.client.host if request.client else "-",
             request.headers.get("user-agent", "-"),
-            request.headers.get("cf-connecting-ip", "-"),
             body,
         )
+        await set_rate_limit_watch(redis, user_id)
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="请求过于频繁，请稍后重试",

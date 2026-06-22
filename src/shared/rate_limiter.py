@@ -8,6 +8,8 @@ from dataclasses import dataclass
 
 from redis.asyncio import Redis
 
+from shared.enum.rate_limit_defaults import RateLimitDefaults
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,3 +86,40 @@ async def check_rate_limit(
     except Exception:
         logger.warning("Redis 频率限制检查失败，降级放行", exc_info=True)
         return RateLimitResult.fail_open()
+
+
+# === 限流触发后的 watch 标记（用于诊断爬虫/高频调用） ===
+
+WATCH_KEY_PREFIX = "rate_limit:watch"
+
+
+async def set_rate_limit_watch(redis: Redis, user_id: str) -> None:
+    """为指定用户设置 watch 标记，此后 10 分钟内所有请求将被详细日志记录。
+
+    Args:
+        redis: Redis 客户端。
+        user_id: 要标记的用户 ID。
+    """
+    try:
+        key = f"{WATCH_KEY_PREFIX}:{user_id}"
+        await redis.setex(key, int(RateLimitDefaults.WATCH_TTL_SECONDS), "1")
+    except Exception:
+        logger.warning("设置 watch 标记失败: user_id=%s", user_id, exc_info=True)
+
+
+async def is_user_watched(redis: Redis, user_id: str) -> bool:
+    """检查用户当前是否处于 watch 状态。
+
+    Args:
+        redis: Redis 客户端。
+        user_id: 要检查的用户 ID。
+
+    Returns:
+        True 表示该用户的 watch 标记存在且未过期，
+        False 表示不存在或 Redis 不可用。
+    """
+    try:
+        key = f"{WATCH_KEY_PREFIX}:{user_id}"
+        return await redis.get(key) is not None
+    except Exception:
+        return False
