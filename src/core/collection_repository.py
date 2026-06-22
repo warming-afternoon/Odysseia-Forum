@@ -256,7 +256,11 @@ class CollectionRepository:
                 for tid in new_ids
             ]
             if values:
-                stmt = insert(UserCollection).values(values)
+                stmt = (
+                    insert(UserCollection)
+                    .values(values)
+                    .on_conflict_do_nothing()
+                )
                 await self.session.execute(stmt)
                 await self.session.commit()
 
