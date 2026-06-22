@@ -10,7 +10,8 @@ from fastapi import Depends, HTTPException, Request, Response, status
 
 from api.v1.dependencies.security import get_current_user
 from shared.enum.rate_limit_defaults import RateLimitDefaults
-from shared.rate_limiter import RateLimitConfig, check_rate_limit, set_rate_limit_watch
+from dto.rate_limit import RateLimitConfig
+from shared.rate_limit import check_rate_limit, set_rate_limit_watch
 from shared.redis_client import RedisManager
 
 logger = logging.getLogger(__name__)

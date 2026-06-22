@@ -6,7 +6,7 @@ from enum import IntEnum
 class RateLimitDefaults(IntEnum):
     """搜索和全局限流默认配置"""
 
-    SEARCH_MAX_REQUESTS = 40
+    SEARCH_MAX_REQUESTS = 60
     """搜索接口每分钟最大请求数"""
 
     GLOBAL_MAX_REQUESTS = 1500

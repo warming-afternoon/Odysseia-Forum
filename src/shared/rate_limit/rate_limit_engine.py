@@ -1,40 +1,17 @@
-"""基于 Redis 的固定窗口频率限制器。
+"""基于 Redis 的固定窗口频率限制器 + watch 标记。
 
 使用 INCR + EXPIRE 实现，每个用户独立计数，窗口到期后自动重置。
 """
 
 import logging
-from dataclasses import dataclass
 
 from redis.asyncio import Redis
 
+from dto.rate_limit import RateLimitResult
+from shared.enum.cache_keys import CacheKeys
 from shared.enum.rate_limit_defaults import RateLimitDefaults
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass
-class RateLimitConfig:
-    """频率限制配置"""
-
-    max_requests: int = 40
-    window_seconds: int = 60
-    key_prefix: str = "rate_limit"
-
-
-@dataclass
-class RateLimitResult:
-    """频率限制检查结果"""
-
-    allowed: bool
-    current_count: int = 0
-    remaining: int = 0
-    reset_after: int = 0
-
-    @classmethod
-    def fail_open(cls) -> "RateLimitResult":
-        """Redis 不可用时的降级结果：放行"""
-        return cls(allowed=True, remaining=9999, reset_after=0)
 
 
 async def check_rate_limit(
@@ -88,11 +65,6 @@ async def check_rate_limit(
         return RateLimitResult.fail_open()
 
 
-# === 限流触发后的 watch 标记（用于诊断爬虫/高频调用） ===
-
-WATCH_KEY_PREFIX = "rate_limit:watch"
-
-
 async def set_rate_limit_watch(redis: Redis, user_id: str) -> None:
     """为指定用户设置 watch 标记，此后 10 分钟内所有请求将被详细日志记录。
 
@@ -101,7 +73,7 @@ async def set_rate_limit_watch(redis: Redis, user_id: str) -> None:
         user_id: 要标记的用户 ID。
     """
     try:
-        key = f"{WATCH_KEY_PREFIX}:{user_id}"
+        key = CacheKeys.RATE_LIMIT_WATCH.format(user_id=user_id)
         await redis.setex(key, int(RateLimitDefaults.WATCH_TTL_SECONDS), "1")
     except Exception:
         logger.warning("设置 watch 标记失败: user_id=%s", user_id, exc_info=True)
@@ -119,7 +91,7 @@ async def is_user_watched(redis: Redis, user_id: str) -> bool:
         False 表示不存在或 Redis 不可用。
     """
     try:
-        key = f"{WATCH_KEY_PREFIX}:{user_id}"
+        key = CacheKeys.RATE_LIMIT_WATCH.format(user_id=user_id)
         return await redis.get(key) is not None
     except Exception:
         return False

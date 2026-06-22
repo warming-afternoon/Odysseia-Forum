@@ -50,7 +50,7 @@
     "rate_limit": {
       "_comment": "请求频率限制配置（Redis 固定窗口算法）",
       "search": {
-        "max_requests": 40,
+        "max_requests": 60,
         "_comment_max_requests": "每个窗口（60秒）内允许的最大请求数"
       }
     }

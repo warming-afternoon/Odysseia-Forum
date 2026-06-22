@@ -11,7 +11,7 @@ from urllib.parse import parse_qsl
 
 from api.v1.utils.jwt_utils import verify_jwt
 from shared.enum.rate_limit_defaults import RateLimitDefaults
-from shared.rate_limiter import (
+from shared.rate_limit import (
     check_rate_limit,
     is_user_watched,
     set_rate_limit_watch,
