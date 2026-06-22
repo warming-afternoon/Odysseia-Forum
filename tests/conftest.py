@@ -26,16 +26,31 @@ sys.path.insert(
 # 注册所有表到 SQLModel.metadata
 import models  # noqa: E402, F401
 
+from shared.redis_client import RedisManager  # noqa: E402
+
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DB_URL",
     "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia_test",
 )
 
+TEST_REDIS_URL = os.environ.get(
+    "TEST_REDIS_URL",
+    "redis://:xunmeng123456%21@localhost:6379/0",
+)
+
 
 @pytest_asyncio.fixture(scope="function")
-async def db_session_factory() -> (
-    AsyncGenerator[async_sessionmaker[AsyncSession], None]
-):
+async def redis_client():
+    """初始化 Redis 客户端，测试结束后关闭。"""
+    await RedisManager.init_redis(TEST_REDIS_URL)
+    yield RedisManager.get_client()
+    await RedisManager.close_redis()
+
+
+@pytest_asyncio.fixture(scope="function")
+async def db_session_factory(
+    redis_client,  # noqa: ARG001 — 确保 Redis 已初始化
+) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
     """函数级别的 PostgreSQL 数据库引擎 + 会话工厂（每测试独立）。"""
     engine = create_async_engine(
         TEST_DATABASE_URL,

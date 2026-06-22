@@ -64,6 +64,12 @@ class BooklistDetail(BaseModel):
     collected_flag: bool = Field(False, description="当前用户是否收藏了该书单")
     """当前用户是否收藏了该书单"""
 
+    is_marked: bool = Field(
+        False,
+        description="是否被标记帖子命中 (仅当请求传入mark_thread_id时有效)",
+    )
+    """是否被标记帖子命中"""
+
     @field_serializer("owner_id")
     def serialize_owner_id(self, value: int) -> str:
         """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""

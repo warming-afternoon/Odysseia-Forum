@@ -2,6 +2,8 @@ import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
 from datetime import datetime
+
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from sqlmodel import delete
 
@@ -11,6 +13,7 @@ from models import Thread
 from models import Author
 from models import ThreadTagLink
 from models import ThreadFollow
+from booklist.booklist_service import BooklistService
 from core.booklist_repository import BooklistRepository
 from core.booklist_item_repository import BooklistItemRepository
 from shared.time_utils import utc_now
@@ -290,3 +293,287 @@ async def test_update_collection_count(seeded_db_session: AsyncSession):
     updated = await service.get_booklist(booklist_id)
     assert updated is not None
     assert updated.collection_count == 0
+
+
+# ============================================================
+# 新增 Repository 方法测试：单帖多书单操作
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_add_thread_to_booklists(seeded_db_session: AsyncSession):
+    """测试将一个帖子批量添加到多个书单"""
+    service = BooklistRepository(seeded_db_session)
+    booklist1 = await service.create_booklist(owner_id=100, title="BL1")
+    booklist2 = await service.create_booklist(owner_id=100, title="BL2")
+    booklist3 = await service.create_booklist(owner_id=100, title="BL3")
+    assert booklist1.id and booklist2.id and booklist3.id
+
+    bid1, bid2, bid3 = booklist1.id, booklist2.id, booklist3.id
+    # booklist2 先已包含 thread_id=1001
+    await service.add_threads_to_booklist(
+        bid2, items=[BooklistItemAddData(thread_id=1001)]
+    )
+
+    # 批量添加到三个书单
+    added = await service.add_thread_to_booklists(
+        thread_id=1001, booklist_ids=[bid1, bid2, bid3], owner_id=100
+    )
+    assert sorted(added) == sorted([bid1, bid3])  # bid2 已存在，跳过
+
+    # 检查 item_count
+    bl1 = await service.get_booklist(bid1)
+    bl2 = await service.get_booklist(bid2)
+    bl3 = await service.get_booklist(bid3)
+    assert bl1 is not None and bl2 is not None and bl3 is not None
+    assert bl1.item_count == 1
+    assert bl2.item_count == 1  # 未变（已存在的未重复插入）
+    assert bl3.item_count == 1
+
+
+@pytest.mark.asyncio
+async def test_add_thread_to_booklists_empty(seeded_db_session: AsyncSession):
+    """测试空列表不会报错"""
+    service = BooklistRepository(seeded_db_session)
+    added = await service.add_thread_to_booklists(
+        thread_id=1001, booklist_ids=[], owner_id=100
+    )
+    assert added == []
+
+
+@pytest.mark.asyncio
+async def test_remove_thread_from_booklists(seeded_db_session: AsyncSession):
+    """测试将一个帖子从多个书单中批量移除"""
+    service = BooklistRepository(seeded_db_session)
+    booklist1 = await service.create_booklist(owner_id=200, title="BL1")
+    booklist2 = await service.create_booklist(owner_id=200, title="BL2")
+    booklist3 = await service.create_booklist(owner_id=200, title="BL3")
+    assert booklist1.id and booklist2.id and booklist3.id
+
+    bid1, bid2, bid3 = booklist1.id, booklist2.id, booklist3.id
+    # 三个书单都添加 thread_id=1001
+    for bid in [bid1, bid2, bid3]:
+        await service.add_threads_to_booklist(
+            bid, items=[BooklistItemAddData(thread_id=1001)]
+        )
+
+    # 从 bid1 和 bid3 移除
+    removed = await service.remove_thread_from_booklists(
+        thread_id=1001, booklist_ids=[bid1, bid3]
+    )
+    assert sorted(removed) == sorted([bid1, bid3])
+
+    # 检查 item_count
+    bl1 = await service.get_booklist(bid1)
+    bl2 = await service.get_booklist(bid2)
+    bl3 = await service.get_booklist(bid3)
+    assert bl1 is not None and bl2 is not None and bl3 is not None
+    assert bl1.item_count == 0
+    assert bl2.item_count == 1  # 未被移除
+    assert bl3.item_count == 0
+
+
+@pytest.mark.asyncio
+async def test_remove_thread_from_booklists_empty(seeded_db_session: AsyncSession):
+    """测试空列表不会报错"""
+    service = BooklistRepository(seeded_db_session)
+    removed = await service.remove_thread_from_booklists(
+        thread_id=1001, booklist_ids=[]
+    )
+    assert removed == []
+
+
+# ============================================================
+# Service 层 sync_thread_in_booklists 测试
+# ============================================================
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_mixed(seeded_db_session: AsyncSession):
+    """完全同步：混合添加、移除、不变"""
+    service = BooklistRepository(seeded_db_session)
+    # 创建 4 个书单
+    bls = []
+    for i in range(4):
+        bl = await service.create_booklist(owner_id=300, title=f"BL{i}")
+        bls.append(bl)
+    ids = [bl.id for bl in bls]
+
+    # 书单 0 和 2 已有帖子 1001
+    await service.add_threads_to_booklist(ids[0], items=[BooklistItemAddData(thread_id=1001)])
+    await service.add_threads_to_booklist(ids[2], items=[BooklistItemAddData(thread_id=1001)])
+
+    # 目标：修改后书单 0 和 1 包含帖子 1001
+    scope = ids  # [0, 1, 2, 3]
+    target = [ids[0], ids[1]]
+
+    svc = BooklistService(seeded_db_session)
+    result = await svc.sync_thread_in_booklists(
+            user_id=300,
+            thread_id=1001,
+            scope_booklist_ids=scope,
+            target_booklist_ids=target,
+        )
+
+    # 结果验证
+    assert result.thread_id == 1001
+    assert sorted(result.added_to_booklist_ids) == sorted([ids[1]])      # BL1 新增
+    assert sorted(result.removed_from_booklist_ids) == sorted([ids[2]])  # BL2 移除
+    assert sorted(result.unchanged_booklist_ids) == sorted([ids[0], ids[3]])  # BL0 已有/BL3 无且不在 target
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_pure_add(seeded_db_session: AsyncSession):
+    """纯添加：target 中书单都不含该帖"""
+    service = BooklistRepository(seeded_db_session)
+    bls = []
+    for i in range(3):
+        bl = await service.create_booklist(owner_id=400, title=f"BL{i}")
+        bls.append(bl)
+    ids = [bl.id for bl in bls]
+
+    # 无书单包含帖子 1001
+
+    svc = BooklistService(seeded_db_session)
+    result = await svc.sync_thread_in_booklists(
+            user_id=400,
+            thread_id=1001,
+            scope_booklist_ids=ids,
+            target_booklist_ids=[ids[0], ids[2]],
+        )
+
+    assert sorted(result.added_to_booklist_ids) == sorted([ids[0], ids[2]])
+    assert result.removed_from_booklist_ids == []
+    assert sorted(result.unchanged_booklist_ids) == sorted([ids[1]])
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_pure_remove(seeded_db_session: AsyncSession):
+    """纯删除：target 为空，移除 scope 中所有含该帖的书单"""
+    service = BooklistRepository(seeded_db_session)
+    bls = []
+    for i in range(3):
+        bl = await service.create_booklist(owner_id=500, title=f"BL{i}")
+        bls.append(bl)
+    ids = [bl.id for bl in bls]
+
+    # 三个书单都包含帖子 1001
+    for bid in ids:
+        await service.add_threads_to_booklist(bid, items=[BooklistItemAddData(thread_id=1001)])
+
+    svc = BooklistService(seeded_db_session)
+    result = await svc.sync_thread_in_booklists(
+            user_id=500,
+            thread_id=1001,
+            scope_booklist_ids=ids,
+            target_booklist_ids=[],
+        )
+
+    assert result.added_to_booklist_ids == []
+    assert sorted(result.removed_from_booklist_ids) == sorted(ids)
+    assert result.unchanged_booklist_ids == []
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_idempotent(seeded_db_session: AsyncSession):
+    """幂等：同样参数调用两次，第二次无变更"""
+    service = BooklistRepository(seeded_db_session)
+    bls = []
+    for i in range(2):
+        bl = await service.create_booklist(owner_id=600, title=f"BL{i}")
+        bls.append(bl)
+    ids = [bl.id for bl in bls]
+
+    # BL0 已有帖子，BL1 无
+    await service.add_threads_to_booklist(ids[0], items=[BooklistItemAddData(thread_id=1001)])
+
+    scope = ids
+    target = [ids[0], ids[1]]
+
+    svc = BooklistService(seeded_db_session)
+    # 第一次
+    result1 = await svc.sync_thread_in_booklists(
+        user_id=600,
+        thread_id=1001,
+        scope_booklist_ids=scope,
+        target_booklist_ids=target,
+    )
+    assert sorted(result1.added_to_booklist_ids) == sorted([ids[1]])
+    assert result1.removed_from_booklist_ids == []
+    assert result1.unchanged_booklist_ids == [ids[0]]
+
+    # 第二次：完全相同参数
+    result2 = await svc.sync_thread_in_booklists(
+        user_id=600,
+        thread_id=1001,
+        scope_booklist_ids=scope,
+        target_booklist_ids=target,
+    )
+    assert result2.added_to_booklist_ids == []
+    assert result2.removed_from_booklist_ids == []
+    assert sorted(result2.unchanged_booklist_ids) == sorted([ids[0], ids[1]])
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_target_not_subset(seeded_db_session: AsyncSession):
+    """target 不是 scope 的子集 → 422"""
+    service = BooklistRepository(seeded_db_session)
+    bl = await service.create_booklist(owner_id=700, title="BL")
+    assert bl.id is not None
+
+    svc = BooklistService(seeded_db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.sync_thread_in_booklists(
+            user_id=700,
+            thread_id=1001,
+            scope_booklist_ids=[bl.id],
+            target_booklist_ids=[bl.id, 99999],  # 99999 不在 scope 中
+        )
+    assert exc_info.value.status_code == 422
+    assert "不在 scope 中" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_not_owner(seeded_db_session: AsyncSession):
+    """scope 中书单不属于当前用户 → 403"""
+    service = BooklistRepository(seeded_db_session)
+    bl = await service.create_booklist(owner_id=800, title="BL")
+    assert bl.id is not None
+
+    svc = BooklistService(seeded_db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.sync_thread_in_booklists(
+            user_id=999,  # 不是 owner
+            thread_id=1001,
+            scope_booklist_ids=[bl.id],
+            target_booklist_ids=[bl.id],
+        )
+    assert exc_info.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_empty_scope(seeded_db_session: AsyncSession):
+    """scope 为空 → 422"""
+    svc = BooklistService(seeded_db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.sync_thread_in_booklists(
+            user_id=900,
+            thread_id=1001,
+            scope_booklist_ids=[],
+            target_booklist_ids=[],
+        )
+    assert exc_info.value.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_nonexistent_in_scope(seeded_db_session: AsyncSession):
+    """scope 中包含不存在的书单 → 404"""
+    svc = BooklistService(seeded_db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        await svc.sync_thread_in_booklists(
+            user_id=900,
+            thread_id=1001,
+            scope_booklist_ids=[99999],  # 不存在的书单
+            target_booklist_ids=[99999],
+        )
+    assert exc_info.value.status_code == 404

@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional, Set, Tuple
 
 from sqlalchemy import update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, asc, delete, desc, func, or_, select
 
@@ -366,6 +367,104 @@ class BooklistRepository:
             # logger.info(f"{deleted_count} 个帖子已从书单 {booklist_id} 移除")
 
         return deleted_count
+
+    async def add_thread_to_booklists(
+        self, thread_id: int, booklist_ids: List[int], owner_id: int
+    ) -> List[int]:
+        """
+        将一个帖子批量添加到多个书单。
+
+        跳过已存在的项（on_conflict_do_nothing 保证幂等），
+        返回实际新增了帖子的书单 ID 列表。
+        """
+        if not booklist_ids:
+            return []
+
+        # 获取各书单当前 max(display_order)
+        max_stmt = (
+            select(
+                BooklistItem.booklist_id,
+                func.max(BooklistItem.display_order).label("max_order"),
+            )
+            .where(BooklistItem.booklist_id.in_(booklist_ids))  # type: ignore
+            .group_by(BooklistItem.booklist_id)  # type: ignore
+        )
+        max_result = await self.session.execute(max_stmt)
+        max_orders: dict = {row[0]: row[1] or 0 for row in max_result.fetchall()}
+
+        # 构建插入值
+        values = [
+            {
+                "booklist_id": bid,
+                "thread_id": thread_id,
+                "owner_id": owner_id,
+                "display_order": max_orders.get(bid, 0) + 1,
+            }
+            for bid in booklist_ids
+        ]
+
+        # 批量插入，冲突时跳过，并返回实际插入的书单 ID
+        stmt = (
+            insert(BooklistItem)
+            .values(values)
+            .on_conflict_do_nothing()
+            .returning(BooklistItem.booklist_id)  # type: ignore
+        )
+        result = await self.session.execute(stmt)
+        inserted_ids: List[int] = [row[0] for row in result.fetchall()]
+
+        # 更新 item_count：仅对实际新增了帖子的书单 +1
+        if inserted_ids:
+            update_stmt = (
+                update(Booklist)
+                .where(Booklist.id.in_(inserted_ids))  # type: ignore
+                .values(item_count=Booklist.item_count + 1)
+            )
+            await self.session.execute(update_stmt)
+
+        await self.session.commit()
+        return inserted_ids
+
+    async def remove_thread_from_booklists(
+        self, thread_id: int, booklist_ids: List[int]
+    ) -> List[int]:
+        """
+        将一个帖子从多个书单中批量移除。
+
+        返回实际移除了帖子的书单 ID 列表。
+        """
+        if not booklist_ids:
+            return []
+
+        # 批量删除并返回被删除的行所属的书单 ID
+        from collections import Counter
+
+        stmt = (
+            delete(BooklistItem)
+            .where(
+                and_(
+                    BooklistItem.thread_id == thread_id,  # type: ignore
+                    BooklistItem.booklist_id.in_(booklist_ids),  # type: ignore
+                )
+            )
+            .returning(BooklistItem.booklist_id)  # type: ignore
+        )
+        result = await self.session.execute(stmt)
+        removed_ids: List[int] = [row[0] for row in result.fetchall()]
+
+        # 更新 item_count：按书单分组递减
+        if removed_ids:
+            counts = Counter(removed_ids)
+            for bid, cnt in counts.items():
+                booklist = await self.get_booklist(bid)
+                if booklist:
+                    booklist.item_count -= cnt
+                    if booklist.item_count < 0:
+                        booklist.item_count = 0
+                    self.session.add(booklist)
+
+        await self.session.commit()
+        return list(set(removed_ids))
 
     async def get_threads_in_users_booklists(
         self, owner_id: int, thread_ids: List[int]

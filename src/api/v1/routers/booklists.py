@@ -18,6 +18,8 @@ from api.v1.schemas.booklist import (
     BooklistItemDetail,
     BooklistItemsAddRequest,
     BooklistItemsDeleteRequest,
+    BooklistItemsSyncRequest,
+    BooklistItemsSyncResponse,
     BooklistItemUpdateRequest,
     BooklistUpdateResponse,
 )
@@ -27,7 +29,9 @@ from core.author_repository import AuthorRepository
 from core.booklist_item_repository import BooklistItemRepository
 from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
+from models import BooklistItem
 from shared.database import AsyncSessionFactory
+from sqlmodel import select
 from shared.enum import CollectionType
 from shared.redis_client import RedisManager
 
@@ -299,6 +303,10 @@ async def list_my_booklists(
         description="每次请求返回的数量 (范围: 1-100)",
     ),
     offset: int = Query(default=0, ge=0, description="结果的偏移量，从0开始"),
+    mark_thread_id: Optional[int] = Query(
+        None,
+        description="标记帖子ID：传入后为每个书单标注是否包含该帖子（不过滤结果集），配合is_marked字段使用",
+    ),
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
     """
@@ -346,6 +354,17 @@ async def list_my_booklists(
                     )
                 )
 
+            # 查询标记帖子在哪些书单中存在
+            marked_booklist_ids = set()
+            if mark_thread_id is not None and booklists:
+                booklist_ids = [b.id for b in booklists if b.id is not None]
+                stmt = select(BooklistItem.booklist_id).where(
+                    BooklistItem.thread_id == mark_thread_id,
+                    BooklistItem.booklist_id.in_(booklist_ids),  # type: ignore
+                )
+                rows = await session.execute(stmt)
+                marked_booklist_ids = set(rows.scalars().all())
+
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, booklists)
 
@@ -359,6 +378,8 @@ async def list_my_booklists(
 
                 if b.id in collected_booklist_ids:
                     detail.collected_flag = True
+                if b.id in marked_booklist_ids:
+                    detail.is_marked = True
                 if not detail.cover_image_url and b.id in fallback_covers:
                     detail.cover_image_url = fallback_covers[b.id]
                 results.append(detail)
@@ -628,6 +649,46 @@ async def remove_threads_from_booklist(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="从书单批量移除帖子失败",
+        )
+
+
+@router.post(
+    "/item/sync",
+    summary="批量同步帖子在多个书单中的存在性",
+    response_model=BooklistItemsSyncResponse,
+)
+async def sync_thread_in_booklists(
+    request: BooklistItemsSyncRequest,
+    current_user: Dict[str, Any] = Depends(require_auth),
+):
+    """
+    批量修改/覆盖一个帖子在用户拥有的多个书单中的存在性。
+
+    - **thread_id**: 帖子ID
+    - **scope_booklist_ids**: 操作范围（必须全是当前用户拥有的书单）
+    - **target_booklist_ids**: 操作后应包含该帖子的书单（必须是 scope 的子集）
+
+    幂等：重复调用不会产生副作用。
+    """
+    try:
+        user_id = int(current_user["id"])
+        async with AsyncSessionFactory() as session:
+            service = BooklistService(session)
+            result = await service.sync_thread_in_booklists(
+                user_id=user_id,
+                thread_id=request.thread_id,
+                scope_booklist_ids=request.scope_booklist_ids,
+                target_booklist_ids=request.target_booklist_ids,
+            )
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量同步帖子的书单状态失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"同步失败: {e}",
         )
 
 

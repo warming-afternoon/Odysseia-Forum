@@ -11,7 +11,7 @@ from core.booklist_repository import BooklistRepository
 from core.redis_trend_service import RedisTrendService
 from core.thread_repository import ThreadRepository
 from dto.booklist_item_dto import BooklistItemDTO
-from models import Thread
+from models import Booklist, BooklistItem, Thread
 from shared.enum import ConstantEnum
 
 logger = logging.getLogger(__name__)
@@ -130,3 +130,123 @@ class BooklistService:
                 await self.thread_repo.update_collection_counts(net_removed_ids, -1)
 
         return deleted_count
+
+    async def sync_thread_in_booklists(
+        self,
+        user_id: int,
+        thread_id: int,
+        scope_booklist_ids: List[int],
+        target_booklist_ids: List[int],
+    ):
+        """
+        批量同步一个帖子在用户多个书单中的存在性。
+
+        - scope_booklist_ids：操作范围（必须全属于当前用户）
+        - target_booklist_ids：操作后应包含该帖子的书单（必须是 scope 的子集）
+        """
+        from api.v1.schemas.booklist.booklist_items_sync_response import (
+            BooklistItemsSyncResponse,
+        )
+
+        # 1. 校验 scope 不能为空
+        if not scope_booklist_ids:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="scope_booklist_ids 不能为空",
+            )
+
+        # 2. 校验 target ⊆ scope
+        target_set = set(target_booklist_ids)
+        scope_set = set(scope_booklist_ids)
+        if not target_set.issubset(scope_set):
+            outside = list(target_set - scope_set)
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"target_booklist_ids 包含不在 scope 中的书单: {outside}",
+            )
+
+        # 3. 校验所有权：所有 scope 书单必须属于当前用户
+        stmt = (
+            select(Booklist.id, Booklist.owner_id)
+            .where(Booklist.id.in_(list(scope_set)))  # type: ignore
+        )
+        booklist_rows = (await self.session.execute(stmt)).all()
+        found_ids = {row[0] for row in booklist_rows}
+
+        for row in booklist_rows:
+            if row[1] != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"书单 {row[0]} 不属于当前用户",
+                )
+
+        # 检查是否有 scope 中书单不存在
+        missing = scope_set - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"书单不存在: {list(missing)}",
+            )
+
+        # 4. 查询 scope 中哪些书单已包含该帖子
+        existing_stmt = select(BooklistItem.booklist_id).where(
+            BooklistItem.thread_id == thread_id,  # type: ignore
+            BooklistItem.booklist_id.in_(list(scope_set)),  # type: ignore
+        )
+        existing_rows = await self.session.execute(existing_stmt)
+        existing_set = set(existing_rows.scalars().all())
+
+        # 5. 计算 add_to / remove_from / unchanged
+        add_to = list(target_set - existing_set)
+        remove_from = list(existing_set - target_set)
+        unchanged = list(scope_set - set(add_to) - set(remove_from))
+
+        # 6. 执行添加和删除
+        added_ids = []
+        removed_ids = []
+        if add_to:
+            added_ids = await self.booklist_repo.add_thread_to_booklists(
+                thread_id, add_to, user_id
+            )
+        if remove_from:
+            removed_ids = await self.booklist_repo.remove_thread_from_booklists(
+                thread_id, remove_from
+            )
+
+        # 7. 跨域同步 Thread.collection_count（净增减）
+        # 查询操作前：thread 是否已在用户任何书单中
+        had_before = bool(existing_set)
+
+        # 查询操作后：thread 是否仍在用户任何书单中
+        still_exists = await self.booklist_repo.get_threads_in_users_booklists(
+            user_id, [thread_id]
+        )
+        has_after = bool(still_exists)
+
+        if not had_before and has_after:
+            # 用户首次收藏此帖
+            await self.thread_repo.update_collection_counts([thread_id], 1)
+
+            # Redis 飙升榜
+            threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+                days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value
+            )
+            check_stmt = select(Thread.thread_id).where(
+                Thread.thread_id == thread_id,  # type: ignore
+                Thread.created_at >= threshold,
+            )
+            valid = (await self.session.execute(check_stmt)).scalar_one_or_none()
+            if valid:
+                trend_service = RedisTrendService()
+                await trend_service.record_increment("collection", thread_id, 1)
+
+        elif had_before and not has_after:
+            # 用户完全取消收藏此帖
+            await self.thread_repo.update_collection_counts([thread_id], -1)
+
+        return BooklistItemsSyncResponse(
+            thread_id=thread_id,
+            added_to_booklist_ids=added_ids,
+            removed_from_booklist_ids=removed_ids,
+            unchanged_booklist_ids=unchanged,
+        )
