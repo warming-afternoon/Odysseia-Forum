@@ -377,6 +377,7 @@ class ThreadFollowRepository:
                                 or thread.latest_update_at > follow.last_viewed_at
                             )
                         ),
+                        active_flag=follow.active_flag,
                     )
                 )
 

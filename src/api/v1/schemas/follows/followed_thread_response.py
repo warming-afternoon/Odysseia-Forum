@@ -33,3 +33,7 @@ class FollowedThreadResponse(ThreadDetail):
         default=False,
         description="自 last_viewed_at 后帖子是否有新内容",
     )
+
+    active_flag: bool = Field(
+        default=True, description="是否为当前关注（True=当前关注，False=过去关注）"
+    )

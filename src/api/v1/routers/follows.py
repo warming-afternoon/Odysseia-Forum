@@ -4,10 +4,8 @@ import logging
 from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
-
 from api.v1.dependencies.security import get_current_user
-from api.v1.schemas.follows import FollowedThreadResponse
+from api.v1.schemas.follows import FollowsListResponse
 from shared.database import AsyncSessionFactory
 from shared.channel_mapping_utils import ChannelMappingUtils
 from core.cache_service import CacheService
@@ -20,15 +18,6 @@ router = APIRouter(prefix="/follows", tags=["关注列表"])
 # 全局变量，将在应用启动时由 api_main.py 注入
 channel_mappings_config: Dict[int, List[Dict]] = {}
 cache_service_instance: Optional[CacheService] = None
-
-
-class FollowsListResponse(BaseModel):
-    """关注列表的 API 响应体"""
-
-    total: int = Field(description="关注总数")
-    threads: List[FollowedThreadResponse] = Field(description="帖子列表")
-    limit: int = Field(description="返回数量限制")
-    offset: int = Field(description="偏移量")
 
 
 @router.get("/", summary="获取用户的关注列表", response_model=FollowsListResponse)
