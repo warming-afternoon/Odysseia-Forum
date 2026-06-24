@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, asc, delete, desc, func, or_, select
 
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
+from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
 from models import Booklist, BooklistItem, UserCollection
 from shared.enum import CollectionType
 
@@ -35,7 +36,8 @@ class BooklistRepository:
                 is_public=False,  # 默认书单设定为私有
                 is_anonymous=False,
                 is_default=True,
-                display_type=1,
+                default_sort_method=DEFAULT_SORT_METHOD.value,
+                default_sort_order=DEFAULT_SORT_ORDER.value,
                 item_count=0,
                 collection_count=0,
                 view_count=0,
@@ -55,7 +57,8 @@ class BooklistRepository:
         cover_image_url: Optional[str] = None,
         is_public: bool = True,
         is_anonymous: bool = False,
-        display_type: int = 1,
+        default_sort_method: str = DEFAULT_SORT_METHOD.value,
+        default_sort_order: str = DEFAULT_SORT_ORDER.value,
         is_tournament: bool = False,
         tournament_channel_id: Optional[int] = None,
     ) -> Booklist:
@@ -69,7 +72,8 @@ class BooklistRepository:
             cover_image_url=cover_image_url,
             is_public=is_public,
             is_anonymous=is_anonymous,
-            display_type=display_type,
+            default_sort_method=default_sort_method,
+            default_sort_order=default_sort_order,
             is_tournament=is_tournament,
             tournament_channel_id=tournament_channel_id,
             item_count=0,
@@ -113,7 +117,8 @@ class BooklistRepository:
         cover_image_url: Optional[str] = None,
         is_public: Optional[bool] = None,
         is_anonymous: Optional[bool] = None,
-        display_type: Optional[int] = None,
+        default_sort_method: Optional[str] = None,
+        default_sort_order: Optional[str] = None,
         display_thread_id: Optional[int] = None,
         display_channel_id: Optional[int] = None,
         display_guild_id: Optional[int] = None,
@@ -127,7 +132,8 @@ class BooklistRepository:
             "cover_image_url": cover_image_url,
             "is_public": is_public,
             "is_anonymous": is_anonymous,
-            "display_type": display_type,
+            "default_sort_method": default_sort_method,
+            "default_sort_order": default_sort_order,
             "display_thread_id": display_thread_id,
             "display_channel_id": display_channel_id,
             "display_guild_id": display_guild_id,

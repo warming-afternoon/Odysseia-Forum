@@ -53,10 +53,16 @@ class Booklist(SQLModel, table=True):
     )
     """赛事关联的 Discord 频道ID"""
 
-    display_type: int = Field(
-        default=1, description="展示方式: 1-加入时间倒序, 2-display_order"
+    default_sort_method: str = Field(
+        default="join_time",
+        description="默认排序方式: hot, created_at, reaction_count, reply_count, collection_count, last_active_at, join_time, display_order",
     )
-    """展示方式: 1-加入时间倒序, 2-display_order"""
+    """默认排序方式"""
+
+    default_sort_order: str = Field(
+        default="desc", description="默认排序顺序: asc, desc"
+    )
+    """默认排序顺序"""
 
     # 统计数据
     item_count: int = Field(default=0, description="书单内帖子数量")

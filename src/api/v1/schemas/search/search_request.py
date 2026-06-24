@@ -75,11 +75,11 @@ class SearchRequest(BaseModel):
     )
     reaction_count_range: str = Field(
         default=DefaultPreferences.DEFAULT_NUMERIC_RANGE.value,
-        description="点赞数范围 (例如: '>10', '5-20')",
+        description="点赞数范围, 例如: [0, 10000000)",
     )
     reply_count_range: str = Field(
         default=DefaultPreferences.DEFAULT_NUMERIC_RANGE.value,
-        description="回复数范围 (例如: '>=5')",
+        description="回复数范围, 例如: [0, 10000000)",
     )
     sort_method: str = Field(
         default="comprehensive",

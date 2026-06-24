@@ -10,6 +10,7 @@ from sqlmodel import select
 
 from api.v1.schemas.booklist import BooklistItemUpdateRequest
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
+from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
 from api.v1.schemas.tournament.tournament_create_request import TournamentCreateRequest
 from api.v1.schemas.tournament.tournament_item_update_request import (
     TournamentItemUpdateRequest,
@@ -54,7 +55,8 @@ class TournamentService:
                 cover_image_url=request.cover_image_url,
                 is_public=request.is_public,
                 is_anonymous=False,
-                display_type=1,
+                default_sort_method=DEFAULT_SORT_METHOD.value,
+                default_sort_order=DEFAULT_SORT_ORDER.value,
                 is_tournament=True,
                 tournament_channel_id=request.tournament_channel_id,
             )

@@ -3,14 +3,43 @@ from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy import Float, case, cast
 from sqlmodel import and_, asc, desc, func, select
 
 from api.v1.schemas.booklist import BooklistItemUpdateRequest
 from api.v1.schemas.booklist.booklist_item_detail import BooklistItemDetail
 from api.v1.schemas.search.author_detail import AuthorDetail
+from core.booklist_sort_constants import (
+    DEFAULT_SORT_METHOD,
+    DEFAULT_SORT_ORDER,
+    SORT_METHOD_COLUMN_MAP,
+)
 from models import Author, Booklist, BooklistItem, Thread
+from shared.enum.search_config_type import SearchConfigDefaults
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_item_sorting(query, sort_method: str, sort_order: str, time_decay: float = SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value):
+    """根据排序方式与顺序对书单帖子查询应用 ORDER BY。"""
+    if sort_method == "hot":
+        # Reddit Hot: log10(max(1, reaction_count)) + (epoch(created_at) / time_decay)
+        ln10 = 2.302585092994046
+        reaction_score = (
+            func.log(
+                case(
+                    (Thread.reaction_count > 1, cast(Thread.reaction_count, Float)),
+                    else_=1.0,
+                )
+            )
+            / ln10
+        )
+        time_score = func.extract("epoch", Thread.created_at).cast(Float) / float(time_decay)
+        return query.order_by((reaction_score + time_score).desc())
+
+    order_func = asc if sort_order == "asc" else desc
+    sort_field = SORT_METHOD_COLUMN_MAP.get(sort_method, BooklistItem.created_at)
+    return query.order_by(order_func(sort_field))
 
 
 class BooklistItemRepository:
@@ -169,15 +198,16 @@ class BooklistItemRepository:
     async def get_booklist_items_with_details(
         self,
         booklist_id: int,
-        display_type: int,
+        default_sort_method: str = DEFAULT_SORT_METHOD,
+        default_sort_order: str = DEFAULT_SORT_ORDER,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[BooklistItemDetail], int]:
         """
-        分页获取书单内的帖子详情，并根据指定的排序方式排序
+        分页获取书单内的帖子详情，并根据书单的默认排序方式排序
         """
 
-        query = (
+        base_query = (
             select(BooklistItem, Thread, Author)
             .join(Thread, BooklistItem.thread_id == Thread.thread_id)  # type: ignore
             .join(Author, Thread.author_id == Author.id)  # type: ignore
@@ -185,21 +215,16 @@ class BooklistItemRepository:
             .options(selectinload(Thread.tags))  # type: ignore
         )
 
-        # 根据 display_type 应用不同的排序规则
-        if display_type == 2:
-            # 按 display_order 升序
-            query = query.order_by(asc(BooklistItem.display_order))
-        else:
-            # 默认按加入时间倒序
-            query = query.order_by(desc(BooklistItem.created_at))
-
-        # 计数
-        count_stmt = select(func.count()).select_from(query.alias("sub"))
+        # 计数（不包含排序）
+        count_stmt = select(func.count()).select_from(base_query.subquery())
         count_result = await self.session.execute(count_stmt)
         total = count_result.scalar_one_or_none() or 0
 
+        # 应用排序
+        sorted_query = _apply_item_sorting(base_query, default_sort_method, default_sort_order)
+
         # 获取数据
-        data_stmt = query.offset(offset).limit(limit)
+        data_stmt = sorted_query.offset(offset).limit(limit)
         result = await self.session.execute(data_stmt)
         rows = result.all()
 

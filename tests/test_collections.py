@@ -56,7 +56,8 @@ async def seeded_collection_session(
         title="PreExisting Booklist",
         description="For testing",
         is_public=True,
-        display_type=1,
+        default_sort_method="join_time",
+        default_sort_order="desc",
     )
     collection_session.add(booklist)
     await collection_session.commit()

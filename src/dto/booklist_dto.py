@@ -19,7 +19,8 @@ class BooklistDTO(BaseModel):
     is_default: bool = Field(default=False, description="是否为用户的默认书单")
     is_tournament: bool = Field(default=False, description="是否为赛事书单")
     tournament_channel_id: Optional[int] = Field(default=None, description="赛事关联的 Discord 频道 ID")
-    display_type: int = Field(default=1, description="展示方式")
+    default_sort_method: str = Field(default="join_time", description="默认排序方式")
+    default_sort_order: str = Field(default="desc", description="默认排序顺序")
     item_count: int = Field(default=0, description="书单内帖子数量")
     view_count: int = Field(default=0, description="被浏览次数")
     collection_count: int = Field(default=0, description="被收藏次数")
@@ -40,7 +41,8 @@ class BooklistDTO(BaseModel):
             is_default=booklist.is_default,
             is_tournament=booklist.is_tournament,
             tournament_channel_id=booklist.tournament_channel_id,
-            display_type=booklist.display_type,
+            default_sort_method=booklist.default_sort_method,
+            default_sort_order=booklist.default_sort_order,
             item_count=booklist.item_count,
             view_count=booklist.view_count,
             collection_count=booklist.collection_count,

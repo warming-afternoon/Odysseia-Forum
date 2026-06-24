@@ -40,6 +40,46 @@ channel_mappings_config: Dict[int, List[Dict]] = {}
 
 logger = logging.getLogger(__name__)
 
+from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
+from shared.enum.booklist_sort_method import BooklistSortMethod
+from shared.enum.booklist_sort_order import BooklistSortOrder
+
+
+def _resolve_sort_params(
+    default_sort_method: Optional[str] = None,
+    default_sort_order: Optional[str] = None,
+    display_type: Optional[int] = None,
+) -> tuple[str, str]:
+    """
+    解析书单排序参数，兼容旧 display_type 字段。
+
+    优先级：新字段 > display_type 转换 > 默认值
+    """
+    # 如果提供了新字段，直接使用（验证合法性）
+    if default_sort_method is not None:
+        valid_methods = {m.value for m in BooklistSortMethod}
+        if default_sort_method not in valid_methods:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"无效的排序方式: {default_sort_method}. 可选值: {', '.join(sorted(valid_methods))}",
+            )
+        valid_orders = {o.value for o in BooklistSortOrder}
+        if default_sort_order is not None and default_sort_order not in valid_orders:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"无效的排序顺序: {default_sort_order}. 可选值: asc, desc",
+            )
+        return default_sort_method, default_sort_order or DEFAULT_SORT_ORDER.value
+
+    # 兼容旧 display_type 字段
+    if display_type is not None:
+        if display_type == 2:
+            return BooklistSortMethod.DISPLAY_ORDER.value, BooklistSortOrder.ASC.value
+        return BooklistSortMethod.JOIN_TIME.value, BooklistSortOrder.DESC.value
+
+    # 默认值
+    return DEFAULT_SORT_METHOD.value, DEFAULT_SORT_ORDER.value
+
 
 async def _fill_authors_for_booklists(
     session: Any, booklists: List[Any]
@@ -122,7 +162,9 @@ async def create_booklist(
     cover_image_url: Optional[str] = None,
     is_public: bool = True,
     is_anonymous: bool = False,
-    display_type: int = 1,
+    display_type: Optional[int] = Query(None, deprecated=True, description="已废弃，请使用 default_sort_method + default_sort_order"),
+    default_sort_method: Optional[str] = Query(None, description="默认排序方式"),
+    default_sort_order: Optional[str] = Query(None, description="默认排序顺序"),
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
     """
@@ -133,10 +175,16 @@ async def create_booklist(
     - cover_image_url: 封面图 URL（可选）
     - is_public: 是否公开，默认为 True
     - is_anonymous: 是否匿名，默认为 False
-    - display_type: 展示方式，1=加入时间倒序，2=display_order，默认为1
+    - default_sort_method: 默认排序方式，默认为 join_time
+    - default_sort_order: 默认排序顺序，默认为 desc
     """
     try:
         user_id = int(current_user["id"])
+        sort_method, sort_order = _resolve_sort_params(
+            default_sort_method=default_sort_method,
+            default_sort_order=default_sort_order,
+            display_type=display_type,
+        )
 
         async with AsyncSessionFactory() as session:
             service = BooklistRepository(session)
@@ -147,7 +195,8 @@ async def create_booklist(
                 cover_image_url=cover_image_url,
                 is_public=is_public,
                 is_anonymous=is_anonymous,
-                display_type=display_type,
+                default_sort_method=sort_method,
+                default_sort_order=sort_order,
             )
 
             if booklist.id is None:
@@ -457,7 +506,9 @@ async def update_booklist(
     cover_image_url: Optional[str] = None,
     is_public: Optional[bool] = None,
     is_anonymous: Optional[bool] = None,
-    display_type: Optional[int] = None,
+    display_type: Optional[int] = Query(None, deprecated=True, description="已废弃，请使用 default_sort_method + default_sort_order"),
+    default_sort_method: Optional[str] = Query(None, description="默认排序方式"),
+    default_sort_order: Optional[str] = Query(None, description="默认排序顺序"),
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
     """
@@ -469,10 +520,17 @@ async def update_booklist(
     - cover_image_url: 新封面图URL（可选）
     - is_public: 是否公开（可选）
     - is_anonymous: 是否匿名（可选）
-    - display_type: 展示方式（可选）
+    - default_sort_method: 默认排序方式（可选）
+    - default_sort_order: 默认排序顺序（可选）
     """
     try:
         user_id = int(current_user["id"])
+        sort_method, sort_order = _resolve_sort_params(
+            default_sort_method=default_sort_method,
+            default_sort_order=default_sort_order,
+            display_type=display_type,
+        )
+
         async with AsyncSessionFactory() as session:
             service = BooklistRepository(session)
             # 检查权限
@@ -493,7 +551,8 @@ async def update_booklist(
                 cover_image_url=cover_image_url,
                 is_public=is_public,
                 is_anonymous=is_anonymous,
-                display_type=display_type,
+                default_sort_method=sort_method,
+                default_sort_order=sort_order,
             )
             if not updated:
                 raise HTTPException(
@@ -654,7 +713,7 @@ async def remove_threads_from_booklist(
 
 @router.post(
     "/item/sync",
-    summary="批量同步帖子在多个书单中的存在性",
+    summary="批量修改帖子在多个书单中的存在性",
     response_model=BooklistItemsSyncResponse,
 )
 async def sync_thread_in_booklists(
@@ -667,8 +726,6 @@ async def sync_thread_in_booklists(
     - **thread_id**: 帖子ID
     - **scope_booklist_ids**: 操作范围（必须全是当前用户拥有的书单）
     - **target_booklist_ids**: 操作后应包含该帖子的书单（必须是 scope 的子集）
-
-    幂等：重复调用不会产生副作用。
     """
     try:
         user_id = int(current_user["id"])
@@ -732,7 +789,8 @@ async def get_booklist_items(
             item_service = BooklistItemRepository(session)
             items, total = await item_service.get_booklist_items_with_details(
                 booklist_id=booklist_id,
-                display_type=booklist.display_type,
+                default_sort_method=booklist.default_sort_method,
+                default_sort_order=booklist.default_sort_order,
                 limit=limit,
                 offset=offset,
             )

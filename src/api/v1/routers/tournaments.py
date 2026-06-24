@@ -247,7 +247,8 @@ async def get_tournament_items(
             item_service = BooklistItemRepository(session)
             items, total = await item_service.get_booklist_items_with_details(
                 booklist_id=booklist.id,  # type: ignore[arg-type]
-                display_type=booklist.display_type,
+                default_sort_method=booklist.default_sort_method,
+                default_sort_order=booklist.default_sort_order,
                 limit=limit,
                 offset=offset,
             )

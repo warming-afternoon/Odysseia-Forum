@@ -41,10 +41,16 @@ class BooklistDetail(BaseModel):
     tournament_channel_id: Optional[int] = Field(None, description="赛事频道ID")
     """赛事频道ID"""
 
-    display_type: int = Field(
-        description="展示方式: 1=加入时间倒序, 2=作者自定义排序(display_order)"
+    default_sort_method: str = Field(
+        default="join_time",
+        description="默认排序方式: hot, created_at, reaction_count, reply_count, collection_count, last_active_at, join_time, display_order",
     )
-    """展示方式: 1=加入时间倒序, 2=作者自定义排序(display_order)"""
+    """默认排序方式"""
+
+    default_sort_order: str = Field(
+        default="desc", description="默认排序顺序: asc, desc"
+    )
+    """默认排序顺序"""
 
     item_count: int = Field(description="书单内帖子数量")
     """书单内帖子数量"""

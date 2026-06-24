@@ -182,14 +182,14 @@ def migrate_favorites_from_follow_bot() -> None:
             psycopg2.extras.execute_values(
                 pg_cursor,
                 "INSERT INTO booklist (owner_id, title, description, is_public,"
-                " is_default, display_type, item_count, collection_count,"
+                " is_default, default_sort_method, default_sort_order, item_count, collection_count,"
                 " view_count, created_at, updated_at)"
                 " VALUES %s RETURNING id, owner_id",
                 [
-                    (uid, "默认收藏", "默认收藏夹", False, True, 1, 0, 0, 0, now, now)
+                    (uid, "默认收藏", "默认收藏夹", False, True, "join_time", "desc", 0, 0, 0, now, now)
                     for uid in users_without_booklist
                 ],
-                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             )
             for row in pg_cursor.fetchall():
                 existing_booklists[row[1]] = row[0]

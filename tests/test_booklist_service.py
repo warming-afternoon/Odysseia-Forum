@@ -20,6 +20,11 @@ from shared.time_utils import utc_now
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 
 
+# ============================================================
+# 测试数据 Fixture
+# ============================================================
+
+
 @pytest_asyncio.fixture(scope="function")
 async def seeded_db_session(
     db_session_factory: async_sessionmaker[AsyncSession],
@@ -73,6 +78,68 @@ async def seeded_db_session(
         await session.commit()
 
 
+SORT_THREAD_SPECS = [
+    # (thread_id, title, created_at_days_ago, reaction_count, reply_count, collection_count, last_active_days_ago)
+    (3001, "A", 30, 5, 1, 0, 20),
+    (3002, "B", 14, 20, 3, 2, 10),
+    (3003, "C", 7, 1, 10, 5, 5),
+    (3004, "D", 1, 100, 0, 10, 1),
+    (3005, "E", 0, 50, 5, 1, 0),
+]
+
+
+@pytest_asyncio.fixture(scope="function")
+async def seeded_sort_data(
+    db_session_factory: async_sessionmaker[AsyncSession],
+) -> AsyncGenerator[AsyncSession, None]:
+    """提供包含 5 个属性各异的帖子的数据库会话，专用于排序测试。"""
+    from datetime import timedelta
+
+    async with db_session_factory() as session:
+        author = Author(
+            id=10,
+            name="SortAuthor",
+            global_name="SortGlobal",
+            display_name="SortDisplay",
+            avatar_url="https://example.com/avatar.png",
+        )
+        session.add(author)
+
+        now = utc_now()
+        threads = []
+        for tid, title, days_ago, rc, rpc, cc, la_days in SORT_THREAD_SPECS:
+            threads.append(
+                Thread(
+                    channel_id=200,
+                    thread_id=tid,
+                    title=title,
+                    author_id=10,
+                    created_at=now - timedelta(days=days_ago),
+                    reaction_count=rc,
+                    reply_count=rpc,
+                    collection_count=cc,
+                    last_active_at=now - timedelta(days=la_days),
+                )
+            )
+        session.add_all(threads)
+        await session.commit()
+
+        yield session
+
+        await session.execute(delete(BooklistItem))
+        await session.execute(delete(Booklist))
+        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(ThreadFollow))
+        await session.execute(delete(Thread))
+        await session.execute(delete(Author))
+        await session.commit()
+
+
+# ============================================================
+# 书单 CRUD 测试
+# ============================================================
+
+
 @pytest.mark.asyncio
 async def test_create_booklist(seeded_db_session: AsyncSession):
     """测试创建书单"""
@@ -83,7 +150,8 @@ async def test_create_booklist(seeded_db_session: AsyncSession):
         description="A test booklist",
         cover_image_url="https://example.com/cover.jpg",
         is_public=True,
-        display_type=1,
+        default_sort_method="join_time",
+        default_sort_order="desc",
     )
     assert booklist.id is not None
     assert booklist.title == "My Booklist"
@@ -120,13 +188,15 @@ async def test_update_booklist(seeded_db_session: AsyncSession):
         title="Updated",
         description="New",
         is_public=False,
-        display_type=2,
+        default_sort_method="display_order",
+        default_sort_order="asc",
     )
     assert updated is not None
     assert updated.title == "Updated"
     assert updated.description == "New"
     assert updated.is_public is False
-    assert updated.display_type == 2
+    assert updated.default_sort_method == "display_order"
+    assert updated.default_sort_order == "asc"
 
 
 @pytest.mark.asyncio
@@ -223,9 +293,14 @@ async def test_list_booklists(seeded_db_session: AsyncSession):
     assert total1 == 5
 
 
+# ============================================================
+# 书单帖子排序测试
+# ============================================================
+
+
 @pytest.mark.asyncio
 async def test_get_booklist_items(seeded_db_session: AsyncSession):
-    """测试获取书单内容"""
+    """测试获取书单内容 —— 默认 join_time desc 排序 + 分页"""
     service = BooklistRepository(seeded_db_session)
     booklist = await service.create_booklist(owner_id=444, title="Items Test")
     assert booklist.id is not None
@@ -239,12 +314,11 @@ async def test_get_booklist_items(seeded_db_session: AsyncSession):
     )
     item_service = BooklistItemRepository(seeded_db_session)
     items, total = await item_service.get_booklist_items_with_details(
-        booklist_id, display_type=1, limit=10, offset=0
+        booklist_id, default_sort_method="join_time", default_sort_order="desc", limit=10, offset=0
     )
     assert total == 2
     assert len(items) == 2
-    # 检查返回数据（BooklistItemDetail 是 Pydantic 模型，用属性访问）
-    # display_type=1 按 created_at DESC 排序，后添加的 thread 1002 排前面
+    # join_time desc = BooklistItem.created_at DESC，后添加的 thread 1002 排前面
     first = items[0]
     assert first.thread_id == 1002
     assert first.comment == "Second"
@@ -252,10 +326,99 @@ async def test_get_booklist_items(seeded_db_session: AsyncSession):
     assert first.author is not None
     # 分页测试
     items_page1, total_page1 = await item_service.get_booklist_items_with_details(
-        booklist_id, display_type=1, limit=1, offset=0
+        booklist_id, default_sort_method="join_time", default_sort_order="desc", limit=1, offset=0
     )
     assert len(items_page1) == 1
     assert total_page1 == 2
+
+
+@pytest.mark.asyncio
+async def test_get_booklist_items_sort_hot(seeded_sort_data: AsyncSession):
+    """hot 排序 = Reddit Hot: log10(reactions) + epoch / time_decay，新 + 高反应排前面"""
+    service = BooklistRepository(seeded_sort_data)
+    booklist = await service.create_booklist(owner_id=445, title="Hot Sort")
+    assert booklist.id is not None
+
+    await service.add_threads_to_booklist(
+        booklist.id,
+        items=[BooklistItemAddData(thread_id=tid) for tid in (3001, 3002, 3003, 3004, 3005)],
+    )
+
+    item_service = BooklistItemRepository(seeded_sort_data)
+    items, total = await item_service.get_booklist_items_with_details(
+        booklist.id, default_sort_method="hot", default_sort_order="desc", limit=10, offset=0
+    )
+    assert total == 5
+    # Reddit Hot = log10(reactions) + epoch / time_decay
+    # D(reaction=100, 1d前) ≈ 1.995   E(reaction=50, 今天)  ≈ 1.697
+    # C(reaction=1,  7d前)  ≈ −0.672  B(reaction=20, 14d前) ≈ −0.043
+    # A(reaction=5,  30d前) ≈ −2.181
+    expected = [3004, 3005, 3003, 3002, 3001]
+    assert [it.thread_id for it in items] == expected
+
+
+# ---- 参数化：各排序方法验证实际顺序 ----
+
+SORT_ORDER_SPECS = [
+    # (method, order, attr_name, expected_tids_ascending)
+    ("created_at", "asc", "created_at", [3001, 3002, 3003, 3004, 3005]),
+    ("created_at", "desc", "created_at", [3005, 3004, 3003, 3002, 3001]),
+    ("reaction_count", "asc", "reaction_count", [3003, 3001, 3002, 3005, 3004]),
+    ("reaction_count", "desc", "reaction_count", [3004, 3005, 3002, 3001, 3003]),
+    ("reply_count", "asc", "reply_count", [3004, 3001, 3002, 3005, 3003]),
+    ("reply_count", "desc", "reply_count", [3003, 3005, 3002, 3001, 3004]),
+    ("collection_count", "asc", "collection_count", [3001, 3005, 3002, 3003, 3004]),
+    ("collection_count", "desc", "collection_count", [3004, 3003, 3002, 3005, 3001]),
+    ("last_active_at", "desc", "last_active_at", [3005, 3004, 3003, 3002, 3001]),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method, order, attr, expected", SORT_ORDER_SPECS)
+async def test_get_booklist_items_sort_order(
+    seeded_sort_data: AsyncSession, method: str, order: str, attr: str, expected: list[int]
+):
+    """验证每种排序方法的结果顺序正确"""
+    service = BooklistRepository(seeded_sort_data)
+    booklist = await service.create_booklist(owner_id=446, title=f"Sort {method} {order}")
+    assert booklist.id is not None
+
+    await service.add_threads_to_booklist(
+        booklist.id,
+        items=[BooklistItemAddData(thread_id=tid) for tid in (3001, 3002, 3003, 3004, 3005)],
+    )
+
+    item_service = BooklistItemRepository(seeded_sort_data)
+    items, total = await item_service.get_booklist_items_with_details(
+        booklist.id, default_sort_method=method, default_sort_order=order, limit=10, offset=0
+    )
+    assert total == 5
+    assert [it.thread_id for it in items] == expected
+
+
+@pytest.mark.asyncio
+async def test_get_booklist_items_sort_display_order(seeded_sort_data: AsyncSession):
+    """display_order 排序：按作者自定义顺序"""
+    service = BooklistRepository(seeded_sort_data)
+    booklist = await service.create_booklist(owner_id=447, title="DispOrder")
+    assert booklist.id is not None
+
+    orders = [30, 20, 50, 10, 40]
+    await service.add_threads_to_booklist(
+        booklist.id,
+        items=[BooklistItemAddData(thread_id=3001 + i, display_order=orders[i]) for i in range(5)],
+    )
+
+    item_service = BooklistItemRepository(seeded_sort_data)
+    items, _ = await item_service.get_booklist_items_with_details(
+        booklist.id, default_sort_method="display_order", default_sort_order="asc", limit=10, offset=0
+    )
+    assert [it.display_order for it in items] == sorted(orders)
+
+
+# ============================================================
+# 书单统计测试
+# ============================================================
 
 
 @pytest.mark.asyncio
@@ -296,7 +459,7 @@ async def test_update_collection_count(seeded_db_session: AsyncSession):
 
 
 # ============================================================
-# 新增 Repository 方法测试：单帖多书单操作
+# 单帖多书单操作测试
 # ============================================================
 
 
