@@ -2,7 +2,7 @@ import logging
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from sqlalchemy import and_, delete, func, select
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -149,7 +149,7 @@ class ThreadFollowRepository:
 
     async def remove_follow(self, user_id: int, thread_id: int) -> bool:
         """
-        取消关注
+        取消关注（软删除：设置 active_flag=False）
 
         Args:
             user_id: 用户Discord ID
@@ -159,17 +159,23 @@ class ThreadFollowRepository:
             是否成功取消
         """
         try:
-            statement = delete(ThreadFollow).where(
-                and_(
-                    ThreadFollow.user_id == user_id,  # type: ignore
-                    ThreadFollow.thread_id == thread_id,  # type: ignore
+            # 仅标记活跃关注为非活跃，已非活跃的不重复操作
+            stmt = (
+                update(ThreadFollow)
+                .where(
+                    and_(
+                        ThreadFollow.user_id == user_id,  # type: ignore[arg-type]
+                        ThreadFollow.thread_id == thread_id,  # type: ignore[arg-type]
+                        ThreadFollow.active_flag == True,  # type: ignore[arg-type]
+                    )
                 )
+                .values(active_flag=False)
             )
-            result = await self.session.execute(statement)
+            result = await self.session.execute(stmt)
             await self.session.commit()
 
             if result.rowcount > 0:
-                logger.info(f"用户 {user_id} 已取消关注帖子 {thread_id}")
+                logger.debug(f"用户 {user_id} 已取消关注帖子 {thread_id}")
                 return True
             else:
                 logger.debug(f"用户 {user_id} 未关注帖子 {thread_id}")
@@ -197,8 +203,6 @@ class ThreadFollowRepository:
             return 0
 
         try:
-            from sqlalchemy import update
-
             stmt = (
                 update(ThreadFollow)
                 .where(
@@ -214,7 +218,7 @@ class ThreadFollowRepository:
             await self.session.commit()
 
             count = result.rowcount
-            logger.debug(
+            logger.info(
                 f"帖子 {thread_id}: 已将 {count} 个关注标记为非活跃"
             )
             return count
