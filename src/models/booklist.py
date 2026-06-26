@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Index, event, func, inspect
+from sqlalchemy import BigInteger, Index, event, func, inspect, text
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlmodel import Column, Field, SQLModel
 
@@ -149,3 +149,14 @@ def _on_booklist_before_update(mapper, connection, target: Booklist):
     target.search_vector = (  # type: ignore[assignment]
         func.to_tsvector("simple", tokens_text) if tokens_text else None
     )
+
+
+# ── table-level storage params (fillfactor=90) ──────────
+
+
+@event.listens_for(Booklist.__table__, "after_create")  # type: ignore[attr-defined]
+def _on_booklist_after_create(target, connection, **kw):  # type: ignore[no-redef]
+    if connection.dialect.name == "postgresql":
+        connection.execute(
+            text("ALTER TABLE booklist SET (fillfactor = 90)")
+        )

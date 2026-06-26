@@ -2,12 +2,6 @@
 
 使用 rjieba 分词分批回填所有现有行，确保与应用层分词一致。
 
-测试方式：
-  1. 本地启动测试 PG: docker compose up -d odysseia-postgres
-  2. 设置 DATABASE_URL 指向测试库
-  3. alembic upgrade head && alembic downgrade -1  # 验证升级+回滚
-  4. 或直接连接测试库验证: SELECT id, title, search_vector FROM booklist LIMIT 5;
-
 Revision ID: add_booklist_search_vector
 Revises: drop_display_type
 Create Date: 2026-06-26
