@@ -37,9 +37,7 @@ class BannerApplication(SQLModel, table=True):
     status: str = Field(
         default=ApplicationStatus.PENDING.value, index=True, description="申请状态"
     )
-    applied_at: datetime = Field(
-        default_factory=utc_now, description="申请时间"
-    )
+    applied_at: datetime = Field(default_factory=utc_now, description="申请时间")
     reviewed_at: Optional[datetime] = Field(default=None, description="审核时间")
     reviewer_id: Optional[int] = Field(
         default=None,

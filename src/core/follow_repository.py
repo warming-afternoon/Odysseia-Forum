@@ -166,7 +166,7 @@ class ThreadFollowRepository:
                     and_(
                         ThreadFollow.user_id == user_id,  # type: ignore[arg-type]
                         ThreadFollow.thread_id == thread_id,  # type: ignore[arg-type]
-                        ThreadFollow.active_flag == True,  # type: ignore[arg-type]
+                        ThreadFollow.active_flag,  # type: ignore[arg-type]
                     )
                 )
                 .values(active_flag=False)
@@ -186,9 +186,7 @@ class ThreadFollowRepository:
             await self.session.rollback()
             return False
 
-    async def batch_mark_inactive(
-        self, thread_id: int, user_ids: List[int]
-    ) -> int:
+    async def batch_mark_inactive(self, thread_id: int, user_ids: List[int]) -> int:
         """
         批量将关注标记为过去关注（非活跃）。
 
@@ -209,7 +207,7 @@ class ThreadFollowRepository:
                     and_(
                         ThreadFollow.thread_id == thread_id,  # type: ignore[arg-type]
                         col(ThreadFollow.user_id).in_(user_ids),
-                        ThreadFollow.active_flag == True,  # type: ignore[arg-type]
+                        ThreadFollow.active_flag,  # type: ignore[arg-type]
                     )
                 )
                 .values(active_flag=False)
@@ -218,9 +216,7 @@ class ThreadFollowRepository:
             await self.session.commit()
 
             count = result.rowcount
-            logger.info(
-                f"帖子 {thread_id}: 已将 {count} 个关注标记为非活跃"
-            )
+            logger.debug(f"帖子 {thread_id}: 已将 {count} 个关注标记为非活跃")
             return count
 
         except Exception as e:
@@ -342,7 +338,8 @@ class ThreadFollowRepository:
                 )
             if channel_ids is not None:
                 count_statement = count_statement.join(
-                    Thread, ThreadFollow.thread_id == Thread.thread_id  # type: ignore[arg-type]
+                    Thread,
+                    ThreadFollow.thread_id == Thread.thread_id,  # type: ignore[arg-type]
                 ).where(Thread.channel_id.in_(channel_ids))  # type: ignore[arg-type]
             count_result = await self.session.execute(count_statement)
             total = count_result.scalar() or 0
@@ -352,7 +349,9 @@ class ThreadFollowRepository:
             for thread, follow in rows:
                 author = None
                 if thread.author:
-                    author = AuthorDetail.model_validate(thread.author, from_attributes=True)
+                    author = AuthorDetail.model_validate(
+                        thread.author, from_attributes=True
+                    )
 
                 results.append(
                     FollowedThreadResponse(
@@ -410,7 +409,7 @@ class ThreadFollowRepository:
                 .where(
                     and_(
                         ThreadFollow.user_id == user_id,  # type: ignore[arg-type]
-                        ThreadFollow.active_flag == True,  # type: ignore[arg-type]
+                        ThreadFollow.active_flag,  # type: ignore[arg-type]
                         Thread.latest_update_at.isnot(None),  # type: ignore[attr-defined]
                         # 未查看 或 更新时间晚于查看时间
                         (
@@ -450,7 +449,7 @@ class ThreadFollowRepository:
                 ThreadFollow.thread_id == thread_id,  # type: ignore[arg-type]
             ]
             if active_only:
-                conditions.append(ThreadFollow.active_flag == True)  # type: ignore[arg-type]
+                conditions.append(ThreadFollow.active_flag)  # type: ignore[arg-type]
 
             statement = select(ThreadFollow).where(and_(*conditions))  # type: ignore[arg-type]
             result = await self.session.execute(statement)

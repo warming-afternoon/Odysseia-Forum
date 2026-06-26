@@ -55,7 +55,7 @@ class SuggestionService:
         # --- 帖子查询 ---
         thread_stmt = select(Thread).where(
             Thread.not_found_count == 0,
-            Thread.show_flag == True,  # type: ignore[attr-defined]
+            Thread.show_flag,  # type: ignore[attr-defined]
         )
         if is_numeric:
             thread_stmt = thread_stmt.where(
@@ -86,7 +86,7 @@ class SuggestionService:
 
         # --- 书单查询 ---
         booklist_stmt = select(Booklist)
-        visibility_cond = Booklist.is_public == True  # type: ignore[attr-defined]
+        visibility_cond = Booklist.is_public  # type: ignore[attr-defined]
         if current_user_id:
             visibility_cond = or_(
                 visibility_cond,

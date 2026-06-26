@@ -256,11 +256,7 @@ class CollectionRepository:
                 for tid in new_ids
             ]
             if values:
-                stmt = (
-                    insert(UserCollection)
-                    .values(values)
-                    .on_conflict_do_nothing()
-                )
+                stmt = insert(UserCollection).values(values).on_conflict_do_nothing()
                 await self.session.execute(stmt)
                 await self.session.commit()
 
@@ -388,7 +384,7 @@ class CollectionRepository:
             .join(ThreadFollow, Thread.thread_id == ThreadFollow.thread_id)  # type: ignore
             .where(
                 ThreadFollow.user_id == user_id,
-                ThreadFollow.active_flag == True,  # type: ignore
+                ThreadFollow.active_flag,  # type: ignore
                 Thread.thread_id.not_in(collected_subquery),  # type: ignore
             )
         )
@@ -477,11 +473,7 @@ class CollectionRepository:
         total_count = count_result.scalar_one_or_none() or 0
 
         # 获取数据
-        data_stmt = (
-            base_query.order_by(sort_order)
-            .offset(offset)
-            .limit(per_page)
-        )
+        data_stmt = base_query.order_by(sort_order).offset(offset).limit(per_page)
         if model_class is Thread:
             data_stmt = data_stmt.options(selectinload(Thread.tags))
         data_result = await self.session.execute(data_stmt)

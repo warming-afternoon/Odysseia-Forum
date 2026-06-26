@@ -109,9 +109,7 @@ class BannerService:
 
         # 都没找到 → ChannelSyncService 按需索引
         if self.channel_sync:
-            channel = await self.channel_sync.fetch_and_index(
-                self.session, target_id
-            )
+            channel = await self.channel_sync.fetch_and_index(self.session, target_id)
             if channel:
                 return ApplicationResult(
                     success=True,
@@ -209,9 +207,7 @@ class BannerService:
         channel_id = None if is_global else int(application.target_scope)
 
         # 检查当前轮播列表是否已满
-        max_banners = (
-            self.GLOBAL_MAX_BANNERS if is_global else self.CHANNEL_MAX_BANNERS
-        )
+        max_banners = self.GLOBAL_MAX_BANNERS if is_global else self.CHANNEL_MAX_BANNERS
         current_count = await self.carousel_repo.get_count(channel_id)
 
         if current_count < max_banners:
@@ -281,9 +277,7 @@ class BannerService:
         await self.session.commit()
         return cleaned_count
 
-    async def delete_banner_by_thread(
-        self, thread_id: int
-    ) -> DeleteBannerResult:
+    async def delete_banner_by_thread(self, thread_id: int) -> DeleteBannerResult:
         """根据 thread_id 从轮播或等待列表中删除 Banner。"""
         carousel_items = await self.carousel_repo.get_by_thread(thread_id)
         waitlist_items = await self.waitlist_repo.get_by_thread(thread_id)
@@ -308,7 +302,7 @@ class BannerService:
                 parts.append(f"  • 等待列表: {item.title[:40]} (范围: {scope})")
             return DeleteBannerResult(
                 success=False,
-                message=f"该帖子ID对应多条Banner记录，删除时存在歧义：\n"
+                message="该帖子ID对应多条Banner记录，删除时存在歧义：\n"
                 + "\n".join(parts),
             )
 
@@ -402,7 +396,6 @@ async def send_review_message(
 ) -> bool:
     """发送审核消息到指定的审核子区。"""
     import discord
-    from sqlalchemy.ext.asyncio import async_sessionmaker
 
     from banner.views.review_view import ReviewView
 
@@ -444,9 +437,7 @@ async def send_review_message(
         title="🎨 新的Banner申请",
         color=discord.Color.orange(),
     )
-    embed.add_field(
-        name="申请人", value=f"<@{application.applicant_id}>", inline=True
-    )
+    embed.add_field(name="申请人", value=f"<@{application.applicant_id}>", inline=True)
     embed.add_field(name="展示范围", value=scope_text, inline=True)
     embed.add_field(name="类型", value=target_label, inline=True)
     embed.add_field(name=target_label, value=target_link, inline=False)

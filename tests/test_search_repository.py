@@ -8,7 +8,6 @@ TestExclusionParameterized 覆盖，保留此处作为互补验证。
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator, List, Set
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from sqlmodel import delete
@@ -31,24 +30,39 @@ async def seeded_db_session(
 
         threads_to_create = [
             Thread(
-                channel_id=1, thread_id=101, title="关于百合破坏的讨论",
-                author_id=1, created_at=utc_now(),
+                channel_id=1,
+                thread_id=101,
+                title="关于百合破坏的讨论",
+                author_id=1,
+                created_at=utc_now(),
             ),
             Thread(
-                channel_id=1, thread_id=102, title="🈲百合破坏",
-                author_id=2, created_at=utc_now(),
+                channel_id=1,
+                thread_id=102,
+                title="🈲百合破坏",
+                author_id=2,
+                created_at=utc_now(),
             ),
             Thread(
-                channel_id=1, thread_id=103, title="小说推荐",
-                author_id=3, created_at=utc_now(),
+                channel_id=1,
+                thread_id=103,
+                title="小说推荐",
+                author_id=3,
+                created_at=utc_now(),
             ),
             Thread(
-                channel_id=1, thread_id=104, title="禁：请勿讨论百合破坏话题",
-                author_id=4, created_at=utc_now(),
+                channel_id=1,
+                thread_id=104,
+                title="禁：请勿讨论百合破坏话题",
+                author_id=4,
+                created_at=utc_now(),
             ),
             Thread(
-                channel_id=1, thread_id=105, title="纯爱小说分享",
-                author_id=5, created_at=utc_now(),
+                channel_id=1,
+                thread_id=105,
+                title="纯爱小说分享",
+                author_id=5,
+                created_at=utc_now(),
             ),
         ]
         session.add_all(threads_to_create)

@@ -50,9 +50,7 @@ class Thread(SQLModel, table=True):
         description="帖子作者的 Discord ID",
     )
 
-    created_at: datetime = Field(
-        default_factory=utc_now, nullable=False, index=True
-    )
+    created_at: datetime = Field(default_factory=utc_now, nullable=False, index=True)
     """帖子创建时间 (UTC)"""
 
     last_active_at: Optional[datetime] = Field(default=None, index=True)
@@ -149,7 +147,9 @@ class Thread(SQLModel, table=True):
 def _on_thread_before_insert(mapper, connection, target: Thread):
     """INSERT 前自动填充 search_vector。"""
     tokens_text = build_search_vector_text(target.title, target.first_message_excerpt)
-    target.search_vector = func.to_tsvector("simple", tokens_text) if tokens_text else None
+    target.search_vector = (
+        func.to_tsvector("simple", tokens_text) if tokens_text else None
+    )
 
 
 @event.listens_for(Thread, "before_update")
@@ -161,4 +161,6 @@ def _on_thread_before_update(mapper, connection, target: Thread):
     if not title_changed and not excerpt_changed:
         return
     tokens_text = build_search_vector_text(target.title, target.first_message_excerpt)
-    target.search_vector = func.to_tsvector("simple", tokens_text) if tokens_text else None
+    target.search_vector = (
+        func.to_tsvector("simple", tokens_text) if tokens_text else None
+    )

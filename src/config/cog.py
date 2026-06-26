@@ -18,7 +18,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-
 class Configuration(commands.Cog):
     """管理机器人各项配置"""
 

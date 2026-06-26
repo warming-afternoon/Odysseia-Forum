@@ -66,9 +66,7 @@ class ThreadDetail(BaseModel):
     collected_flag: bool = Field(default=False, description="当前用户是否收藏了该帖子")
     """当前用户是否收藏了该帖子"""
 
-    is_tournament: bool = Field(
-        default=False, description="该帖子是否为参赛帖子"
-    )
+    is_tournament: bool = Field(default=False, description="该帖子是否为参赛帖子")
     """该帖子是否为参赛帖子"""
 
     tournament_info_list: List["TournamentInfo"] = Field(

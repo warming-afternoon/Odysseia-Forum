@@ -33,16 +33,14 @@ def is_deadlock_error(exc: Exception) -> bool:
     orig = getattr(exc, "orig", None)
     if orig is None:
         return False
-    return (
-        getattr(orig, "sqlstate", None) == "40P01"
-        or "deadlock" in str(orig).lower()
-    )
+    return getattr(orig, "sqlstate", None) == "40P01" or "deadlock" in str(orig).lower()
 
 
 async def init_db():
     """创建所有表（如果尚不存在）并建立全文搜索索引。"""
     async with async_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+
 
 async def init_db_for_test(engine_instance: AsyncEngine):
     """为测试环境初始化数据库（创建表及索引）。"""

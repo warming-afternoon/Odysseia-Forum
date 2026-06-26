@@ -187,7 +187,9 @@ class ThreadManager(commands.Cog):
             return
 
         if self.is_channel_indexed(thread.parent_id):
-            await self.batch_update_service.add_update(thread.id, message.created_at.replace(tzinfo=None))
+            await self.batch_update_service.add_update(
+                thread.id, message.created_at.replace(tzinfo=None)
+            )
 
     @commands.Cog.listener()
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
@@ -206,7 +208,10 @@ class ThreadManager(commands.Cog):
                     )
                 else:
                     await self.batch_update_service.add_active_at_update(
-                        channel.id, datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None)
+                        channel.id,
+                        datetime.datetime.now(datetime.timezone.utc).replace(
+                            tzinfo=None
+                        ),
                     )
         except Exception:
             logger.warning("处理消息编辑事件失败", exc_info=True)
@@ -252,9 +257,9 @@ class ThreadManager(commands.Cog):
                     if channel.created_at >= threshold:
                         # 只有 60 天内创建的帖子才记录点赞飙升
                         # 检查是否在广场推荐忽略频道列表中
-                        discovery_ignore = self.config.get(
-                            "discovery", {}
-                        ).get("ignore_channel_ids", [])
+                        discovery_ignore = self.config.get("discovery", {}).get(
+                            "ignore_channel_ids", []
+                        )
                         if channel.parent_id not in discovery_ignore:
                             await RedisTrendService().record_increment(
                                 "reaction", channel.id, 1

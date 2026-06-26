@@ -16,7 +16,9 @@ class BotConfigDTO(BaseModel):
     config_str: str = Field(default="", description="预留的字符串配置字段")
     tips: str = Field(default="", description="该配置的含义或提示")
     update_time: datetime = Field(description="最近更新时间 (UTC)")
-    update_user_id: Optional[int] = Field(default=None, description="最后修改此配置的用户 ID")
+    update_user_id: Optional[int] = Field(
+        default=None, description="最后修改此配置的用户 ID"
+    )
 
     @staticmethod
     def from_orm(config) -> "BotConfigDTO":

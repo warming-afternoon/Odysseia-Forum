@@ -60,11 +60,41 @@ async def seeded_basic_session(
 
         now = datetime.now()
         threads = [
-            Thread(thread_id=101, channel_id=1, title="关于百合破坏的讨论", author_id=1, created_at=now),
-            Thread(thread_id=102, channel_id=1, title="🈲百合破坏", author_id=2, created_at=now),
-            Thread(thread_id=103, channel_id=1, title="小说推荐", author_id=3, created_at=now),
-            Thread(thread_id=104, channel_id=1, title="禁：请勿讨论百合破坏话题", author_id=4, created_at=now),
-            Thread(thread_id=105, channel_id=1, title="纯爱小说分享", author_id=5, created_at=now),
+            Thread(
+                thread_id=101,
+                channel_id=1,
+                title="关于百合破坏的讨论",
+                author_id=1,
+                created_at=now,
+            ),
+            Thread(
+                thread_id=102,
+                channel_id=1,
+                title="🈲百合破坏",
+                author_id=2,
+                created_at=now,
+            ),
+            Thread(
+                thread_id=103,
+                channel_id=1,
+                title="小说推荐",
+                author_id=3,
+                created_at=now,
+            ),
+            Thread(
+                thread_id=104,
+                channel_id=1,
+                title="禁：请勿讨论百合破坏话题",
+                author_id=4,
+                created_at=now,
+            ),
+            Thread(
+                thread_id=105,
+                channel_id=1,
+                title="纯爱小说分享",
+                author_id=5,
+                created_at=now,
+            ),
         ]
         session.add_all(threads)
         await session.commit()
@@ -86,17 +116,46 @@ async def seeded_fts_varied_session(
 
         now = datetime.now()
         threads = [
-            Thread(thread_id=201, channel_id=1, title="福州十六中出了条神龙",
-                   first_message_excerpt="Gemini 3.1 Pro Preview 测试模型", author_id=1, created_at=now),
-            Thread(thread_id=202, channel_id=1, title="纯爱小说分享",
-                   first_message_excerpt="推荐一些好玩的RPG游戏和视觉小说", author_id=2, created_at=now),
-            Thread(thread_id=203, channel_id=1, title="搬运工汉化教程",
-                   first_message_excerpt="https://discord.com/channels/1134557553011998840/1481100119632777237",
-                   author_id=3, created_at=now),
-            Thread(thread_id=204, channel_id=1, title="Hello 世界 123",
-                   first_message_excerpt="CJK混合文本 test テスト 한국어", author_id=4, created_at=now),
-            Thread(thread_id=205, channel_id=1, title="商业用途绝对不可以",
-                   first_message_excerpt="二改大大方方改把我这条蛆带上就行", author_id=5, created_at=now),
+            Thread(
+                thread_id=201,
+                channel_id=1,
+                title="福州十六中出了条神龙",
+                first_message_excerpt="Gemini 3.1 Pro Preview 测试模型",
+                author_id=1,
+                created_at=now,
+            ),
+            Thread(
+                thread_id=202,
+                channel_id=1,
+                title="纯爱小说分享",
+                first_message_excerpt="推荐一些好玩的RPG游戏和视觉小说",
+                author_id=2,
+                created_at=now,
+            ),
+            Thread(
+                thread_id=203,
+                channel_id=1,
+                title="搬运工汉化教程",
+                first_message_excerpt="https://discord.com/channels/1134557553011998840/1481100119632777237",
+                author_id=3,
+                created_at=now,
+            ),
+            Thread(
+                thread_id=204,
+                channel_id=1,
+                title="Hello 世界 123",
+                first_message_excerpt="CJK混合文本 test テスト 한국어",
+                author_id=4,
+                created_at=now,
+            ),
+            Thread(
+                thread_id=205,
+                channel_id=1,
+                title="商业用途绝对不可以",
+                first_message_excerpt="二改大大方方改把我这条蛆带上就行",
+                author_id=5,
+                created_at=now,
+            ),
         ]
         session.add_all(threads)
         await session.commit()
@@ -118,31 +177,66 @@ async def seeded_sorting_session(
 
         now = datetime.now()
         threads = [
-            Thread(thread_id=301, channel_id=1, title="高互动高曝光",
-                   reaction_count=100, display_count=500, reply_count=30,
-                   collection_count=10,
-                   created_at=now - timedelta(days=30), last_active_at=now - timedelta(hours=1),
-                   author_id=1),
-            Thread(thread_id=302, channel_id=1, title="高互动低曝光新帖",
-                   reaction_count=80, display_count=20, reply_count=15,
-                   collection_count=5,
-                   created_at=now - timedelta(days=1), last_active_at=now,
-                   author_id=2),
-            Thread(thread_id=303, channel_id=1, title="低互动高曝光老帖",
-                   reaction_count=5, display_count=1000, reply_count=2,
-                   collection_count=1,
-                   created_at=now - timedelta(days=90), last_active_at=now - timedelta(days=60),
-                   author_id=3),
-            Thread(thread_id=304, channel_id=1, title="零曝光新帖",
-                   reaction_count=50, display_count=0, reply_count=8,
-                   collection_count=0,
-                   created_at=now - timedelta(hours=2), last_active_at=now - timedelta(minutes=30),
-                   author_id=4),
-            Thread(thread_id=305, channel_id=1, title="中等互动中等曝光",
-                   reaction_count=30, display_count=100, reply_count=10,
-                   collection_count=3,
-                   created_at=now - timedelta(days=10), last_active_at=now - timedelta(days=1),
-                   author_id=5),
+            Thread(
+                thread_id=301,
+                channel_id=1,
+                title="高互动高曝光",
+                reaction_count=100,
+                display_count=500,
+                reply_count=30,
+                collection_count=10,
+                created_at=now - timedelta(days=30),
+                last_active_at=now - timedelta(hours=1),
+                author_id=1,
+            ),
+            Thread(
+                thread_id=302,
+                channel_id=1,
+                title="高互动低曝光新帖",
+                reaction_count=80,
+                display_count=20,
+                reply_count=15,
+                collection_count=5,
+                created_at=now - timedelta(days=1),
+                last_active_at=now,
+                author_id=2,
+            ),
+            Thread(
+                thread_id=303,
+                channel_id=1,
+                title="低互动高曝光老帖",
+                reaction_count=5,
+                display_count=1000,
+                reply_count=2,
+                collection_count=1,
+                created_at=now - timedelta(days=90),
+                last_active_at=now - timedelta(days=60),
+                author_id=3,
+            ),
+            Thread(
+                thread_id=304,
+                channel_id=1,
+                title="零曝光新帖",
+                reaction_count=50,
+                display_count=0,
+                reply_count=8,
+                collection_count=0,
+                created_at=now - timedelta(hours=2),
+                last_active_at=now - timedelta(minutes=30),
+                author_id=4,
+            ),
+            Thread(
+                thread_id=305,
+                channel_id=1,
+                title="中等互动中等曝光",
+                reaction_count=30,
+                display_count=100,
+                reply_count=10,
+                collection_count=3,
+                created_at=now - timedelta(days=10),
+                last_active_at=now - timedelta(days=1),
+                author_id=5,
+            ),
         ]
         session.add_all(threads)
         await session.commit()
@@ -183,22 +277,66 @@ async def seeded_filter_session(
         session.add_all(tags)
 
         threads = [
-            Thread(thread_id=401, channel_id=10, guild_id=1, title="汉化RPG游戏推荐",
-                   author_id=1, created_at=now - timedelta(days=5),
-                   last_active_at=now - timedelta(hours=2), reaction_count=20),
-            Thread(thread_id=402, channel_id=10, guild_id=1, title="原创汉化工具分享",
-                   author_id=1, created_at=now - timedelta(days=3),
-                   last_active_at=now - timedelta(hours=1), reaction_count=15),
-            Thread(thread_id=403, channel_id=20, guild_id=1, title="百合RPG小说推荐",
-                   author_id=2, created_at=now - timedelta(days=10),
-                   last_active_at=now - timedelta(days=1), reaction_count=30),
-            Thread(thread_id=404, channel_id=20, guild_id=2, title="纯爱原创故事",
-                   author_id=2, created_at=now - timedelta(days=1),
-                   last_active_at=now, reaction_count=5),
-            Thread(thread_id=405, channel_id=10, guild_id=1, title="隐藏帖子不应出现",
-                   author_id=1, created_at=now, reaction_count=0, show_flag=False),
-            Thread(thread_id=406, channel_id=10, guild_id=1, title="未找到的帖子不应出现",
-                   author_id=1, created_at=now, reaction_count=0, not_found_count=3),
+            Thread(
+                thread_id=401,
+                channel_id=10,
+                guild_id=1,
+                title="汉化RPG游戏推荐",
+                author_id=1,
+                created_at=now - timedelta(days=5),
+                last_active_at=now - timedelta(hours=2),
+                reaction_count=20,
+            ),
+            Thread(
+                thread_id=402,
+                channel_id=10,
+                guild_id=1,
+                title="原创汉化工具分享",
+                author_id=1,
+                created_at=now - timedelta(days=3),
+                last_active_at=now - timedelta(hours=1),
+                reaction_count=15,
+            ),
+            Thread(
+                thread_id=403,
+                channel_id=20,
+                guild_id=1,
+                title="百合RPG小说推荐",
+                author_id=2,
+                created_at=now - timedelta(days=10),
+                last_active_at=now - timedelta(days=1),
+                reaction_count=30,
+            ),
+            Thread(
+                thread_id=404,
+                channel_id=20,
+                guild_id=2,
+                title="纯爱原创故事",
+                author_id=2,
+                created_at=now - timedelta(days=1),
+                last_active_at=now,
+                reaction_count=5,
+            ),
+            Thread(
+                thread_id=405,
+                channel_id=10,
+                guild_id=1,
+                title="隐藏帖子不应出现",
+                author_id=1,
+                created_at=now,
+                reaction_count=0,
+                show_flag=False,
+            ),
+            Thread(
+                thread_id=406,
+                channel_id=10,
+                guild_id=1,
+                title="未找到的帖子不应出现",
+                author_id=1,
+                created_at=now,
+                reaction_count=0,
+                not_found_count=3,
+            ),
         ]
         session.add_all(threads)
         await session.commit()
@@ -210,8 +348,17 @@ async def seeded_filter_session(
         id_map = {}
         for t in threads:
             id_map[t.thread_id] = t.id
-        for tid_pair in [(401, 1001), (401, 1003), (402, 1001), (402, 1002), (403, 1003), (404, 1002)]:
-            session.add(ThreadTagLink(thread_id=id_map[tid_pair[0]], tag_id=tid_pair[1]))
+        for tid_pair in [
+            (401, 1001),
+            (401, 1003),
+            (402, 1001),
+            (402, 1002),
+            (403, 1003),
+            (404, 1002),
+        ]:
+            session.add(
+                ThreadTagLink(thread_id=id_map[tid_pair[0]], tag_id=tid_pair[1])
+            )
         await session.commit()
 
         yield session
@@ -262,13 +409,20 @@ class TestFTSRjiebaTokenization:
     """验证 rjieba 分词对各种文本类型的切分结果。"""
 
     async def _insert_and_search(
-        self, session: AsyncSession, tag_cache: TagCacheService,
-        title: str, first_message_excerpt: str, search_keywords: str,
+        self,
+        session: AsyncSession,
+        tag_cache: TagCacheService,
+        title: str,
+        first_message_excerpt: str,
+        search_keywords: str,
     ) -> int:
         """插入一条帖子，用给定关键词搜索，返回匹配数。"""
         t = Thread(
-            thread_id=9000 + hash(title) % 10000, channel_id=1, title=title,
-            first_message_excerpt=first_message_excerpt, author_id=1,
+            thread_id=9000 + hash(title) % 10000,
+            channel_id=1,
+            title=title,
+            first_message_excerpt=first_message_excerpt,
+            author_id=1,
             created_at=datetime.now(),
         )
         session.add(t)
@@ -277,21 +431,29 @@ class TestFTSRjiebaTokenization:
         query = ThreadSearchQuery(keywords=search_keywords)
         service = SearchService(session=session, tag_cache_service=tag_cache)
         _, total = await service.search_threads_with_count(
-            query=query, limit=50, offset=0,
-            total_display_count=1000, exploration_factor=1.414, strength_weight=10.0,
+            query=query,
+            limit=50,
+            offset=0,
+            total_display_count=1000,
+            exploration_factor=1.414,
+            strength_weight=10.0,
         )
         await session.delete(t)
         await session.commit()
         return total
 
     @pytest.mark.asyncio
-    async def test_chinese_tokenization_basic(self, empty_db_session, db_session_factory):
+    async def test_chinese_tokenization_basic(
+        self, empty_db_session, db_session_factory
+    ):
         """中文基本分词：'搬运工' 应匹配包含该词的帖子。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         count = await self._insert_and_search(
-            empty_db_session, tag_cache,
-            title="搬运工汉化教程", first_message_excerpt="",
+            empty_db_session,
+            tag_cache,
+            title="搬运工汉化教程",
+            first_message_excerpt="",
             search_keywords="搬运工",
         )
         assert count == 1
@@ -302,20 +464,26 @@ class TestFTSRjiebaTokenization:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         count = await self._insert_and_search(
-            empty_db_session, tag_cache,
-            title="福州十六中出了条神龙", first_message_excerpt="",
+            empty_db_session,
+            tag_cache,
+            title="福州十六中出了条神龙",
+            first_message_excerpt="",
             search_keywords="十六中",
         )
         assert count == 1
 
     @pytest.mark.asyncio
-    async def test_english_text_tokenization(self, empty_db_session, db_session_factory):
+    async def test_english_text_tokenization(
+        self, empty_db_session, db_session_factory
+    ):
         """英文/数字混合文本：'Gemini' 应可被搜索。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         count = await self._insert_and_search(
-            empty_db_session, tag_cache,
-            title="测试", first_message_excerpt="Gemini 3.1 Pro Preview 测试模型",
+            empty_db_session,
+            tag_cache,
+            title="测试",
+            first_message_excerpt="Gemini 3.1 Pro Preview 测试模型",
             search_keywords="Gemini",
         )
         assert count == 1
@@ -326,8 +494,10 @@ class TestFTSRjiebaTokenization:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         count = await self._insert_and_search(
-            empty_db_session, tag_cache,
-            title="教程", first_message_excerpt="https://discord.com/channels/1134557553011998840",
+            empty_db_session,
+            tag_cache,
+            title="教程",
+            first_message_excerpt="https://discord.com/channels/1134557553011998840",
             search_keywords="discord",
         )
         assert count == 1
@@ -338,32 +508,42 @@ class TestFTSRjiebaTokenization:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         count = await self._insert_and_search(
-            empty_db_session, tag_cache,
-            title="Hello 世界 123", first_message_excerpt="CJK混合文本 test テスト 한국어",
+            empty_db_session,
+            tag_cache,
+            title="Hello 世界 123",
+            first_message_excerpt="CJK混合文本 test テスト 한국어",
             search_keywords="한국어",
         )
         assert count == 1
 
     @pytest.mark.asyncio
-    async def test_special_characters_parentheses(self, empty_db_session, db_session_factory):
+    async def test_special_characters_parentheses(
+        self, empty_db_session, db_session_factory
+    ):
         """括号内文本应可搜索。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         count = await self._insert_and_search(
-            empty_db_session, tag_cache,
-            title="国模测试", first_message_excerpt="(国模测试过更新变量成功)",
+            empty_db_session,
+            tag_cache,
+            title="国模测试",
+            first_message_excerpt="(国模测试过更新变量成功)",
             search_keywords="国模",
         )
         assert count == 1
 
     @pytest.mark.asyncio
-    async def test_first_message_excerpt_indexed(self, empty_db_session, db_session_factory):
+    async def test_first_message_excerpt_indexed(
+        self, empty_db_session, db_session_factory
+    ):
         """仅出现在 first_message_excerpt 中的词应被索引。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         count = await self._insert_and_search(
-            empty_db_session, tag_cache,
-            title="标题不含此关键词", first_message_excerpt="但摘要包含独有词汇奥德赛论坛",
+            empty_db_session,
+            tag_cache,
+            title="标题不含此关键词",
+            first_message_excerpt="但摘要包含独有词汇奥德赛论坛",
             search_keywords="奥德赛",
         )
         assert count >= 1, "search_vector should index first_message_excerpt content"
@@ -374,8 +554,10 @@ class TestFTSRjiebaTokenization:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         count = await self._insert_and_search(
-            empty_db_session, tag_cache,
-            title="GEMINI", first_message_excerpt="",
+            empty_db_session,
+            tag_cache,
+            title="GEMINI",
+            first_message_excerpt="",
             search_keywords="gemini",
         )
         assert count == 1
@@ -390,34 +572,46 @@ class TestFTSIncludeKeywords:
     """测试正选关键词的各种查询模式。"""
 
     @pytest.mark.asyncio
-    async def test_single_keyword_match(self, seeded_fts_varied_session, db_session_factory):
+    async def test_single_keyword_match(
+        self, seeded_fts_varied_session, db_session_factory
+    ):
         """单个关键词应仅命中包含该词的帖子。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_fts_varied_session, tag_cache, keywords="汉化",
+            seeded_fts_varied_session,
+            tag_cache,
+            keywords="汉化",
         )
         titles = _titles(threads)
         assert "搬运工汉化教程" in titles
 
     @pytest.mark.asyncio
-    async def test_comma_separated_and_groups(self, seeded_fts_varied_session, db_session_factory):
+    async def test_comma_separated_and_groups(
+        self, seeded_fts_varied_session, db_session_factory
+    ):
         """逗号分隔多 AND 组。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_fts_varied_session, tag_cache, keywords="搬运工,汉化",
+            seeded_fts_varied_session,
+            tag_cache,
+            keywords="搬运工,汉化",
         )
         titles = _titles(threads)
         assert "搬运工汉化教程" in titles
 
     @pytest.mark.asyncio
-    async def test_slash_separated_or_keywords(self, seeded_fts_varied_session, db_session_factory):
+    async def test_slash_separated_or_keywords(
+        self, seeded_fts_varied_session, db_session_factory
+    ):
         """斜杠分隔 OR 关键词。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_fts_varied_session, tag_cache, keywords="汉化/纯爱",
+            seeded_fts_varied_session,
+            tag_cache,
+            keywords="汉化/纯爱",
         )
         titles = _titles(threads)
         assert "搬运工汉化教程" in titles
@@ -428,13 +622,19 @@ class TestFTSIncludeKeywords:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         t = Thread(
-            thread_id=9010, channel_id=1, title="测试专用词Unique测试",
-            first_message_excerpt="", author_id=1, created_at=datetime.now(),
+            thread_id=9010,
+            channel_id=1,
+            title="测试专用词Unique测试",
+            first_message_excerpt="",
+            author_id=1,
+            created_at=datetime.now(),
         )
         empty_db_session.add(t)
         await empty_db_session.commit()
 
-        threads, _ = await _search(empty_db_session, tag_cache, keywords='"专用词Unique"')
+        threads, _ = await _search(
+            empty_db_session, tag_cache, keywords='"专用词Unique"'
+        )
         titles = _titles(threads)
         assert "测试专用词Unique测试" in titles
 
@@ -442,12 +642,16 @@ class TestFTSIncludeKeywords:
         await empty_db_session.commit()
 
     @pytest.mark.asyncio
-    async def test_mixed_and_or_groups(self, seeded_fts_varied_session, db_session_factory):
+    async def test_mixed_and_or_groups(
+        self, seeded_fts_varied_session, db_session_factory
+    ):
         """混合 AND+OR：'汉化/纯爱,Gemini' → (汉化 OR 纯爱) AND Gemini。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_fts_varied_session, tag_cache, keywords="汉化/纯爱,Gemini",
+            seeded_fts_varied_session,
+            tag_cache,
+            keywords="汉化/纯爱,Gemini",
         )
         for t in threads:
             title_lower = t.title.lower()
@@ -460,7 +664,9 @@ class TestFTSIncludeKeywords:
             )
 
     @pytest.mark.asyncio
-    async def test_no_keywords_returns_all(self, seeded_fts_varied_session, db_session_factory):
+    async def test_no_keywords_returns_all(
+        self, seeded_fts_varied_session, db_session_factory
+    ):
         """无关键词时不过滤，返回所有可见帖子。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
@@ -468,7 +674,9 @@ class TestFTSIncludeKeywords:
         assert total == 5
 
     @pytest.mark.asyncio
-    async def test_empty_keywords_returns_all(self, seeded_fts_varied_session, db_session_factory):
+    async def test_empty_keywords_returns_all(
+        self, seeded_fts_varied_session, db_session_factory
+    ):
         """空字符串关键词也应视为无过滤。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
@@ -481,8 +689,12 @@ class TestFTSIncludeKeywords:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         t = Thread(
-            thread_id=9100, channel_id=1, title="搬运工汉化教程",
-            first_message_excerpt="", author_id=1, created_at=datetime.now(),
+            thread_id=9100,
+            channel_id=1,
+            title="搬运工汉化教程",
+            first_message_excerpt="",
+            author_id=1,
+            created_at=datetime.now(),
         )
         empty_db_session.add(t)
         await empty_db_session.commit()
@@ -505,12 +717,15 @@ class TestFTSExcludeAndExemption:
     """测试排除关键词和豁免标记的交互。"""
 
     @pytest.mark.asyncio
-    async def test_exclude_single_keyword(self, seeded_basic_session, db_session_factory):
+    async def test_exclude_single_keyword(
+        self, seeded_basic_session, db_session_factory
+    ):
         """排除单个关键词应移除所有含该词的帖子。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏",
             exclude_keyword_exemption_markers=[],
@@ -528,7 +743,8 @@ class TestFTSExcludeAndExemption:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         _, total = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏 小说",
             exclude_keyword_exemption_markers=[],
@@ -536,12 +752,15 @@ class TestFTSExcludeAndExemption:
         assert total == 0
 
     @pytest.mark.asyncio
-    async def test_exclude_with_include_keywords(self, seeded_basic_session, db_session_factory):
+    async def test_exclude_with_include_keywords(
+        self, seeded_basic_session, db_session_factory
+    ):
         """排除关键词 + 豁免标记组合。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏",
             exclude_keyword_exemption_markers=["禁", "🈲"],
@@ -552,12 +771,15 @@ class TestFTSExcludeAndExemption:
         assert "关于百合破坏的讨论" not in titles
 
     @pytest.mark.asyncio
-    async def test_exemption_marker_proximity(self, seeded_basic_session, db_session_factory):
+    async def test_exemption_marker_proximity(
+        self, seeded_basic_session, db_session_factory
+    ):
         """豁免标记：排除词附近有禁/🈲 时不排除。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏",
             exclude_keyword_exemption_markers=["禁", "🈲"],
@@ -570,12 +792,15 @@ class TestFTSExcludeAndExemption:
         assert "纯爱小说分享" in titles
 
     @pytest.mark.asyncio
-    async def test_exemption_prefix_keyword(self, seeded_basic_session, db_session_factory):
+    async def test_exemption_prefix_keyword(
+        self, seeded_basic_session, db_session_factory
+    ):
         """前缀排除 + 豁免。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破",
             exclude_keyword_exemption_markers=["禁", "🈲"],
@@ -591,7 +816,8 @@ class TestFTSExcludeAndExemption:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏",
             exclude_keyword_exemption_markers=[],
@@ -602,12 +828,15 @@ class TestFTSExcludeAndExemption:
         assert "禁：请勿讨论百合破坏话题" not in titles
 
     @pytest.mark.asyncio
-    async def test_exemption_comma_separated_excludes(self, seeded_basic_session, db_session_factory):
+    async def test_exemption_comma_separated_excludes(
+        self, seeded_basic_session, db_session_factory
+    ):
         """多排除词独立生效：'百合破坏 纯爱'。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏 纯爱",
             exclude_keyword_exemption_markers=["禁", "🈲"],
@@ -627,7 +856,8 @@ class TestFTSExcludeAndExemption:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏",
             exclude_keyword_exemption_markers=["禁", "🈲"],
@@ -676,7 +906,8 @@ class TestFTSExcludeAndExemption:
         await empty_db_session.commit()
 
         threads, _ = await _search(
-            empty_db_session, tag_cache,
+            empty_db_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏",
             exclude_keyword_exemption_markers=["禁", "🈲"],
@@ -706,7 +937,10 @@ class TestSearchFilters:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords=None, channel_ids=[10],
+            seeded_filter_session,
+            tag_cache,
+            keywords=None,
+            channel_ids=[10],
         )
         titles = _titles(threads)
         assert "汉化RPG游戏推荐" in titles
@@ -719,7 +953,10 @@ class TestSearchFilters:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords=None, exclude_channel_ids=[20],
+            seeded_filter_session,
+            tag_cache,
+            keywords=None,
+            exclude_channel_ids=[20],
         )
         titles = _titles(threads)
         assert "汉化RPG游戏推荐" in titles
@@ -731,7 +968,10 @@ class TestSearchFilters:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords=None, guild_id=1,
+            seeded_filter_session,
+            tag_cache,
+            keywords=None,
+            guild_id=1,
         )
         titles = _titles(threads)
         assert "汉化RPG游戏推荐" in titles
@@ -743,7 +983,10 @@ class TestSearchFilters:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords=None, include_authors=[1],
+            seeded_filter_session,
+            tag_cache,
+            keywords=None,
+            include_authors=[1],
         )
         for t in threads:
             assert t.author_id == 1
@@ -754,7 +997,10 @@ class TestSearchFilters:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords=None, exclude_authors=[2],
+            seeded_filter_session,
+            tag_cache,
+            keywords=None,
+            exclude_authors=[2],
         )
         for t in threads:
             assert t.author_id != 2
@@ -765,13 +1011,18 @@ class TestSearchFilters:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords=None, author_name="author_one",
+            seeded_filter_session,
+            tag_cache,
+            keywords=None,
+            author_name="author_one",
         )
         for t in threads:
             assert t.author_id == 1
 
     @pytest.mark.asyncio
-    async def test_hidden_thread_excluded(self, seeded_filter_session, db_session_factory):
+    async def test_hidden_thread_excluded(
+        self, seeded_filter_session, db_session_factory
+    ):
         """show_flag=False 不出现在结果中。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
@@ -780,7 +1031,9 @@ class TestSearchFilters:
         assert "隐藏帖子不应出现" not in titles
 
     @pytest.mark.asyncio
-    async def test_not_found_thread_excluded(self, seeded_filter_session, db_session_factory):
+    async def test_not_found_thread_excluded(
+        self, seeded_filter_session, db_session_factory
+    ):
         """not_found_count > 0 不出现在结果中。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
@@ -789,35 +1042,50 @@ class TestSearchFilters:
         assert "未找到的帖子不应出现" not in titles
 
     @pytest.mark.asyncio
-    async def test_time_filter_created_after(self, seeded_filter_session, db_session_factory):
+    async def test_time_filter_created_after(
+        self, seeded_filter_session, db_session_factory
+    ):
         """创建时间下限过滤。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords=None, created_after="2d",
+            seeded_filter_session,
+            tag_cache,
+            keywords=None,
+            created_after="2d",
         )
         titles = _titles(threads)
         assert "汉化RPG游戏推荐" not in titles  # 5 天前
         assert "纯爱原创故事" in titles  # 1 天前
 
     @pytest.mark.asyncio
-    async def test_reaction_count_range(self, seeded_filter_session, db_session_factory):
+    async def test_reaction_count_range(
+        self, seeded_filter_session, db_session_factory
+    ):
         """反应数范围过滤。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords=None, reaction_count_range="[10, 999999]",
+            seeded_filter_session,
+            tag_cache,
+            keywords=None,
+            reaction_count_range="[10, 999999]",
         )
         for t in threads:
             assert t.reaction_count >= 10
 
     @pytest.mark.asyncio
-    async def test_fts_plus_channel_filter(self, seeded_filter_session, db_session_factory):
+    async def test_fts_plus_channel_filter(
+        self, seeded_filter_session, db_session_factory
+    ):
         """FTS + 频道过滤组合。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_filter_session, tag_cache, keywords="汉化", channel_ids=[10],
+            seeded_filter_session,
+            tag_cache,
+            keywords="汉化",
+            channel_ids=[10],
         )
         titles = _titles(threads)
         assert "汉化RPG游戏推荐" in titles
@@ -835,49 +1103,69 @@ class TestSearchSorting:
     """测试各排序算法。"""
 
     @pytest.mark.asyncio
-    async def test_sort_by_reaction_count_desc(self, seeded_sorting_session, db_session_factory):
+    async def test_sort_by_reaction_count_desc(
+        self, seeded_sorting_session, db_session_factory
+    ):
         """按反应数降序。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="reaction_count", sort_order="desc",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="reaction_count",
+            sort_order="desc",
         )
         for i in range(len(threads) - 1):
             assert threads[i].reaction_count >= threads[i + 1].reaction_count
 
     @pytest.mark.asyncio
-    async def test_sort_by_reaction_count_asc(self, seeded_sorting_session, db_session_factory):
+    async def test_sort_by_reaction_count_asc(
+        self, seeded_sorting_session, db_session_factory
+    ):
         """按反应数升序。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="reaction_count", sort_order="asc",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="reaction_count",
+            sort_order="asc",
         )
         for i in range(len(threads) - 1):
             assert threads[i].reaction_count <= threads[i + 1].reaction_count
 
     @pytest.mark.asyncio
-    async def test_sort_by_created_at_desc(self, seeded_sorting_session, db_session_factory):
+    async def test_sort_by_created_at_desc(
+        self, seeded_sorting_session, db_session_factory
+    ):
         """按创建时间降序。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="created_at", sort_order="desc",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="created_at",
+            sort_order="desc",
         )
         for i in range(len(threads) - 1):
             assert threads[i].created_at >= threads[i + 1].created_at
 
     @pytest.mark.asyncio
-    async def test_sort_by_last_active_at_desc(self, seeded_sorting_session, db_session_factory):
+    async def test_sort_by_last_active_at_desc(
+        self, seeded_sorting_session, db_session_factory
+    ):
         """按最后活跃时间降序。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="last_active_at", sort_order="desc",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="last_active_at",
+            sort_order="desc",
         )
         for i in range(len(threads) - 1):
             a = threads[i].last_active_at
@@ -886,13 +1174,18 @@ class TestSearchSorting:
                 assert a >= b
 
     @pytest.mark.asyncio
-    async def test_ucb1_comprehensive_sort(self, seeded_sorting_session, db_session_factory):
+    async def test_ucb1_comprehensive_sort(
+        self, seeded_sorting_session, db_session_factory
+    ):
         """UCB1 综合排序。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, total = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="comprehensive", sort_order="desc",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="comprehensive",
+            sort_order="desc",
         )
         assert total == 5
         assert len(threads) == 5
@@ -903,44 +1196,62 @@ class TestSearchSorting:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, total = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="reddit_hot", sort_order="desc",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="reddit_hot",
+            sort_order="desc",
         )
         assert total == 5
         assert len(threads) == 5
 
     @pytest.mark.asyncio
-    async def test_sort_by_reply_count(self, seeded_sorting_session, db_session_factory):
+    async def test_sort_by_reply_count(
+        self, seeded_sorting_session, db_session_factory
+    ):
         """按回复数排序。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="reply_count", sort_order="desc",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="reply_count",
+            sort_order="desc",
         )
         for i in range(len(threads) - 1):
             assert threads[i].reply_count >= threads[i + 1].reply_count
 
     @pytest.mark.asyncio
-    async def test_sort_by_collection_count(self, seeded_sorting_session, db_session_factory):
+    async def test_sort_by_collection_count(
+        self, seeded_sorting_session, db_session_factory
+    ):
         """按收藏数排序。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, _ = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="collection_count", sort_order="desc",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="collection_count",
+            sort_order="desc",
         )
         for i in range(len(threads) - 1):
             assert threads[i].collection_count >= threads[i + 1].collection_count
 
     @pytest.mark.asyncio
-    async def test_custom_sort_fallback(self, seeded_sorting_session, db_session_factory):
+    async def test_custom_sort_fallback(
+        self, seeded_sorting_session, db_session_factory
+    ):
         """自定义排序回退。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         threads, total = await _search(
-            seeded_sorting_session, tag_cache,
-            keywords=None, sort_method="custom", custom_base_sort="reaction_count",
+            seeded_sorting_session,
+            tag_cache,
+            keywords=None,
+            sort_method="custom",
+            custom_base_sort="reaction_count",
             sort_order="desc",
         )
         assert total == 5
@@ -956,37 +1267,53 @@ class TestSearchBoundaries:
     """测试边界值和边缘情况。"""
 
     @pytest.mark.asyncio
-    async def test_no_results_fts_no_match(self, seeded_basic_session, db_session_factory):
+    async def test_no_results_fts_no_match(
+        self, seeded_basic_session, db_session_factory
+    ):
         """FTS 关键词无匹配。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         _, total = await _search(
-            seeded_basic_session, tag_cache, keywords="不存在的词汇xyz123",
+            seeded_basic_session,
+            tag_cache,
+            keywords="不存在的词汇xyz123",
         )
         assert total == 0
 
     @pytest.mark.asyncio
-    async def test_fts_match_but_filter_excludes_all(self, seeded_filter_session, db_session_factory):
+    async def test_fts_match_but_filter_excludes_all(
+        self, seeded_filter_session, db_session_factory
+    ):
         """FTS 匹配但过滤器排除全部。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         _, total = await _search(
-            seeded_filter_session, tag_cache, keywords="汉化", channel_ids=[20],
+            seeded_filter_session,
+            tag_cache,
+            keywords="汉化",
+            channel_ids=[20],
         )
         assert total == 0
 
     @pytest.mark.asyncio
-    async def test_pagination_offset(self, seeded_fts_varied_session, db_session_factory):
+    async def test_pagination_offset(
+        self, seeded_fts_varied_session, db_session_factory
+    ):
         """分页偏移。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         query = ThreadSearchQuery()
         service = SearchService(
-            session=seeded_fts_varied_session, tag_cache_service=tag_cache,
+            session=seeded_fts_varied_session,
+            tag_cache_service=tag_cache,
         )
         paged, paged_total = await service.search_threads_with_count(
-            query=query, limit=2, offset=2,
-            total_display_count=1000, exploration_factor=1.414, strength_weight=10.0,
+            query=query,
+            limit=2,
+            offset=2,
+            total_display_count=1000,
+            exploration_factor=1.414,
+            strength_weight=10.0,
         )
         assert paged_total == 5
         assert len(paged) == 2
@@ -998,11 +1325,16 @@ class TestSearchBoundaries:
         await tag_cache.build_cache()
         query = ThreadSearchQuery()
         service = SearchService(
-            session=seeded_fts_varied_session, tag_cache_service=tag_cache,
+            session=seeded_fts_varied_session,
+            tag_cache_service=tag_cache,
         )
         threads, total = await service.search_threads_with_count(
-            query=query, limit=0, offset=0,
-            total_display_count=1000, exploration_factor=1.414, strength_weight=10.0,
+            query=query,
+            limit=0,
+            offset=0,
+            total_display_count=1000,
+            exploration_factor=1.414,
+            strength_weight=10.0,
         )
         assert len(threads) == 0
         assert total == 5
@@ -1013,7 +1345,8 @@ class TestSearchBoundaries:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         _, total = await _search(
-            seeded_basic_session, tag_cache,
+            seeded_basic_session,
+            tag_cache,
             keywords=None,
             exclude_keywords="百合破坏 小说",
             exclude_keyword_exemption_markers=[],
@@ -1021,14 +1354,20 @@ class TestSearchBoundaries:
         assert total == 0
 
     @pytest.mark.asyncio
-    async def test_fts_update_updates_search_vector(self, empty_db_session, db_session_factory):
+    async def test_fts_update_updates_search_vector(
+        self, empty_db_session, db_session_factory
+    ):
         """更新标题后 search_vector 同步更新。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
 
         t = Thread(
-            thread_id=9200, channel_id=1, title="旧标题不含关键词",
-            first_message_excerpt="", author_id=1, created_at=datetime.now(),
+            thread_id=9200,
+            channel_id=1,
+            title="旧标题不含关键词",
+            first_message_excerpt="",
+            author_id=1,
+            created_at=datetime.now(),
         )
         empty_db_session.add(t)
         await empty_db_session.commit()
@@ -1047,14 +1386,20 @@ class TestSearchBoundaries:
         await empty_db_session.commit()
 
     @pytest.mark.asyncio
-    async def test_fts_delete_removes_from_search(self, empty_db_session, db_session_factory):
+    async def test_fts_delete_removes_from_search(
+        self, empty_db_session, db_session_factory
+    ):
         """删除帖子后搜索不到。"""
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
 
         t = Thread(
-            thread_id=9300, channel_id=1, title="待删除帖子关键词测试",
-            first_message_excerpt="", author_id=1, created_at=datetime.now(),
+            thread_id=9300,
+            channel_id=1,
+            title="待删除帖子关键词测试",
+            first_message_excerpt="",
+            author_id=1,
+            created_at=datetime.now(),
         )
         empty_db_session.add(t)
         await empty_db_session.commit()
@@ -1139,15 +1484,20 @@ class TestExclusionParameterized:
         tag_cache = _make_tag_cache(db_session_factory)
         await tag_cache.build_cache()
         service = SearchService(
-            session=seeded_basic_session, tag_cache_service=tag_cache,
+            session=seeded_basic_session,
+            tag_cache_service=tag_cache,
         )
         query = ThreadSearchQuery(
             exclude_keywords=exclude_keywords,
             exclude_keyword_exemption_markers=exemption_markers,
         )
         threads, total = await service.search_threads_with_count(
-            query=query, offset=0, limit=10,
-            total_display_count=1000, exploration_factor=1.414, strength_weight=10.0,
+            query=query,
+            offset=0,
+            limit=10,
+            total_display_count=1000,
+            exploration_factor=1.414,
+            strength_weight=10.0,
         )
         returned_titles = {t.title for t in threads}
 

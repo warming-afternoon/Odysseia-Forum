@@ -11,7 +11,6 @@ PG 关注点：func.random() 排序，多表 JOIN，selectinload/joinedload
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
@@ -37,9 +36,24 @@ async def seeded_discovery_session(
     """预填充多样化的帖子数据，用于发现页测试。"""
     # 创建作者
     authors = [
-        Author(id=1, name="Author1", display_name="ADisp1", avatar_url="https://example.com/a1.png"),
-        Author(id=2, name="Author2", display_name="ADisp2", avatar_url="https://example.com/a2.png"),
-        Author(id=3, name="Author3", display_name="ADisp3", avatar_url="https://example.com/a3.png"),
+        Author(
+            id=1,
+            name="Author1",
+            display_name="ADisp1",
+            avatar_url="https://example.com/a1.png",
+        ),
+        Author(
+            id=2,
+            name="Author2",
+            display_name="ADisp2",
+            avatar_url="https://example.com/a2.png",
+        ),
+        Author(
+            id=3,
+            name="Author3",
+            display_name="ADisp3",
+            avatar_url="https://example.com/a3.png",
+        ),
     ]
     discovery_session.add_all(authors)
 
@@ -50,29 +64,50 @@ async def seeded_discovery_session(
     # 创建帖子（不同频道、不同时间）
     threads = [
         Thread(
-            channel_id=1, thread_id=101, title="Latest Thread",
-            author_id=1, created_at=utc_now(),
-            show_flag=True, not_found_count=0,
+            channel_id=1,
+            thread_id=101,
+            title="Latest Thread",
+            author_id=1,
+            created_at=utc_now(),
+            show_flag=True,
+            not_found_count=0,
         ),
         Thread(
-            channel_id=1, thread_id=102, title="Hidden Thread",
-            author_id=2, created_at=utc_now(),
-            show_flag=False, not_found_count=0,
+            channel_id=1,
+            thread_id=102,
+            title="Hidden Thread",
+            author_id=2,
+            created_at=utc_now(),
+            show_flag=False,
+            not_found_count=0,
         ),
         Thread(
-            channel_id=1, thread_id=103, title="NotFound Thread",
-            author_id=3, created_at=utc_now(),
-            show_flag=True, not_found_count=5,
+            channel_id=1,
+            thread_id=103,
+            title="NotFound Thread",
+            author_id=3,
+            created_at=utc_now(),
+            show_flag=True,
+            not_found_count=5,
         ),
         Thread(
-            channel_id=2, thread_id=201, title="Channel 2 Thread",
-            author_id=1, created_at=utc_now(),
-            show_flag=True, not_found_count=0,
+            channel_id=2,
+            thread_id=201,
+            title="Channel 2 Thread",
+            author_id=1,
+            created_at=utc_now(),
+            show_flag=True,
+            not_found_count=0,
         ),
         Thread(
-            channel_id=1, thread_id=104, title="Reaction Thread",
-            author_id=2, created_at=utc_now(),
-            show_flag=True, not_found_count=0, reaction_count=50,
+            channel_id=1,
+            thread_id=104,
+            title="Reaction Thread",
+            author_id=2,
+            created_at=utc_now(),
+            show_flag=True,
+            not_found_count=0,
+            reaction_count=50,
         ),
     ]
     discovery_session.add_all(threads)
@@ -97,7 +132,9 @@ async def seeded_discovery_session(
 class TestGetLatestThreads:
     """获取最新帖子 — 过滤 + 排序"""
 
-    async def test_get_latest_threads_basic(self, seeded_discovery_session: AsyncSession):
+    async def test_get_latest_threads_basic(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """基本拉取：排除隐藏/软删除帖子"""
         repo = DiscoveryRepository(seeded_discovery_session)
         threads = await repo.get_latest_threads(limit=10, offset=0, prefs=None)
@@ -110,13 +147,17 @@ class TestGetLatestThreads:
         assert 102 not in thread_ids
         assert 103 not in thread_ids
 
-    async def test_get_latest_threads_limit(self, seeded_discovery_session: AsyncSession):
+    async def test_get_latest_threads_limit(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """分页限制"""
         repo = DiscoveryRepository(seeded_discovery_session)
         threads = await repo.get_latest_threads(limit=2, offset=0, prefs=None)
         assert len(threads) == 2
 
-    async def test_get_latest_threads_offset(self, seeded_discovery_session: AsyncSession):
+    async def test_get_latest_threads_offset(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """偏移分页"""
         repo = DiscoveryRepository(seeded_discovery_session)
         page1 = await repo.get_latest_threads(limit=2, offset=0, prefs=None)
@@ -125,7 +166,9 @@ class TestGetLatestThreads:
         # 应看到所有 3 个可见帖子
         assert len(all_ids) == 3
 
-    async def test_get_latest_threads_eager_loading(self, seeded_discovery_session: AsyncSession):
+    async def test_get_latest_threads_eager_loading(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """预加载 author 关系"""
         repo = DiscoveryRepository(seeded_discovery_session)
         threads = await repo.get_latest_threads(limit=10, offset=0, prefs=None)
@@ -136,7 +179,9 @@ class TestGetLatestThreads:
                 assert t.author is not None
                 assert t.author.name == "Author1"
 
-    async def test_get_latest_with_preferences_channel(self, seeded_discovery_session: AsyncSession):
+    async def test_get_latest_with_preferences_channel(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """偏好过滤 → preferred_channels"""
         from dto.preferences.user_search_preferences_dto import UserSearchPreferencesDTO
 
@@ -154,7 +199,9 @@ class TestGetLatestThreads:
 class TestGetRandomThreads:
     """随机帖子查询 — func.random()"""
 
-    async def test_get_random_threads_basic(self, seeded_discovery_session: AsyncSession):
+    async def test_get_random_threads_basic(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """基本随机查询"""
         repo = ThreadRepository(seeded_discovery_session)
         threads = await repo.get_random_threads(
@@ -168,7 +215,9 @@ class TestGetRandomThreads:
             assert t.show_flag is True
             assert t.not_found_count == 0
 
-    async def test_get_random_threads_exclusion(self, seeded_discovery_session: AsyncSession):
+    async def test_get_random_threads_exclusion(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """排除指定频道"""
         repo = ThreadRepository(seeded_discovery_session)
         threads = await repo.get_random_threads(
@@ -180,7 +229,9 @@ class TestGetRandomThreads:
         for t in threads:
             assert t.channel_id == 2
 
-    async def test_get_random_threads_limit(self, seeded_discovery_session: AsyncSession):
+    async def test_get_random_threads_limit(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """Limit 约束"""
         repo = ThreadRepository(seeded_discovery_session)
         threads = await repo.get_random_threads(
@@ -189,7 +240,9 @@ class TestGetRandomThreads:
         )
         assert len(threads) == 1
 
-    async def test_get_random_threads_empty_channel(self, seeded_discovery_session: AsyncSession):
+    async def test_get_random_threads_empty_channel(
+        self, seeded_discovery_session: AsyncSession
+    ):
         """空频道列表 → 空结果"""
         repo = ThreadRepository(seeded_discovery_session)
         threads = await repo.get_random_threads(

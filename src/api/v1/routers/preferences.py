@@ -39,7 +39,9 @@ async def get_user_preferences(user_id: int):
 
     try:
         async with async_session_factory() as session:
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             # 使用注入的 main_guild_id
             prefs_dto = await repo.get_user_preferences(user_id, main_guild_id)
             if not prefs_dto:
@@ -81,7 +83,9 @@ async def update_user_preferences(user_id: int, request: UserPreferencesUpdateRe
 
     try:
         async with async_session_factory() as session:
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             # 使用注入的 main_guild_id
             updated_prefs = await repo.save_user_preferences(
                 user_id, update_data, main_guild_id

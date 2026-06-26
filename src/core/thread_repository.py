@@ -33,7 +33,7 @@ def _batch_cut(keywords: list[str]) -> list[list[str]]:
 def _escape_tsquery_token(token: str) -> str:
     """转义 token 中可能破坏 PostgreSQL tsquery 语法的单引号和反斜杠。"""
     token = token.replace("\\", "\\\\")  # 先转义反斜杠
-    return token.replace("'", "''")      # 再转义单引号
+    return token.replace("'", "''")  # 再转义单引号
 
 
 def _tokens_to_tsquery_and(tokens: list[str]) -> str:
@@ -48,7 +48,6 @@ def _tokens_to_tsquery_and(tokens: list[str]) -> str:
     parts = [f"'{t}'" for t in escaped[:-1]]
     parts.append(f"'{escaped[-1]}':*")
     return " & ".join(parts)
-
 
 
 def _build_exemption_tsquery(
@@ -143,8 +142,8 @@ class ThreadRepository:
             logger.info(f"频道 {channel_id} 没有需要删除的索引帖子。")
             return
 
-        thread_ids = [row[0] for row in rows]       # 内部主键 ID
-        discord_ids = [row[1] for row in rows]       # Discord 帖子 ID
+        thread_ids = [row[0] for row in rows]  # 内部主键 ID
+        discord_ids = [row[1] for row in rows]  # Discord 帖子 ID
 
         try:
             # 删除 ThreadTagLink 记录（依赖 thread internal id）
@@ -476,9 +475,7 @@ class ThreadRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
-    async def get_threads_by_ids_with_tags(
-        self, thread_ids: list[int]
-    ) -> list[Thread]:
+    async def get_threads_by_ids_with_tags(self, thread_ids: list[int]) -> list[Thread]:
         """批量获取帖子及其标签（预加载），用于 Banner 等场景。"""
         if not thread_ids:
             return []
@@ -745,7 +742,9 @@ class ThreadRepository:
         has_any_include = False
         if keywords:
             # 按逗号拆分为多个 AND 组，各关键词组之间取交集
-            keywords_str = keywords.replace("，", ",").replace("／", "/").replace("\\", "/")
+            keywords_str = (
+                keywords.replace("，", ",").replace("／", "/").replace("\\", "/")
+            )
             and_groups = [
                 group.strip() for group in keywords_str.split(",") if group.strip()
             ]
@@ -788,7 +787,9 @@ class ThreadRepository:
                         exact_kw = kw[1:-1].strip().replace('"', "")
                         if exact_kw:
                             exact_tokens = list(rjieba.cut(exact_kw))
-                            clean_tokens = [t.strip().lower() for t in exact_tokens if t.strip()]
+                            clean_tokens = [
+                                t.strip().lower() for t in exact_tokens if t.strip()
+                            ]
                             if clean_tokens:
                                 phrase = " & ".join(f"'{t}'" for t in clean_tokens)
                                 or_tsquery_parts.append(f"({phrase})")

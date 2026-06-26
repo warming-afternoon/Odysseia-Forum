@@ -372,7 +372,6 @@ class SearchService:
 
             if total_count == 0:
                 if debug_timing:
-                    t_now = time.perf_counter()
                     logger.info(
                         f"[计时] DB内部 | clean={(t_clean - t0) * 1000:.0f}ms "
                         f"fts={(t_fts - t_clean) * 1000:.0f}ms "

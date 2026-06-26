@@ -29,9 +29,7 @@ class ApiCacheService:
     启动定时轮询任务，自动同步频道元数据和配置变更。
     """
 
-    def __init__(
-        self, session_factory: async_sessionmaker, redis_client
-    ):
+    def __init__(self, session_factory: async_sessionmaker, redis_client):
         self.bot = NullBot()
         self.session_factory = session_factory
         self._redis = redis_client
@@ -80,21 +78,19 @@ class ApiCacheService:
                 pass
         logger.info("ApiCacheService 定时同步已停止")
 
-    async def get_bot_config(self, config_type: SearchConfigType) -> BotConfigDTO | None:
+    async def get_bot_config(
+        self, config_type: SearchConfigType
+    ) -> BotConfigDTO | None:
         """从缓存获取配置；如未命中则自动刷新后重试。"""
         config = self.bot_configs.get(config_type)
         if config is not None:
             return config
 
-        logger.info(
-            f"ApiCacheService 配置缓存未命中: {config_type.name}，正在刷新..."
-        )
+        logger.info(f"ApiCacheService 配置缓存未命中: {config_type.name}，正在刷新...")
         await self.refresh_bot_config_cache()
         config = self.bot_configs.get(config_type)
         if config is None:
-            logger.error(
-                f"刷新缓存后仍然找不到配置: {config_type.name}."
-            )
+            logger.error(f"刷新缓存后仍然找不到配置: {config_type.name}.")
         return config
 
     async def get_ucb1_config(self) -> SearchConfigDTO:
@@ -154,9 +150,7 @@ class ApiCacheService:
         """检查频道ID是否已索引。"""
         return channel_id in self.indexed_channel_ids
 
-    def get_indexed_channels(
-        self, guild_id: int | None = None
-    ) -> list[ChannelMeta]:
+    def get_indexed_channels(self, guild_id: int | None = None) -> list[ChannelMeta]:
         """获取已索引的频道元数据列表。可选按 guild_id 过滤。"""
         if guild_id is not None:
             guild_data = self.guild_channels.get(guild_id, {})
@@ -186,10 +180,7 @@ class ApiCacheService:
         if not thread_ids:
             return {}
 
-        keys = [
-            CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
-            for tid in thread_ids
-        ]
+        keys = [CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid) for tid in thread_ids]
         result: dict[int, list[dict]] = {}
         miss_ids: list[int] = []
 
@@ -235,9 +226,7 @@ class ApiCacheService:
             indexed_channel_ids = await thread_service.get_all_indexed_channel_ids()
             self.indexed_channel_ids = set(indexed_channel_ids)
 
-    async def _load_channel_metadata_from_redis(
-        self, retry_on_missing: bool = False
-    ):
+    async def _load_channel_metadata_from_redis(self, retry_on_missing: bool = False):
         """从 Redis 加载由 Bot 进程发布的频道元数据。"""
         try:
             raw = await self._redis.get("cache:forum-channels")
@@ -250,19 +239,13 @@ class ApiCacheService:
                     try:
                         raw = await self._redis.get("cache:forum-channels")
                     except Exception:
-                        logger.debug(
-                            f"Redis 读取失败（第 {attempt} 次），将继续重试"
-                        )
+                        logger.debug(f"Redis 读取失败（第 {attempt} 次），将继续重试")
                         continue
                     if raw:
-                        logger.info(
-                            f"频道元数据已就绪（等待了 {attempt} 秒）"
-                        )
+                        logger.info(f"频道元数据已就绪（等待了 {attempt} 秒）")
                         break
                 else:
-                    logger.warning(
-                        "等待超时：Bot 未在 30 秒内发布频道元数据"
-                    )
+                    logger.warning("等待超时：Bot 未在 30 秒内发布频道元数据")
                     return
 
             if not raw:
@@ -281,9 +264,7 @@ class ApiCacheService:
                 category = None
                 if entry.get("category"):
                     cat_data = entry["category"]
-                    category = CategoryMeta(
-                        id=cat_data["id"], name=cat_data["name"]
-                    )
+                    category = CategoryMeta(id=cat_data["id"], name=cat_data["name"])
 
                 tags = [
                     TagMeta(id=t["id"], name=t["name"])
@@ -303,9 +284,7 @@ class ApiCacheService:
 
             self.indexed_channels = new_channels
             self.guild_channels = dict(new_guild_channels)
-            logger.debug(
-                f"从 Redis 加载了 {len(new_channels)} 个频道的元数据"
-            )
+            logger.debug(f"从 Redis 加载了 {len(new_channels)} 个频道的元数据")
         except Exception:
             logger.error("从 Redis 加载频道元数据失败", exc_info=True)
 

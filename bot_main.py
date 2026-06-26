@@ -20,9 +20,6 @@ import time
 import os
 
 from dotenv import load_dotenv
-
-load_dotenv()
-
 from shared.database import AsyncSessionFactory, init_db, close_db
 from shared.redis_client import RedisManager
 from ThreadManager.cog import ThreadManager
@@ -45,13 +42,20 @@ from backup.cog import BackupCog
 from shared.api_scheduler import APIScheduler
 from shared.enum import SearchConfigDefaultsInt
 
+load_dotenv()
+
 logger = logging.getLogger(__name__)
 
 
 class MyBot(commands.Bot):
     def __init__(self, *, intents: discord.Intents, config: dict):
         proxy = config.get("proxy")
-        bot_kwargs = {"command_prefix": "!", "intents": intents, "max_messages": 0, "chunk_guilds_at_startup": False}
+        bot_kwargs = {
+            "command_prefix": "!",
+            "intents": intents,
+            "max_messages": 0,
+            "chunk_guilds_at_startup": False,
+        }
         if proxy:
             bot_kwargs["proxy"] = proxy
         super().__init__(**bot_kwargs)
@@ -103,9 +107,7 @@ class MyBot(commands.Bot):
 
         # 刷新后重新发布频道元数据到 Redis
         if self.cache_service:
-            await self.cache_service.publish_channel_metadata(
-                RedisManager.get_client()
-            )
+            await self.cache_service.publish_channel_metadata(RedisManager.get_client())
         logger.info("核心缓存刷新完毕")
 
     def reload_config(self):
@@ -364,7 +366,6 @@ class MyBot(commands.Bot):
             return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
 
-
 async def main():
     # 配置日志记录
     logging.basicConfig(
@@ -375,7 +376,9 @@ async def main():
         file_handler = TimedRotatingFileHandler(
             "/app/logs/bot.log", when="midnight", backupCount=7, encoding="utf-8"
         )
-        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
         logging.getLogger().addHandler(file_handler)
     except Exception:
         logging.getLogger().warning("无法创建日志文件处理器，仅输出到控制台")
@@ -393,7 +396,9 @@ async def main():
         config = json.load(f)
 
     # 读取配置项并初始化全局Redis连接池
-    redis_url = os.environ.get("REDIS_URL", config.get("redis_url", "redis://odysseia-redis:6379/0"))
+    redis_url = os.environ.get(
+        "REDIS_URL", config.get("redis_url", "redis://odysseia-redis:6379/0")
+    )
     await RedisManager.init_redis(redis_url)  # type: ignore[arg-type]
 
     # 清除上一次运行残留的就绪标志，确保 API 不会在 Bot 重启期间读到过期状态

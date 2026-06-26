@@ -91,9 +91,7 @@ class BannerEventListener(commands.Cog):
                     guild_id = await repo.get_thread_guild_id(application.thread_id)
                 # 查询历史申请记录
                 app_repo = BannerApplicationRepository(session)
-                history = await app_repo.get_history_by_thread_id(
-                    application.thread_id
-                )
+                history = await app_repo.get_history_by_thread_id(application.thread_id)
 
                 embed = ReviewEmbedBuilder.build_review_embed(
                     application=application,
@@ -168,9 +166,7 @@ class BannerEventListener(commands.Cog):
 
             # 构建目标链接
             guild_id = interaction.guild_id or 0
-            target_link = (
-                f"https://discord.com/channels/{guild_id}/{thread_id}"
-            )
+            target_link = f"https://discord.com/channels/{guild_id}/{thread_id}"
 
             # 展示频道选择视图
             view = ChannelSelectionView(
@@ -248,9 +244,7 @@ class BannerEventListener(commands.Cog):
 
                 # 查询历史申请记录
                 app_repo = BannerApplicationRepository(session)
-                history = await app_repo.get_history_by_thread_id(
-                    application.thread_id
-                )
+                history = await app_repo.get_history_by_thread_id(application.thread_id)
 
                 # 构建审核 Embed
                 embed = ReviewEmbedBuilder.build_review_embed(
@@ -333,9 +327,7 @@ class BannerEventListener(commands.Cog):
 
                 application_id = application.id
                 if application_id is None:
-                    await interaction.followup.send(
-                        "❌ 申请数据异常", ephemeral=True
-                    )
+                    await interaction.followup.send("❌ 申请数据异常", ephemeral=True)
                     return
 
                 application, entered_carousel = await service.approve_application(
@@ -433,9 +425,7 @@ class BannerEventListener(commands.Cog):
 
                 application_id = application.id
                 if application_id is None:
-                    await interaction.followup.send(
-                        "❌ 申请数据异常", ephemeral=True
-                    )
+                    await interaction.followup.send("❌ 申请数据异常", ephemeral=True)
                     return
 
                 application = await service.reject_application(
@@ -450,9 +440,7 @@ class BannerEventListener(commands.Cog):
                     value=f"❌ 已拒绝 by <@{reviewer_id}>",
                     inline=False,
                 )
-                original_embed.add_field(
-                    name="拒绝理由", value=reason, inline=False
-                )
+                original_embed.add_field(name="拒绝理由", value=reason, inline=False)
                 await interaction.message.edit(embed=original_embed, view=None)
 
                 # DM 通知

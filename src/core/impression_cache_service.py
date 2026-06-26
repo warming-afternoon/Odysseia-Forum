@@ -167,9 +167,7 @@ class ImpressionCacheService:
 
                 except Exception as e:
                     await session.rollback()
-                    logger.error(
-                        f"展示次数批次回写失败 (非数据库错误): {e}"
-                    )
+                    logger.error(f"展示次数批次回写失败 (非数据库错误): {e}")
                     break
 
         return False
@@ -182,9 +180,7 @@ class ImpressionCacheService:
                     update(BotConfig)
                     .where(BotConfig.type == SearchConfigType.TOTAL_DISPLAY_COUNT)  # type: ignore
                     .values(
-                        value_int=(
-                            func.coalesce(BotConfig.value_int, 0) + increment
-                        )
+                        value_int=(func.coalesce(BotConfig.value_int, 0) + increment)
                     )
                 )
                 await session.commit()

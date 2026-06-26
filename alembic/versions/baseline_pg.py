@@ -17,22 +17,54 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # ── 序列 ─────────────────────────────────────────
-    op.execute("CREATE SEQUENCE public.author_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.banner_application_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.banner_carousel_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.banner_waitlist_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.booklist_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.booklist_item_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.bot_config_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.mutex_tag_group_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.mutex_tag_rule_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.tag_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.tag_vote_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.thread_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.thread_follow_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.user_collection_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.usersearchpreferences_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
-    op.execute("CREATE SEQUENCE public.user_update_preference_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1")
+    op.execute(
+        "CREATE SEQUENCE public.author_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.banner_application_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.banner_carousel_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.banner_waitlist_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.booklist_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.booklist_item_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.bot_config_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.mutex_tag_group_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.mutex_tag_rule_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.tag_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.tag_vote_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.thread_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.thread_follow_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.user_collection_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.usersearchpreferences_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
+    op.execute(
+        "CREATE SEQUENCE public.user_update_preference_id_seq AS integer START WITH 1 INCREMENT BY 1 NO MINVALUE NO MAXVALUE CACHE 1"
+    )
 
     # ── 表 ───────────────────────────────────────────
     op.execute("""
@@ -249,125 +281,327 @@ def upgrade() -> None:
     """)
 
     # ── 主键 ─────────────────────────────────────────
-    op.execute("ALTER TABLE ONLY public.author ADD CONSTRAINT author_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.banner_application ADD CONSTRAINT banner_application_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.banner_carousel ADD CONSTRAINT banner_carousel_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.banner_waitlist ADD CONSTRAINT banner_waitlist_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.booklist ADD CONSTRAINT booklist_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.booklist_item ADD CONSTRAINT booklist_item_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.bot_config ADD CONSTRAINT bot_config_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.mutex_tag_group ADD CONSTRAINT mutex_tag_group_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.mutex_tag_rule ADD CONSTRAINT mutex_tag_rule_pkey PRIMARY KEY (id)")
+    op.execute(
+        "ALTER TABLE ONLY public.author ADD CONSTRAINT author_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.banner_application ADD CONSTRAINT banner_application_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.banner_carousel ADD CONSTRAINT banner_carousel_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.banner_waitlist ADD CONSTRAINT banner_waitlist_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.booklist ADD CONSTRAINT booklist_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.booklist_item ADD CONSTRAINT booklist_item_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.bot_config ADD CONSTRAINT bot_config_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.mutex_tag_group ADD CONSTRAINT mutex_tag_group_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.mutex_tag_rule ADD CONSTRAINT mutex_tag_rule_pkey PRIMARY KEY (id)"
+    )
     op.execute("ALTER TABLE ONLY public.tag ADD CONSTRAINT tag_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.tag_vote ADD CONSTRAINT tag_vote_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.thread ADD CONSTRAINT thread_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.thread_follow ADD CONSTRAINT thread_follow_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.thread_tag_link ADD CONSTRAINT threadtaglink_pkey PRIMARY KEY (thread_id, tag_id)")
-    op.execute("ALTER TABLE ONLY public.user_collection ADD CONSTRAINT user_collection_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.user_search_preferences ADD CONSTRAINT usersearchpreferences_pkey PRIMARY KEY (id)")
-    op.execute("ALTER TABLE ONLY public.user_update_preference ADD CONSTRAINT user_update_preference_pkey PRIMARY KEY (id)")
+    op.execute(
+        "ALTER TABLE ONLY public.tag_vote ADD CONSTRAINT tag_vote_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.thread ADD CONSTRAINT thread_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.thread_follow ADD CONSTRAINT thread_follow_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.thread_tag_link ADD CONSTRAINT threadtaglink_pkey PRIMARY KEY (thread_id, tag_id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_collection ADD CONSTRAINT user_collection_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_search_preferences ADD CONSTRAINT usersearchpreferences_pkey PRIMARY KEY (id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_update_preference ADD CONSTRAINT user_update_preference_pkey PRIMARY KEY (id)"
+    )
 
     # ── 唯一约束 ─────────────────────────────────────
-    op.execute("ALTER TABLE ONLY public.bot_config ADD CONSTRAINT bot_config_type_key UNIQUE (type)")
-    op.execute("ALTER TABLE ONLY public.booklist_item ADD CONSTRAINT uq_booklist_thread UNIQUE (booklist_id, thread_id)")
-    op.execute("ALTER TABLE ONLY public.tag_vote ADD CONSTRAINT uq_user_tag_thread_vote UNIQUE (user_id, tag_id, thread_id)")
-    op.execute("ALTER TABLE ONLY public.user_collection ADD CONSTRAINT uk_user_collection_target UNIQUE (user_id, target_type, target_id)")
-    op.execute("ALTER TABLE ONLY public.user_search_preferences ADD CONSTRAINT uk_user_guild_preferences UNIQUE (user_id, guild_id)")
-    op.execute("ALTER TABLE ONLY public.user_update_preference ADD CONSTRAINT uk_user_thread_update_pref UNIQUE (user_id, thread_id)")
+    op.execute(
+        "ALTER TABLE ONLY public.bot_config ADD CONSTRAINT bot_config_type_key UNIQUE (type)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.booklist_item ADD CONSTRAINT uq_booklist_thread UNIQUE (booklist_id, thread_id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.tag_vote ADD CONSTRAINT uq_user_tag_thread_vote UNIQUE (user_id, tag_id, thread_id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_collection ADD CONSTRAINT uk_user_collection_target UNIQUE (user_id, target_type, target_id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_search_preferences ADD CONSTRAINT uk_user_guild_preferences UNIQUE (user_id, guild_id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_update_preference ADD CONSTRAINT uk_user_thread_update_pref UNIQUE (user_id, thread_id)"
+    )
 
     # ── 外键 ─────────────────────────────────────────
-    op.execute("ALTER TABLE ONLY public.mutex_tag_rule ADD CONSTRAINT mutex_tag_rule_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.mutex_tag_group(id)")
-    op.execute("ALTER TABLE ONLY public.tag_vote ADD CONSTRAINT tag_vote_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tag(id)")
-    op.execute("ALTER TABLE ONLY public.tag_vote ADD CONSTRAINT tag_vote_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES public.thread(id)")
+    op.execute(
+        "ALTER TABLE ONLY public.mutex_tag_rule ADD CONSTRAINT mutex_tag_rule_group_id_fkey FOREIGN KEY (group_id) REFERENCES public.mutex_tag_group(id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.tag_vote ADD CONSTRAINT tag_vote_tag_id_fkey FOREIGN KEY (tag_id) REFERENCES public.tag(id)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.tag_vote ADD CONSTRAINT tag_vote_thread_id_fkey FOREIGN KEY (thread_id) REFERENCES public.thread(id)"
+    )
 
     # ── 序列所有权 ───────────────────────────────────
-    op.execute("ALTER SEQUENCE public.banner_application_id_seq OWNED BY public.banner_application.id")
-    op.execute("ALTER SEQUENCE public.banner_carousel_id_seq OWNED BY public.banner_carousel.id")
-    op.execute("ALTER SEQUENCE public.banner_waitlist_id_seq OWNED BY public.banner_waitlist.id")
+    op.execute(
+        "ALTER SEQUENCE public.banner_application_id_seq OWNED BY public.banner_application.id"
+    )
+    op.execute(
+        "ALTER SEQUENCE public.banner_carousel_id_seq OWNED BY public.banner_carousel.id"
+    )
+    op.execute(
+        "ALTER SEQUENCE public.banner_waitlist_id_seq OWNED BY public.banner_waitlist.id"
+    )
     op.execute("ALTER SEQUENCE public.booklist_id_seq OWNED BY public.booklist.id")
-    op.execute("ALTER SEQUENCE public.booklist_item_id_seq OWNED BY public.booklist_item.id")
+    op.execute(
+        "ALTER SEQUENCE public.booklist_item_id_seq OWNED BY public.booklist_item.id"
+    )
     op.execute("ALTER SEQUENCE public.bot_config_id_seq OWNED BY public.bot_config.id")
-    op.execute("ALTER SEQUENCE public.mutex_tag_group_id_seq OWNED BY public.mutex_tag_group.id")
-    op.execute("ALTER SEQUENCE public.mutex_tag_rule_id_seq OWNED BY public.mutex_tag_rule.id")
+    op.execute(
+        "ALTER SEQUENCE public.mutex_tag_group_id_seq OWNED BY public.mutex_tag_group.id"
+    )
+    op.execute(
+        "ALTER SEQUENCE public.mutex_tag_rule_id_seq OWNED BY public.mutex_tag_rule.id"
+    )
     op.execute("ALTER SEQUENCE public.tag_id_seq OWNED BY public.tag.id")
     op.execute("ALTER SEQUENCE public.tag_vote_id_seq OWNED BY public.tag_vote.id")
     op.execute("ALTER SEQUENCE public.thread_id_seq OWNED BY public.thread.id")
-    op.execute("ALTER SEQUENCE public.thread_follow_id_seq OWNED BY public.thread_follow.id")
-    op.execute("ALTER SEQUENCE public.user_collection_id_seq OWNED BY public.user_collection.id")
-    op.execute("ALTER SEQUENCE public.usersearchpreferences_id_seq OWNED BY public.user_search_preferences.id")
-    op.execute("ALTER SEQUENCE public.user_update_preference_id_seq OWNED BY public.user_update_preference.id")
+    op.execute(
+        "ALTER SEQUENCE public.thread_follow_id_seq OWNED BY public.thread_follow.id"
+    )
+    op.execute(
+        "ALTER SEQUENCE public.user_collection_id_seq OWNED BY public.user_collection.id"
+    )
+    op.execute(
+        "ALTER SEQUENCE public.usersearchpreferences_id_seq OWNED BY public.user_search_preferences.id"
+    )
+    op.execute(
+        "ALTER SEQUENCE public.user_update_preference_id_seq OWNED BY public.user_update_preference.id"
+    )
 
     # ── 默认值 ───────────────────────────────────────
-    op.execute("ALTER TABLE ONLY public.banner_application ALTER COLUMN id SET DEFAULT nextval('public.banner_application_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.banner_carousel ALTER COLUMN id SET DEFAULT nextval('public.banner_carousel_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.banner_waitlist ALTER COLUMN id SET DEFAULT nextval('public.banner_waitlist_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.booklist ALTER COLUMN id SET DEFAULT nextval('public.booklist_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.booklist_item ALTER COLUMN id SET DEFAULT nextval('public.booklist_item_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.bot_config ALTER COLUMN id SET DEFAULT nextval('public.bot_config_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.mutex_tag_group ALTER COLUMN id SET DEFAULT nextval('public.mutex_tag_group_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.mutex_tag_rule ALTER COLUMN id SET DEFAULT nextval('public.mutex_tag_rule_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.tag ALTER COLUMN id SET DEFAULT nextval('public.tag_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.tag_vote ALTER COLUMN id SET DEFAULT nextval('public.tag_vote_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.thread ALTER COLUMN id SET DEFAULT nextval('public.thread_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.thread_follow ALTER COLUMN id SET DEFAULT nextval('public.thread_follow_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.user_collection ALTER COLUMN id SET DEFAULT nextval('public.user_collection_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.user_search_preferences ALTER COLUMN id SET DEFAULT nextval('public.usersearchpreferences_id_seq'::regclass)")
-    op.execute("ALTER TABLE ONLY public.user_update_preference ALTER COLUMN id SET DEFAULT nextval('public.user_update_preference_id_seq'::regclass)")
+    op.execute(
+        "ALTER TABLE ONLY public.banner_application ALTER COLUMN id SET DEFAULT nextval('public.banner_application_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.banner_carousel ALTER COLUMN id SET DEFAULT nextval('public.banner_carousel_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.banner_waitlist ALTER COLUMN id SET DEFAULT nextval('public.banner_waitlist_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.booklist ALTER COLUMN id SET DEFAULT nextval('public.booklist_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.booklist_item ALTER COLUMN id SET DEFAULT nextval('public.booklist_item_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.bot_config ALTER COLUMN id SET DEFAULT nextval('public.bot_config_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.mutex_tag_group ALTER COLUMN id SET DEFAULT nextval('public.mutex_tag_group_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.mutex_tag_rule ALTER COLUMN id SET DEFAULT nextval('public.mutex_tag_rule_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.tag ALTER COLUMN id SET DEFAULT nextval('public.tag_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.tag_vote ALTER COLUMN id SET DEFAULT nextval('public.tag_vote_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.thread ALTER COLUMN id SET DEFAULT nextval('public.thread_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.thread_follow ALTER COLUMN id SET DEFAULT nextval('public.thread_follow_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_collection ALTER COLUMN id SET DEFAULT nextval('public.user_collection_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_search_preferences ALTER COLUMN id SET DEFAULT nextval('public.usersearchpreferences_id_seq'::regclass)"
+    )
+    op.execute(
+        "ALTER TABLE ONLY public.user_update_preference ALTER COLUMN id SET DEFAULT nextval('public.user_update_preference_id_seq'::regclass)"
+    )
 
     # ── 索引 ─────────────────────────────────────────
-    op.execute("CREATE INDEX ix_banner_application_applicant_id ON public.banner_application USING btree (applicant_id)")
-    op.execute("CREATE INDEX ix_banner_application_channel_id ON public.banner_application USING btree (channel_id)")
-    op.execute("CREATE INDEX ix_banner_application_status ON public.banner_application USING btree (status)")
-    op.execute("CREATE INDEX ix_banner_application_target_scope ON public.banner_application USING btree (target_scope)")
-    op.execute("CREATE INDEX ix_banner_application_thread_id ON public.banner_application USING btree (thread_id)")
-    op.execute("CREATE INDEX ix_banner_carousel_channel_id ON public.banner_carousel USING btree (channel_id)")
-    op.execute("CREATE INDEX ix_banner_carousel_end_time ON public.banner_carousel USING btree (end_time)")
-    op.execute("CREATE INDEX ix_banner_carousel_position ON public.banner_carousel USING btree (\"position\")")
-    op.execute("CREATE INDEX ix_banner_carousel_start_time ON public.banner_carousel USING btree (start_time)")
-    op.execute("CREATE INDEX ix_banner_carousel_thread_id ON public.banner_carousel USING btree (thread_id)")
-    op.execute("CREATE INDEX ix_banner_waitlist_channel_id ON public.banner_waitlist USING btree (channel_id)")
-    op.execute("CREATE INDEX ix_banner_waitlist_position ON public.banner_waitlist USING btree (\"position\")")
-    op.execute("CREATE INDEX ix_banner_waitlist_queued_at ON public.banner_waitlist USING btree (queued_at)")
-    op.execute("CREATE INDEX ix_banner_waitlist_thread_id ON public.banner_waitlist USING btree (thread_id)")
-    op.execute("CREATE INDEX ix_booklist_is_anonymous ON public.booklist USING btree (is_anonymous)")
-    op.execute("CREATE INDEX ix_booklist_is_default ON public.booklist USING btree (is_default)")
-    op.execute("CREATE INDEX ix_booklist_is_public ON public.booklist USING btree (is_public)")
-    op.execute("CREATE INDEX ix_booklist_is_tournament ON public.booklist USING btree (is_tournament)")
-    op.execute("CREATE INDEX ix_booklist_item_booklist_id ON public.booklist_item USING btree (booklist_id)")
-    op.execute("CREATE INDEX ix_booklist_item_display_order ON public.booklist_item USING btree (display_order)")
-    op.execute("CREATE INDEX ix_booklist_item_owner_id ON public.booklist_item USING btree (owner_id)")
-    op.execute("CREATE INDEX ix_booklist_item_thread_id ON public.booklist_item USING btree (thread_id)")
-    op.execute("CREATE INDEX ix_booklist_owner_id ON public.booklist USING btree (owner_id)")
+    op.execute(
+        "CREATE INDEX ix_banner_application_applicant_id ON public.banner_application USING btree (applicant_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_application_channel_id ON public.banner_application USING btree (channel_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_application_status ON public.banner_application USING btree (status)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_application_target_scope ON public.banner_application USING btree (target_scope)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_application_thread_id ON public.banner_application USING btree (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_carousel_channel_id ON public.banner_carousel USING btree (channel_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_carousel_end_time ON public.banner_carousel USING btree (end_time)"
+    )
+    op.execute(
+        'CREATE INDEX ix_banner_carousel_position ON public.banner_carousel USING btree ("position")'
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_carousel_start_time ON public.banner_carousel USING btree (start_time)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_carousel_thread_id ON public.banner_carousel USING btree (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_waitlist_channel_id ON public.banner_waitlist USING btree (channel_id)"
+    )
+    op.execute(
+        'CREATE INDEX ix_banner_waitlist_position ON public.banner_waitlist USING btree ("position")'
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_waitlist_queued_at ON public.banner_waitlist USING btree (queued_at)"
+    )
+    op.execute(
+        "CREATE INDEX ix_banner_waitlist_thread_id ON public.banner_waitlist USING btree (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_is_anonymous ON public.booklist USING btree (is_anonymous)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_is_default ON public.booklist USING btree (is_default)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_is_public ON public.booklist USING btree (is_public)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_is_tournament ON public.booklist USING btree (is_tournament)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_item_booklist_id ON public.booklist_item USING btree (booklist_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_item_display_order ON public.booklist_item USING btree (display_order)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_item_owner_id ON public.booklist_item USING btree (owner_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_item_thread_id ON public.booklist_item USING btree (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_booklist_owner_id ON public.booklist USING btree (owner_id)"
+    )
     op.execute("CREATE INDEX ix_booklist_title ON public.booklist USING btree (title)")
-    op.execute("CREATE UNIQUE INDEX ix_booklist_tournament_channel_id ON public.booklist USING btree (tournament_channel_id)")
-    op.execute("CREATE INDEX ix_mutex_tag_group_override_tag_name ON public.mutex_tag_group USING btree (override_tag_name)")
-    op.execute("CREATE INDEX ix_mutex_tag_rule_tag_name ON public.mutex_tag_rule USING btree (tag_name)")
+    op.execute(
+        "CREATE UNIQUE INDEX ix_booklist_tournament_channel_id ON public.booklist USING btree (tournament_channel_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_mutex_tag_group_override_tag_name ON public.mutex_tag_group USING btree (override_tag_name)"
+    )
+    op.execute(
+        "CREATE INDEX ix_mutex_tag_rule_tag_name ON public.mutex_tag_rule USING btree (tag_name)"
+    )
     op.execute("CREATE INDEX ix_tag_name ON public.tag USING btree (name)")
-    op.execute("CREATE INDEX ix_tag_vote_tag_id ON public.tag_vote USING btree (tag_id)")
-    op.execute("CREATE INDEX ix_tag_vote_thread_id ON public.tag_vote USING btree (thread_id)")
-    op.execute("CREATE INDEX ix_tag_vote_user_id ON public.tag_vote USING btree (user_id)")
-    op.execute("CREATE INDEX ix_thread_author_id ON public.thread USING btree (author_id)")
-    op.execute("CREATE INDEX ix_thread_channel_id ON public.thread USING btree (channel_id)")
-    op.execute("CREATE INDEX ix_thread_created_at ON public.thread USING btree (created_at)")
-    op.execute("CREATE INDEX ix_thread_display_count ON public.thread USING btree (display_count)")
-    op.execute("CREATE INDEX ix_thread_follow_thread_id ON public.thread_follow USING btree (thread_id)")
-    op.execute("CREATE INDEX ix_thread_follow_user_id ON public.thread_follow USING btree (user_id)")
-    op.execute("CREATE INDEX ix_thread_guild_id ON public.thread USING btree (guild_id)")
-    op.execute("CREATE INDEX ix_thread_last_active_at ON public.thread USING btree (last_active_at)")
-    op.execute("CREATE INDEX ix_thread_latest_update_at ON public.thread USING btree (latest_update_at)")
-    op.execute("CREATE INDEX ix_thread_not_found_count ON public.thread USING btree (not_found_count)")
-    op.execute("CREATE INDEX ix_thread_reaction_count ON public.thread USING btree (reaction_count)")
-    op.execute("CREATE INDEX ix_thread_reply_count ON public.thread USING btree (reply_count)")
-    op.execute("CREATE INDEX ix_thread_search_vector ON public.thread USING gin (search_vector)")
-    op.execute("CREATE INDEX ix_thread_show_flag ON public.thread USING btree (show_flag)")
-    op.execute("CREATE UNIQUE INDEX ix_thread_thread_id ON public.thread USING btree (thread_id)")
-    op.execute("CREATE INDEX ix_user_collection_target_id ON public.user_collection USING btree (target_id)")
-    op.execute("CREATE INDEX ix_user_collection_target_type ON public.user_collection USING btree (target_type)")
-    op.execute("CREATE INDEX ix_user_collection_user_id ON public.user_collection USING btree (user_id)")
-    op.execute("CREATE INDEX ix_user_update_preference_thread_id ON public.user_update_preference USING btree (thread_id)")
-    op.execute("CREATE INDEX ix_user_update_preference_user_id ON public.user_update_preference USING btree (user_id)")
-    op.execute("CREATE INDEX ix_usersearchpreferences_guild_id ON public.user_search_preferences USING btree (guild_id)")
-    op.execute("CREATE INDEX ix_usersearchpreferences_user_id ON public.user_search_preferences USING btree (user_id)")
+    op.execute(
+        "CREATE INDEX ix_tag_vote_tag_id ON public.tag_vote USING btree (tag_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_tag_vote_thread_id ON public.tag_vote USING btree (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_tag_vote_user_id ON public.tag_vote USING btree (user_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_author_id ON public.thread USING btree (author_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_channel_id ON public.thread USING btree (channel_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_created_at ON public.thread USING btree (created_at)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_display_count ON public.thread USING btree (display_count)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_follow_thread_id ON public.thread_follow USING btree (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_follow_user_id ON public.thread_follow USING btree (user_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_guild_id ON public.thread USING btree (guild_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_last_active_at ON public.thread USING btree (last_active_at)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_latest_update_at ON public.thread USING btree (latest_update_at)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_not_found_count ON public.thread USING btree (not_found_count)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_reaction_count ON public.thread USING btree (reaction_count)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_reply_count ON public.thread USING btree (reply_count)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_search_vector ON public.thread USING gin (search_vector)"
+    )
+    op.execute(
+        "CREATE INDEX ix_thread_show_flag ON public.thread USING btree (show_flag)"
+    )
+    op.execute(
+        "CREATE UNIQUE INDEX ix_thread_thread_id ON public.thread USING btree (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_user_collection_target_id ON public.user_collection USING btree (target_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_user_collection_target_type ON public.user_collection USING btree (target_type)"
+    )
+    op.execute(
+        "CREATE INDEX ix_user_collection_user_id ON public.user_collection USING btree (user_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_user_update_preference_thread_id ON public.user_update_preference USING btree (thread_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_user_update_preference_user_id ON public.user_update_preference USING btree (user_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_usersearchpreferences_guild_id ON public.user_search_preferences USING btree (guild_id)"
+    )
+    op.execute(
+        "CREATE INDEX ix_usersearchpreferences_user_id ON public.user_search_preferences USING btree (user_id)"
+    )
 
 
 def downgrade() -> None:

@@ -134,12 +134,9 @@ class BatchUpdateService:
                     for tid, data in batch.items():
                         existing = self.pending_updates[tid]
                         existing["increment"] += data["increment"]
-                        if (
-                            data["last_active_at"] is not None
-                            and (
-                                existing["last_active_at"] is None
-                                or data["last_active_at"] > existing["last_active_at"]
-                            )
+                        if data["last_active_at"] is not None and (
+                            existing["last_active_at"] is None
+                            or data["last_active_at"] > existing["last_active_at"]
                         ):
                             existing["last_active_at"] = data["last_active_at"]
 

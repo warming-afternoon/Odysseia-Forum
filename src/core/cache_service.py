@@ -90,8 +90,7 @@ class CacheService:
                 if channel.category
                 else None,
                 "available_tags": [
-                    {"id": tag.id, "name": tag.name}
-                    for tag in channel.available_tags
+                    {"id": tag.id, "name": tag.name} for tag in channel.available_tags
                 ],
             }
             channels_data.append(entry)
@@ -116,7 +115,9 @@ class CacheService:
             if config.type in SearchConfigType._value2member_map_
         }
 
-    async def get_bot_config(self, config_type: SearchConfigType) -> BotConfigDTO | None:
+    async def get_bot_config(
+        self, config_type: SearchConfigType
+    ) -> BotConfigDTO | None:
         """从缓存获取配置；如未命中则自动刷新后重试。"""
         config = self.bot_configs.get(config_type)
         if config is not None:
@@ -217,10 +218,7 @@ class CacheService:
 
         from shared.enum.cache_keys import CacheKeys
 
-        keys = [
-            CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
-            for tid in thread_ids
-        ]
+        keys = [CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid) for tid in thread_ids]
         result: dict[int, list[dict]] = {}
         miss_ids: list[int] = []
         redis = getattr(self, "_redis", None)

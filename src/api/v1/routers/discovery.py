@@ -241,9 +241,7 @@ async def get_single_rail(
             detail="数据库尚未初始化",
         )
 
-    user_id = (
-        int(current_user["id"]) if current_user and "id" in current_user else None
-    )
+    user_id = int(current_user["id"]) if current_user and "id" in current_user else None
     prefs = None
 
     # 获取用户偏好设置
@@ -272,9 +270,7 @@ async def get_single_rail(
             return builder.build_list(threads, collected_ids)
 
     except Exception as e:
-        logger.error(
-            f"获取单条轨道数据失败 (rail={rail_name}): {e}", exc_info=True
-        )
+        logger.error(f"获取单条轨道数据失败 (rail={rail_name}): {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="获取轨道数据发生异常",

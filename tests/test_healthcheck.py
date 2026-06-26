@@ -208,7 +208,12 @@ class TestHealthcheckEdgeCases:
         hb_file = tmp_path / "no_perms.json"
         _write_heartbeat(
             hb_file,
-            {"timestamp": time.time(), "connected": True, "disconnected_since": 0, "is_closed": False},
+            {
+                "timestamp": time.time(),
+                "connected": True,
+                "disconnected_since": 0,
+                "is_closed": False,
+            },
         )
         hb_file.chmod(0o000)
         try:

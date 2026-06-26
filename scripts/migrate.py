@@ -19,6 +19,7 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 # ── 终端输出辅助 ──────────────────────────────────────────
 
+
 def print_info(msg: str) -> None:
     print(f"\033[94m[INFO] {msg}\033[0m")
 
@@ -36,6 +37,7 @@ def print_error(msg: str) -> None:
 
 
 # ── PostgreSQL 工具 ────────────────────────────────────────
+
 
 def _pg_components(db_url: str) -> tuple[str, str, str, str, str]:
     """从 DATABASE_URL 解析 (host, port, dbname, user, password)。"""
@@ -55,10 +57,21 @@ def check_db_reachable(db_url: str) -> bool:
     try:
         subprocess.run(
             [
-                "pg_isready", "-h", host, "-p", port,
-                "-d", dbname, "-U", user, "-t", "10",
+                "pg_isready",
+                "-h",
+                host,
+                "-p",
+                port,
+                "-d",
+                dbname,
+                "-U",
+                user,
+                "-t",
+                "10",
             ],
-            check=True, capture_output=True, text=True,
+            check=True,
+            capture_output=True,
+            text=True,
         )
         return True
     except (subprocess.CalledProcessError, FileNotFoundError):
@@ -73,11 +86,23 @@ def backup_db(db_url: str) -> Path | None:
     try:
         subprocess.run(
             [
-                "pg_dump", "-h", host, "-p", port,
-                "-d", dbname, "-U", user,
-                "--no-owner", "--no-acl", "-f", str(backup_path),
+                "pg_dump",
+                "-h",
+                host,
+                "-p",
+                port,
+                "-d",
+                dbname,
+                "-U",
+                user,
+                "--no-owner",
+                "--no-acl",
+                "-f",
+                str(backup_path),
             ],
-            check=True, capture_output=True, text=True,
+            check=True,
+            capture_output=True,
+            text=True,
             env={**os.environ, "PGPASSWORD": password},
         )
         return backup_path
@@ -88,6 +113,7 @@ def backup_db(db_url: str) -> Path | None:
 
 # ── Alembic 迁移 ───────────────────────────────────────────
 
+
 def run_alembic_migration() -> None:
     """执行 alembic upgrade head。"""
     print_info("执行 alembic upgrade head ...")
@@ -95,7 +121,10 @@ def run_alembic_migration() -> None:
     try:
         result = subprocess.run(
             ["alembic", "upgrade", "head"],
-            check=True, capture_output=True, text=True, encoding="utf-8",
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
         )
         print(result.stdout)
         print_success("Alembic 迁移完成")
@@ -110,12 +139,16 @@ def run_alembic_migration() -> None:
     # 输出版本
     result = subprocess.run(
         ["alembic", "current"],
-        check=True, capture_output=True, text=True, encoding="utf-8",
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
     )
     print_info(f"当前数据库版本: {result.stdout.strip()}")
 
 
 # ── 旧收藏数据迁移（SQLite follow_bot.db → PostgreSQL booklist_item） ──
+
 
 def migrate_favorites_from_follow_bot() -> None:
     """将旧 follow_bot.db 的 thread_favorites 迁移到当前系统的默认书单。
@@ -186,7 +219,20 @@ def migrate_favorites_from_follow_bot() -> None:
                 " view_count, created_at, updated_at)"
                 " VALUES %s RETURNING id, owner_id",
                 [
-                    (uid, "默认收藏", "默认收藏夹", False, True, "join_time", "desc", 0, 0, 0, now, now)
+                    (
+                        uid,
+                        "默认收藏",
+                        "默认收藏夹",
+                        False,
+                        True,
+                        "join_time",
+                        "desc",
+                        0,
+                        0,
+                        0,
+                        now,
+                        now,
+                    )
                     for uid in users_without_booklist
                 ],
                 template="(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
@@ -326,6 +372,7 @@ def migrate_favorites_from_follow_bot() -> None:
 
 
 # ── main ───────────────────────────────────────────────────
+
 
 def main() -> None:
     print_info("=" * 50)

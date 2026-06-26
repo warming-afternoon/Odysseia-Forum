@@ -13,9 +13,7 @@ class TournamentItemAddData(BaseModel):
     comment: Optional[str] = Field(None, description="推荐语/备注")
     """推荐语/备注"""
 
-    tournament_participated_at: Optional[datetime] = Field(
-        None, description="参赛时间"
-    )
+    tournament_participated_at: Optional[datetime] = Field(None, description="参赛时间")
     """参赛时间"""
 
     @field_validator("thread_id", mode="before")

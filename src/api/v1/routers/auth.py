@@ -538,9 +538,7 @@ async def check_auth(request: Request):
     role_ids = _AUTH_CONFIG["role_ids"].split(",")
     if not any(role_id in user_roles for role_id in role_ids):
         response = JSONResponse(content={"loggedIn": False}, status_code=200)
-        response.delete_cookie(
-            key="session", path="/", secure=True, samesite="none"
-        )
+        response.delete_cookie(key="session", path="/", secure=True, samesite="none")
         return response
 
     # 获取未读更新数量

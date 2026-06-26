@@ -42,9 +42,7 @@ class BannerManagement(commands.Cog):
         # 解析申请人角色 ID
         applicant_role_ids_str = self.config.get("applicant_role_ids", "")
         allowed_role_ids = [
-            int(rid.strip())
-            for rid in applicant_role_ids_str.split(",")
-            if rid.strip()
+            int(rid.strip()) for rid in applicant_role_ids_str.split(",") if rid.strip()
         ]
 
         # 注册申请按钮持久化视图
@@ -97,9 +95,7 @@ class BannerManagement(commands.Cog):
             channels_config = self.config.get("available_channels", {})
 
             # 验证必需配置
-            if not all(
-                [applicant_role_ids_str, review_thread_id, archive_thread_id]
-            ):
+            if not all([applicant_role_ids_str, review_thread_id, archive_thread_id]):
                 await interaction.followup.send(
                     "❌ Banner配置不完整。请在config.json中配置：\n"
                     "- banner.applicant_role_ids (允许申请的身份组)\n"
@@ -208,9 +204,7 @@ class BannerManagement(commands.Cog):
 
                 if global_banners:
                     for banner in global_banners:
-                        remaining = (
-                            banner.end_time - discord.utils.utcnow()
-                        ).days
+                        remaining = (banner.end_time - discord.utils.utcnow()).days
                         status_msg += (
                             f"  • 帖子 {banner.thread_id}: "
                             f"{banner.title[:30]}... (剩余{remaining}天)\n"
@@ -224,12 +218,8 @@ class BannerManagement(commands.Cog):
                     if idx >= 5:  # 只显示前5个
                         break
 
-                    ch_banners = await service.get_active_banners(
-                        channel_id=int(ch_id)
-                    )
-                    ch_specific = [
-                        b for b in ch_banners if b.channel_id is not None
-                    ]
+                    ch_banners = await service.get_active_banners(channel_id=int(ch_id))
+                    ch_specific = [b for b in ch_banners if b.channel_id is not None]
                     status_msg += (
                         f"  • {ch_name}: "
                         f"{len(ch_specific)}/{service.CHANNEL_MAX_BANNERS}\n"
@@ -276,8 +266,7 @@ class BannerManagement(commands.Cog):
         # 验证帖子ID格式
         if not thread_id.isdigit():
             await interaction.followup.send(
-                "❌ 帖子ID必须是纯数字。"
-                "请使用 `/banner 查看状态` 获取正确的帖子ID。",
+                "❌ 帖子ID必须是纯数字。请使用 `/banner 查看状态` 获取正确的帖子ID。",
                 ephemeral=True,
             )
             return
@@ -297,9 +286,7 @@ class BannerManagement(commands.Cog):
 
                 # 构建成功 Embed
                 location_label = (
-                    "轮播列表"
-                    if result.deleted_from == "carousel"
-                    else "等待列表"
+                    "轮播列表" if result.deleted_from == "carousel" else "等待列表"
                 )
                 embed = discord.Embed(
                     title="✅ Banner已删除",
@@ -352,6 +339,4 @@ async def setup(bot: "MyBot"):
     banner_config = bot.config.get("banner", {})
 
     await bot.add_cog(BannerManagement(bot, AsyncSessionFactory))
-    await bot.add_cog(
-        BannerEventListener(bot, AsyncSessionFactory, banner_config)
-    )
+    await bot.add_cog(BannerEventListener(bot, AsyncSessionFactory, banner_config))

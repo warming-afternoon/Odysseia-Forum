@@ -22,12 +22,18 @@ class ThreadDTO(BaseModel):
     title: str = Field(description="帖子标题")
     author_id: int = Field(description="帖子作者的 Discord ID")
     created_at: datetime = Field(description="帖子创建时间 (UTC)")
-    last_active_at: Optional[datetime] = Field(default=None, description="帖子最后活跃时间 (UTC)")
+    last_active_at: Optional[datetime] = Field(
+        default=None, description="帖子最后活跃时间 (UTC)"
+    )
     reaction_count: int = Field(default=0, description="帖子获得的总反应数")
     reply_count: int = Field(default=0, description="帖子的回复数量")
     collection_count: int = Field(default=0, description="被收藏次数")
-    first_message_excerpt: Optional[str] = Field(default=None, description="帖子首条消息的文本摘要")
-    thumbnail_urls: list[str] = Field(default_factory=list, description="首楼图片链接列表")
+    first_message_excerpt: Optional[str] = Field(
+        default=None, description="帖子首条消息的文本摘要"
+    )
+    thumbnail_urls: list[str] = Field(
+        default_factory=list, description="首楼图片链接列表"
+    )
     tags: list[TagDTO] = Field(default_factory=list, description="关联的标签列表")
 
     @staticmethod

@@ -77,9 +77,7 @@ class InactiveFollowBuffer:
             cursor = 0
             keys: List[str] = []
             while True:
-                cursor, batch = await redis.scan(
-                    cursor, match=pattern, count=100
-                )
+                cursor, batch = await redis.scan(cursor, match=pattern, count=100)
                 keys.extend(batch)
                 if cursor == 0:
                     break
@@ -114,7 +112,9 @@ class InactiveFollowBuffer:
                         )
 
             if total:
-                logger.debug(f"InactiveFollowBuffer flush 完成，共标记 {total} 条为非活跃")
+                logger.debug(
+                    f"InactiveFollowBuffer flush 完成，共标记 {total} 条为非活跃"
+                )
         except Exception:
             logger.error("InactiveFollowBuffer flush_all 失败", exc_info=True)
 

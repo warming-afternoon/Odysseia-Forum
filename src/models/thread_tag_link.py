@@ -13,8 +13,6 @@ class ThreadTagLink(SQLModel, table=True):
         default=None,
         sa_column=Column(BigInteger, primary_key=True),
     )
-    tag_id: int = Field(
-        sa_column=Column(BigInteger, primary_key=True)
-    )
+    tag_id: int = Field(sa_column=Column(BigInteger, primary_key=True))
     upvotes: int = Field(default=0)
     downvotes: int = Field(default=0)

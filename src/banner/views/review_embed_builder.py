@@ -160,8 +160,7 @@ class ReviewEmbedBuilder:
         if application.target_type == TargetType.CHANNEL.value:
             # 频道链接：guild/channel_id
             thread_url = (
-                f"https://discord.com/channels/{guild.id}"
-                f"/{application.thread_id}"
+                f"https://discord.com/channels/{guild.id}/{application.thread_id}"
             )
         else:
             # 论坛帖子链接：guild/channel_id/thread_id

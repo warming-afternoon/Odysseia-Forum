@@ -7,7 +7,6 @@
 import json
 import logging
 from typing import Optional
-from urllib.parse import parse_qsl
 
 from api.v1.utils.jwt_utils import verify_jwt
 from shared.enum.rate_limit_defaults import RateLimitDefaults
@@ -95,13 +94,11 @@ class RateLimitMiddleware:
 
         # 可疑阈值检查（在放行后执行，避免与上方限流 WARNING 重复打印；
         # is_user_watched 守卫确保每个用户每 10 分钟仅一次）
-        if (
-            result.current_count >= int(RateLimitDefaults.SUSPICIOUS_THRESHOLD)
-            and not await is_user_watched(redis, user_id)
-        ):
+        if result.current_count >= int(
+            RateLimitDefaults.SUSPICIOUS_THRESHOLD
+        ) and not await is_user_watched(redis, user_id):
             logger.warning(
-                "全局可疑高频请求: user_id=%s, count=%s/%s | "
-                "method=%s path=%s ua=%s",
+                "全局可疑高频请求: user_id=%s, count=%s/%s | method=%s path=%s ua=%s",
                 user_id,
                 result.current_count,
                 RateLimitDefaults.GLOBAL_MAX_REQUESTS,
@@ -208,20 +205,24 @@ class RateLimitMiddleware:
 
     async def _send_429(self, send, reset_after: int) -> None:
         body = '{"detail":"请求过于频繁，请稍后重试"}'.encode("utf-8")
-        await send({
-            "type": "http.response.start",
-            "status": 429,
-            "headers": [
-                (b"content-type", b"application/json"),
-                (b"retry-after", str(reset_after).encode()),
-                (b"x-ratelimit-remaining", b"0"),
-                (b"x-ratelimit-reset", str(reset_after).encode()),
-            ],
-        })
-        await send({
-            "type": "http.response.body",
-            "body": body,
-        })
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 429,
+                "headers": [
+                    (b"content-type", b"application/json"),
+                    (b"retry-after", str(reset_after).encode()),
+                    (b"x-ratelimit-remaining", b"0"),
+                    (b"x-ratelimit-reset", str(reset_after).encode()),
+                ],
+            }
+        )
+        await send(
+            {
+                "type": "http.response.body",
+                "body": body,
+            }
+        )
 
     async def _send_with_headers(self, scope, receive, send, result) -> None:
         """包装 send 以注入限流响应头。"""
@@ -230,10 +231,12 @@ class RateLimitMiddleware:
         async def _send(message):
             nonlocal headers_injected
             if not headers_injected and message["type"] == "http.response.start":
-                message["headers"].extend([
-                    (b"x-ratelimit-remaining", str(result.remaining).encode()),
-                    (b"x-ratelimit-reset", str(result.reset_after).encode()),
-                ])
+                message["headers"].extend(
+                    [
+                        (b"x-ratelimit-remaining", str(result.remaining).encode()),
+                        (b"x-ratelimit-reset", str(result.reset_after).encode()),
+                    ]
+                )
                 headers_injected = True
             await send(message)
 

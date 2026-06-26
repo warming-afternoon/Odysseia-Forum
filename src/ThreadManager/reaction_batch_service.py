@@ -23,7 +23,9 @@ class ReactionBatchService:
         self.sync_service = sync_service
         self.interval = interval
 
-        self._pending: set[int] = set()  # set 自动去重，同一帖子多次 reaction 只处理一次
+        self._pending: set[int] = (
+            set()
+        )  # set 自动去重，同一帖子多次 reaction 只处理一次
         self._lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(4)  # 限制并发 Discord API 请求数
         self._task: asyncio.Task | None = None
@@ -33,7 +35,9 @@ class ReactionBatchService:
         """启动后台定时刷新任务。"""
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._run_loop())
-            logger.debug("反应数批量更新后台任务已启动，每 %d 秒执行一次。", self.interval)
+            logger.debug(
+                "反应数批量更新后台任务已启动，每 %d 秒执行一次。", self.interval
+            )
 
     async def stop(self):
         """取消后台任务并执行最后一次刷新，确保数据不丢失。"""
@@ -85,9 +89,7 @@ class ReactionBatchService:
                 # 帖子或消息在排期中被删除，无需处理
                 pass
             except Exception:
-                logger.warning(
-                    "更新反应数失败 (帖子ID: %d)", thread_id, exc_info=True
-                )
+                logger.warning("更新反应数失败 (帖子ID: %d)", thread_id, exc_info=True)
 
         async def _with_semaphore(thread_id: int):
             async with self._semaphore:

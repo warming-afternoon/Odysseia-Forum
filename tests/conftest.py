@@ -19,9 +19,7 @@ import os
 import sys
 
 # 确保 src/ 在 Python 路径中
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src"))
-)
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 # 注册所有表到 SQLModel.metadata
 import models  # noqa: E402, F401

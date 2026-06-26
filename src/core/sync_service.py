@@ -82,7 +82,11 @@ class SyncService:
 
         # 默认值
         final_author_id = thread.owner_id or 0
-        final_created_at = thread.created_at.replace(tzinfo=None) if thread.created_at else thread.created_at
+        final_created_at = (
+            thread.created_at.replace(tzinfo=None)
+            if thread.created_at
+            else thread.created_at
+        )
         source_user_for_author_service = thread.owner
         excerpt = ""
         thumbnail_urls: List[str] = []
@@ -141,7 +145,9 @@ class SyncService:
                     local_dt = datetime.datetime(
                         year, month, day, hour, minute, tzinfo=local_tz
                     )
-                    final_created_at = local_dt.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+                    final_created_at = local_dt.astimezone(
+                        datetime.timezone.utc
+                    ).replace(tzinfo=None)
             except Exception as e:
                 logger.warning(
                     f"重建帖 {thread.id} 解析作者或时间失败: {e}。中止对其的索引"
@@ -269,11 +275,13 @@ class SyncService:
             "author_id": final_author_id,
             "created_at": final_created_at,
             "last_active_at": (
-                discord.utils.snowflake_time(
-                    thread.last_message_id
-                ).replace(tzinfo=None)
+                discord.utils.snowflake_time(thread.last_message_id).replace(
+                    tzinfo=None
+                )
                 if thread.last_message_id
-                else thread.created_at.replace(tzinfo=None) if thread.created_at else thread.created_at
+                else thread.created_at.replace(tzinfo=None)
+                if thread.created_at
+                else thread.created_at
             ),
             "reaction_count": reaction_count,
             "reply_count": thread.message_count,
@@ -380,7 +388,7 @@ class SyncService:
             follow_count = result.scalar() or 0
             is_first_follow = follow_count == 0
 
-        # 如果是首次被关注的老帖子，批量添加所有成员到关注列表
+        # 如果是首次被关注的帖子，批量添加所有成员到关注列表
         if is_first_follow:
             await self._auto_follow_on_first_detect(thread)
 
@@ -406,11 +414,11 @@ class SyncService:
                     )
                     if added_count > 0:
                         logger.info(
-                            f"老帖子 {thread.id} 首次检测，为 {added_count} 个成员添加了自动关注"
+                            f"帖子 {thread.id} 首次检测，为 {added_count} 个成员添加了自动关注"
                         )
         except discord.NotFound:
-            logger.warning(f"老帖子 {thread.id} 已被删除，跳过自动关注")
+            logger.warning(f"帖子 {thread.id} 已被删除，跳过自动关注")
         except discord.Forbidden:
-            logger.warning(f"老帖子 {thread.id} 没有权限获取成员列表，跳过自动关注")
+            logger.warning(f"帖子 {thread.id} 没有权限获取成员列表，跳过自动关注")
         except Exception as e:
-            logger.error(f"老帖子自动关注失败 (帖子 {thread.id}): {e}", exc_info=True)
+            logger.error(f"帖子自动关注失败 (帖子 {thread.id}): {e}", exc_info=True)

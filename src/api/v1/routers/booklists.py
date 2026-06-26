@@ -33,16 +33,15 @@ from models import BooklistItem
 from shared.database import AsyncSessionFactory
 from sqlmodel import select
 from shared.enum import CollectionType
+from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
+from shared.enum.booklist_sort_method import BooklistSortMethod
+from shared.enum.booklist_sort_order import BooklistSortOrder
 from shared.redis_client import RedisManager
 
 # 频道映射配置
 channel_mappings_config: Dict[int, List[Dict]] = {}
 
 logger = logging.getLogger(__name__)
-
-from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
-from shared.enum.booklist_sort_method import BooklistSortMethod
-from shared.enum.booklist_sort_order import BooklistSortOrder
 
 
 def _resolve_sort_params(
@@ -115,7 +114,11 @@ async def _fill_authors_for_booklists(
             try:
                 await client.sadd("author_fetch_queue", str(owner_id))  # type: ignore
             except Exception:
-                logger.warning("将 owner_id=%s 加入 author_fetch_queue 失败", owner_id, exc_info=True)
+                logger.warning(
+                    "将 owner_id=%s 加入 author_fetch_queue 失败",
+                    owner_id,
+                    exc_info=True,
+                )
 
     return author_map
 
@@ -135,7 +138,9 @@ async def _fill_fallback_covers(session: Any, booklists: List[Any]) -> Dict[int,
     return await item_repo.get_fallback_covers(missing_ids)
 
 
-def _apply_anonymous_author(detail: BooklistDetail, booklist: Any, current_user_id: int, author_map: dict):
+def _apply_anonymous_author(
+    detail: BooklistDetail, booklist: Any, current_user_id: int, author_map: dict
+):
     if getattr(booklist, "is_anonymous", False):
         if current_user_id != booklist.owner_id:
             detail.owner_id = 0
@@ -144,7 +149,7 @@ def _apply_anonymous_author(detail: BooklistDetail, booklist: Any, current_user_
             name="匿名用户",
             global_name=None,
             display_name="匿名用户",
-            avatar_url="https://cdn.discordapp.com/embed/avatars/0.png"
+            avatar_url="https://cdn.discordapp.com/embed/avatars/0.png",
         )
     elif booklist.owner_id in author_map:
         detail.author = AuthorDetail.model_validate(
@@ -162,7 +167,11 @@ async def create_booklist(
     cover_image_url: Optional[str] = None,
     is_public: bool = True,
     is_anonymous: bool = False,
-    display_type: Optional[int] = Query(None, deprecated=True, description="已废弃，请使用 default_sort_method + default_sort_order"),
+    display_type: Optional[int] = Query(
+        None,
+        deprecated=True,
+        description="已废弃，请使用 default_sort_method + default_sort_order",
+    ),
     default_sort_method: Optional[str] = Query(None, description="默认排序方式"),
     default_sort_order: Optional[str] = Query(None, description="默认排序顺序"),
     current_user: Dict[str, Any] = Depends(require_auth),
@@ -506,7 +515,11 @@ async def update_booklist(
     cover_image_url: Optional[str] = None,
     is_public: Optional[bool] = None,
     is_anonymous: Optional[bool] = None,
-    display_type: Optional[int] = Query(None, deprecated=True, description="已废弃，请使用 default_sort_method + default_sort_order"),
+    display_type: Optional[int] = Query(
+        None,
+        deprecated=True,
+        description="已废弃，请使用 default_sort_method + default_sort_order",
+    ),
     default_sort_method: Optional[str] = Query(None, description="默认排序方式"),
     default_sort_order: Optional[str] = Query(None, description="默认排序顺序"),
     current_user: Dict[str, Any] = Depends(require_auth),

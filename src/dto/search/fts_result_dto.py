@@ -12,7 +12,9 @@ class FTSResultDTO(BaseModel):
     """
 
     include_conditions: list = []  # 每个 AND 组一个 search_vector @@ tsquery 条件
-    exclude_condition: Any = None  # 排除关键词的 search_vector @@ tsquery 条件，无排除词则为 None
+    exclude_condition: Any = (
+        None  # 排除关键词的 search_vector @@ tsquery 条件，无排除词则为 None
+    )
     has_include: bool = False
     has_exclude: bool = False
 

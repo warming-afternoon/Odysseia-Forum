@@ -52,7 +52,8 @@ class TestGetPreferences:
         """指定 guild_id → 正确隔离"""
         repo = PreferencesRepository(pref_session)
         await repo.save_user_preferences(
-            user_id=1, guild_id=5,
+            user_id=1,
+            guild_id=5,
             prefs_data={"include_keywords": "guild5"},
         )
         # 相同 user_id 不同 guild → 隔离
@@ -124,7 +125,9 @@ class TestSavePreferences:
         )
         assert result.exclude_keyword_exemption_markers == ["禁", "🈲"]
 
-    async def test_save_partial_update_preserves_others(self, pref_session: AsyncSession):
+    async def test_save_partial_update_preserves_others(
+        self, pref_session: AsyncSession
+    ):
         """部分更新不会清除其他字段"""
         repo = PreferencesRepository(pref_session)
         await repo.save_user_preferences(
@@ -156,11 +159,13 @@ class TestGuildIsolation:
         repo = PreferencesRepository(pref_session)
 
         await repo.save_user_preferences(
-            user_id=1, guild_id=10,
+            user_id=1,
+            guild_id=10,
             prefs_data={"sort_method": "reaction_count"},
         )
         await repo.save_user_preferences(
-            user_id=1, guild_id=20,
+            user_id=1,
+            guild_id=20,
             prefs_data={"sort_method": "created_at"},
         )
 
@@ -177,11 +182,13 @@ class TestGuildIsolation:
         repo = PreferencesRepository(pref_session)
 
         await repo.save_user_preferences(
-            user_id=1, guild_id=0,
+            user_id=1,
+            guild_id=0,
             prefs_data={"include_keywords": "user1"},
         )
         await repo.save_user_preferences(
-            user_id=2, guild_id=0,
+            user_id=2,
+            guild_id=0,
             prefs_data={"include_keywords": "user2"},
         )
 

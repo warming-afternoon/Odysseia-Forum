@@ -1,9 +1,7 @@
 import gc
 import json
 import logging
-import os
 import sys
-from collections import Counter
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,11 +9,6 @@ from fastapi.responses import JSONResponse, ORJSONResponse
 from sqlalchemy import text
 
 from api.middleware.rate_limit_middleware import RateLimitMiddleware
-from shared.database import AsyncSessionFactory
-from shared.redis_client import RedisManager
-
-logger = logging.getLogger(__name__)
-
 from api.v1.routers import (
     auth,
     authors,
@@ -31,6 +24,10 @@ from api.v1.routers import (
     discovery,
     tournaments,
 )
+from shared.database import AsyncSessionFactory
+from shared.redis_client import RedisManager
+
+logger = logging.getLogger(__name__)
 
 # 读取配置
 try:
@@ -301,9 +298,7 @@ async def debug_memory_sources():
             {
                 "module": module,
                 "total_objects": count,
-                "top_types": [
-                    {"type": t, "count": c} for t, c in types_in_module
-                ],
+                "top_types": [{"type": t, "count": c} for t, c in types_in_module],
             }
         )
 
@@ -313,6 +308,7 @@ async def debug_memory_sources():
 @app.get("/v1/debug/memory/force-gc", summary="强制 GC 并对比", tags=["系统"])
 async def debug_force_gc():
     """调试端点：强制全量 GC，对比回收前后的对象数和 RSS"""
+
     def _read_rss():
         try:
             with open("/proc/self/status") as f:
@@ -336,7 +332,9 @@ async def debug_force_gc():
     return {
         "rss_kb_before": rss_before,
         "rss_kb_after": rss_after,
-        "rss_freed_kb": rss_before - rss_after if rss_before > 0 and rss_after > 0 else -1,
+        "rss_freed_kb": rss_before - rss_after
+        if rss_before > 0 and rss_after > 0
+        else -1,
         "objects_before": total_before,
         "objects_after": total_after,
         "objects_freed": total_before - total_after,

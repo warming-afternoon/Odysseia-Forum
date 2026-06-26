@@ -69,7 +69,9 @@ async def get_follows(
 
             # 通过频道映射解析，将父频道展开为实际子频道 ID 列表
             if cache_service_instance:
-                all_indexed_channels = cache_service_instance.get_indexed_channel_ids_list()
+                all_indexed_channels = (
+                    cache_service_instance.get_indexed_channel_ids_list()
+                )
                 channel_result = ChannelMappingUtils(channel_mappings_config).resolve(
                     channel_ids=effective_channel_ids,
                     include_tags=[],

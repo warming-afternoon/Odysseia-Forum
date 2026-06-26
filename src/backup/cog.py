@@ -69,9 +69,7 @@ class BackupCog(commands.Cog):
                 return None
             return key
         except Exception as e:
-            logger.error(
-                f"BACKUP_ENCRYPTION_KEY 解码失败: {e}，将跳过配置文件加密备份"
-            )
+            logger.error(f"BACKUP_ENCRYPTION_KEY 解码失败: {e}，将跳过配置文件加密备份")
             return None
 
     @staticmethod
@@ -129,10 +127,14 @@ class BackupCog(commands.Cog):
             subprocess.run(
                 [
                     "pg_dump",
-                    "--dbname", pg_url,
-                    "--format", "custom",
-                    "--compress", "6",
-                    "--file", dump_path,
+                    "--dbname",
+                    pg_url,
+                    "--format",
+                    "custom",
+                    "--compress",
+                    "6",
+                    "--file",
+                    dump_path,
                     "--no-owner",
                     "--no-acl",
                 ],
@@ -194,7 +196,7 @@ class BackupCog(commands.Cog):
 
             # 从 dump 文件名提取时间戳，用于配置文件加密备份命名
             basename = os.path.basename(gz_path)  # backup_temp_YYYYMMDD_HHMMSS.dump
-            timestamp = basename[len("backup_temp_"):-len(".dump")]
+            timestamp = basename[len("backup_temp_") : -len(".dump")]
 
             # 加密配置文件（若密钥已配置）
             key = self._get_encryption_key()
@@ -213,7 +215,7 @@ class BackupCog(commands.Cog):
                 try:
                     enc_basename = os.path.basename(enc_path)
                     # backup_temp_config_YYYYMMDD_HHMMSS.enc → config_YYYYMMDD_HHMMSS.enc
-                    clean_name = enc_basename[len("backup_temp_"):]
+                    clean_name = enc_basename[len("backup_temp_") :]
                     s3_key = f"odysseia_backups/{clean_name}"
                     await self._upload_to_s3(enc_path, s3_key=s3_key)
                 except Exception as e:

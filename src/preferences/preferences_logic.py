@@ -59,7 +59,9 @@ class PreferencesLogic:
     ) -> Optional[UserSearchPreferencesDTO]:
         """获取并返回用户在指定服务器的搜索偏好 DTO"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             return await repo.get_user_preferences(
                 user_id, self._resolve_guild_id(guild_id)
             )
@@ -69,7 +71,9 @@ class PreferencesLogic:
     ) -> UserSearchPreferencesDTO:
         """创建或更新用户在指定服务器的搜索偏好设置"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             return await repo.save_user_preferences(
                 user_id, prefs_data, self._resolve_guild_id(guild_id)
             )
@@ -94,7 +98,9 @@ class PreferencesLogic:
         final_exclude_str = ", ".join(sorted(list(final_exclude_set)))
 
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             return await repo.save_user_preferences(
                 user_id,
                 {
@@ -125,7 +131,9 @@ class PreferencesLogic:
                 return
 
             async with self.session_factory() as session:
-                repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+                repo = PreferencesRepository(
+                    session, redis_client=RedisManager.get_client()
+                )
                 prefs = await repo.get_user_preferences(user_id, resolved_guild_id)
 
                 if not prefs:
@@ -189,7 +197,9 @@ class PreferencesLogic:
         try:
             resolved_guild_id = self._resolve_guild_id()
             async with self.session_factory() as session:
-                repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+                repo = PreferencesRepository(
+                    session, redis_client=RedisManager.get_client()
+                )
                 prefs_dto = await repo.get_user_preferences(
                     interaction.user.id, resolved_guild_id
                 )
@@ -221,7 +231,9 @@ class PreferencesLogic:
         """保存用户的默认搜索频道列表"""
         async with self.session_factory() as session:
             resolved_guild_id = self._resolve_guild_id(guild_id)
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             await repo.save_user_preferences(
                 user_id,
                 {"preferred_channels": channel_ids},
@@ -237,7 +249,9 @@ class PreferencesLogic:
         """
         async with self.session_factory() as session:
             resolved_guild_id = self._resolve_guild_id(guild_id)
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             await repo.save_user_preferences(user_id, time_data, resolved_guild_id)
 
     async def search_preferences_tags(
@@ -248,7 +262,9 @@ class PreferencesLogic:
         try:
             resolved_guild_id = self._resolve_guild_id()
             async with self.session_factory() as session:
-                repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+                repo = PreferencesRepository(
+                    session, redis_client=RedisManager.get_client()
+                )
 
                 # 获取所有可用标签
                 all_tags = self.tag_service.get_unique_tag_names()
@@ -287,7 +303,9 @@ class PreferencesLogic:
         try:
             resolved_guild_id = self._resolve_guild_id()
             async with self.session_factory() as session:
-                repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+                repo = PreferencesRepository(
+                    session, redis_client=RedisManager.get_client()
+                )
                 await repo.save_user_preferences(
                     interaction.user.id,
                     {
@@ -303,7 +321,9 @@ class PreferencesLogic:
     async def toggle_preview_mode(self, user_id: int, guild_id: int = 0) -> None:
         """切换用户的预览图显示模式（大图/缩略图）。"""
         async with self.session_factory() as session:
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             resolved_guild_id = self._resolve_guild_id()
             prefs = await repo.get_user_preferences(user_id, resolved_guild_id)
 
@@ -321,7 +341,9 @@ class PreferencesLogic:
         """清空指定用户在指定服务器的所有搜索偏好设置"""
         async with self.session_factory() as session:
             resolved_guild_id = self._resolve_guild_id(guild_id)
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             await repo.save_user_preferences(
                 user_id,
                 {
@@ -349,7 +371,9 @@ class PreferencesLogic:
         """保存用户的排序算法偏好"""
         async with self.session_factory() as session:
             resolved_guild_id = self._resolve_guild_id(guild_id)
-            repo = PreferencesRepository(session, redis_client=RedisManager.get_client())
+            repo = PreferencesRepository(
+                session, redis_client=RedisManager.get_client()
+            )
             await repo.save_user_preferences(
                 user_id,
                 {"sort_method": sort_method},

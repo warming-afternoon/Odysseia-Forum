@@ -15,7 +15,9 @@ class BannerApplicationRequest(BaseModel):
         description="Discord 跳转链接（https://discord.com/channels/{guild_id}/{id}）或纯数字 ID",
     )
     cover_image_url: str = Field(..., description="封面图链接")
-    target_scope: str = Field(..., description="目标范围：'global'表示全频道，或具体频道ID")
+    target_scope: str = Field(
+        ..., description="目标范围：'global'表示全频道，或具体频道ID"
+    )
 
     @model_validator(mode="before")
     @classmethod

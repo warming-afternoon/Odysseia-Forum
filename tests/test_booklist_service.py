@@ -1,7 +1,6 @@
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
-from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
@@ -223,7 +222,9 @@ async def test_add_thread_to_booklist(seeded_db_session: AsyncSession):
     # 添加第一个帖子
     items = await service.add_threads_to_booklist(
         booklist_id=booklist_id,
-        items=[BooklistItemAddData(thread_id=1001, comment="Great thread", display_order=1)],
+        items=[
+            BooklistItemAddData(thread_id=1001, comment="Great thread", display_order=1)
+        ],
     )
     assert len(items) == 1
     item1 = items[0]
@@ -314,7 +315,11 @@ async def test_get_booklist_items(seeded_db_session: AsyncSession):
     )
     item_service = BooklistItemRepository(seeded_db_session)
     items, total = await item_service.get_booklist_items_with_details(
-        booklist_id, default_sort_method="join_time", default_sort_order="desc", limit=10, offset=0
+        booklist_id,
+        default_sort_method="join_time",
+        default_sort_order="desc",
+        limit=10,
+        offset=0,
     )
     assert total == 2
     assert len(items) == 2
@@ -326,7 +331,11 @@ async def test_get_booklist_items(seeded_db_session: AsyncSession):
     assert first.author is not None
     # 分页测试
     items_page1, total_page1 = await item_service.get_booklist_items_with_details(
-        booklist_id, default_sort_method="join_time", default_sort_order="desc", limit=1, offset=0
+        booklist_id,
+        default_sort_method="join_time",
+        default_sort_order="desc",
+        limit=1,
+        offset=0,
     )
     assert len(items_page1) == 1
     assert total_page1 == 2
@@ -341,12 +350,18 @@ async def test_get_booklist_items_sort_hot(seeded_sort_data: AsyncSession):
 
     await service.add_threads_to_booklist(
         booklist.id,
-        items=[BooklistItemAddData(thread_id=tid) for tid in (3001, 3002, 3003, 3004, 3005)],
+        items=[
+            BooklistItemAddData(thread_id=tid) for tid in (3001, 3002, 3003, 3004, 3005)
+        ],
     )
 
     item_service = BooklistItemRepository(seeded_sort_data)
     items, total = await item_service.get_booklist_items_with_details(
-        booklist.id, default_sort_method="hot", default_sort_order="desc", limit=10, offset=0
+        booklist.id,
+        default_sort_method="hot",
+        default_sort_order="desc",
+        limit=10,
+        offset=0,
     )
     assert total == 5
     # Reddit Hot = log10(reactions) + epoch / time_decay
@@ -376,21 +391,33 @@ SORT_ORDER_SPECS = [
 @pytest.mark.asyncio
 @pytest.mark.parametrize("method, order, attr, expected", SORT_ORDER_SPECS)
 async def test_get_booklist_items_sort_order(
-    seeded_sort_data: AsyncSession, method: str, order: str, attr: str, expected: list[int]
+    seeded_sort_data: AsyncSession,
+    method: str,
+    order: str,
+    attr: str,
+    expected: list[int],
 ):
     """验证每种排序方法的结果顺序正确"""
     service = BooklistRepository(seeded_sort_data)
-    booklist = await service.create_booklist(owner_id=446, title=f"Sort {method} {order}")
+    booklist = await service.create_booklist(
+        owner_id=446, title=f"Sort {method} {order}"
+    )
     assert booklist.id is not None
 
     await service.add_threads_to_booklist(
         booklist.id,
-        items=[BooklistItemAddData(thread_id=tid) for tid in (3001, 3002, 3003, 3004, 3005)],
+        items=[
+            BooklistItemAddData(thread_id=tid) for tid in (3001, 3002, 3003, 3004, 3005)
+        ],
     )
 
     item_service = BooklistItemRepository(seeded_sort_data)
     items, total = await item_service.get_booklist_items_with_details(
-        booklist.id, default_sort_method=method, default_sort_order=order, limit=10, offset=0
+        booklist.id,
+        default_sort_method=method,
+        default_sort_order=order,
+        limit=10,
+        offset=0,
     )
     assert total == 5
     assert [it.thread_id for it in items] == expected
@@ -406,12 +433,19 @@ async def test_get_booklist_items_sort_display_order(seeded_sort_data: AsyncSess
     orders = [30, 20, 50, 10, 40]
     await service.add_threads_to_booklist(
         booklist.id,
-        items=[BooklistItemAddData(thread_id=3001 + i, display_order=orders[i]) for i in range(5)],
+        items=[
+            BooklistItemAddData(thread_id=3001 + i, display_order=orders[i])
+            for i in range(5)
+        ],
     )
 
     item_service = BooklistItemRepository(seeded_sort_data)
     items, _ = await item_service.get_booklist_items_with_details(
-        booklist.id, default_sort_method="display_order", default_sort_order="asc", limit=10, offset=0
+        booklist.id,
+        default_sort_method="display_order",
+        default_sort_order="asc",
+        limit=10,
+        offset=0,
     )
     assert [it.display_order for it in items] == sorted(orders)
 
@@ -563,8 +597,12 @@ async def test_sync_thread_in_booklists_mixed(seeded_db_session: AsyncSession):
     ids = [bl.id for bl in bls]
 
     # 书单 0 和 2 已有帖子 1001
-    await service.add_threads_to_booklist(ids[0], items=[BooklistItemAddData(thread_id=1001)])
-    await service.add_threads_to_booklist(ids[2], items=[BooklistItemAddData(thread_id=1001)])
+    await service.add_threads_to_booklist(
+        ids[0], items=[BooklistItemAddData(thread_id=1001)]
+    )
+    await service.add_threads_to_booklist(
+        ids[2], items=[BooklistItemAddData(thread_id=1001)]
+    )
 
     # 目标：修改后书单 0 和 1 包含帖子 1001
     scope = ids  # [0, 1, 2, 3]
@@ -572,17 +610,19 @@ async def test_sync_thread_in_booklists_mixed(seeded_db_session: AsyncSession):
 
     svc = BooklistService(seeded_db_session)
     result = await svc.sync_thread_in_booklists(
-            user_id=300,
-            thread_id=1001,
-            scope_booklist_ids=scope,
-            target_booklist_ids=target,
-        )
+        user_id=300,
+        thread_id=1001,
+        scope_booklist_ids=scope,
+        target_booklist_ids=target,
+    )
 
     # 结果验证
     assert result.thread_id == 1001
-    assert sorted(result.added_to_booklist_ids) == sorted([ids[1]])      # BL1 新增
+    assert sorted(result.added_to_booklist_ids) == sorted([ids[1]])  # BL1 新增
     assert sorted(result.removed_from_booklist_ids) == sorted([ids[2]])  # BL2 移除
-    assert sorted(result.unchanged_booklist_ids) == sorted([ids[0], ids[3]])  # BL0 已有/BL3 无且不在 target
+    assert sorted(result.unchanged_booklist_ids) == sorted(
+        [ids[0], ids[3]]
+    )  # BL0 已有/BL3 无且不在 target
 
 
 @pytest.mark.asyncio
@@ -599,11 +639,11 @@ async def test_sync_thread_in_booklists_pure_add(seeded_db_session: AsyncSession
 
     svc = BooklistService(seeded_db_session)
     result = await svc.sync_thread_in_booklists(
-            user_id=400,
-            thread_id=1001,
-            scope_booklist_ids=ids,
-            target_booklist_ids=[ids[0], ids[2]],
-        )
+        user_id=400,
+        thread_id=1001,
+        scope_booklist_ids=ids,
+        target_booklist_ids=[ids[0], ids[2]],
+    )
 
     assert sorted(result.added_to_booklist_ids) == sorted([ids[0], ids[2]])
     assert result.removed_from_booklist_ids == []
@@ -622,15 +662,17 @@ async def test_sync_thread_in_booklists_pure_remove(seeded_db_session: AsyncSess
 
     # 三个书单都包含帖子 1001
     for bid in ids:
-        await service.add_threads_to_booklist(bid, items=[BooklistItemAddData(thread_id=1001)])
+        await service.add_threads_to_booklist(
+            bid, items=[BooklistItemAddData(thread_id=1001)]
+        )
 
     svc = BooklistService(seeded_db_session)
     result = await svc.sync_thread_in_booklists(
-            user_id=500,
-            thread_id=1001,
-            scope_booklist_ids=ids,
-            target_booklist_ids=[],
-        )
+        user_id=500,
+        thread_id=1001,
+        scope_booklist_ids=ids,
+        target_booklist_ids=[],
+    )
 
     assert result.added_to_booklist_ids == []
     assert sorted(result.removed_from_booklist_ids) == sorted(ids)
@@ -648,7 +690,9 @@ async def test_sync_thread_in_booklists_idempotent(seeded_db_session: AsyncSessi
     ids = [bl.id for bl in bls]
 
     # BL0 已有帖子，BL1 无
-    await service.add_threads_to_booklist(ids[0], items=[BooklistItemAddData(thread_id=1001)])
+    await service.add_threads_to_booklist(
+        ids[0], items=[BooklistItemAddData(thread_id=1001)]
+    )
 
     scope = ids
     target = [ids[0], ids[1]]
@@ -678,7 +722,9 @@ async def test_sync_thread_in_booklists_idempotent(seeded_db_session: AsyncSessi
 
 
 @pytest.mark.asyncio
-async def test_sync_thread_in_booklists_target_not_subset(seeded_db_session: AsyncSession):
+async def test_sync_thread_in_booklists_target_not_subset(
+    seeded_db_session: AsyncSession,
+):
     """target 不是 scope 的子集 → 422"""
     service = BooklistRepository(seeded_db_session)
     bl = await service.create_booklist(owner_id=700, title="BL")
@@ -729,7 +775,9 @@ async def test_sync_thread_in_booklists_empty_scope(seeded_db_session: AsyncSess
 
 
 @pytest.mark.asyncio
-async def test_sync_thread_in_booklists_nonexistent_in_scope(seeded_db_session: AsyncSession):
+async def test_sync_thread_in_booklists_nonexistent_in_scope(
+    seeded_db_session: AsyncSession,
+):
     """scope 中包含不存在的书单 → 404"""
     svc = BooklistService(seeded_db_session)
     with pytest.raises(HTTPException) as exc_info:

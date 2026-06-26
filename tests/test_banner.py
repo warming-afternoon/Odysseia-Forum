@@ -6,19 +6,17 @@ BannerService 自动检测 target_type。"""
 import os
 import sys
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import select
-from sqlmodel import SQLModel
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 from api.v1.schemas.banner import BannerApplicationRequest
 from banner.banner_service import BannerService
 from banner.dto.application_result import ApplicationResult
-from models import BannerApplication, BannerCarousel, BannerWaitlist, Channel
+from models import BannerApplication, BannerCarousel, BannerWaitlist
 from models.channel import Channel as ChannelModel
 from shared.enum import ApplicationStatus, TargetType
 
@@ -106,6 +104,7 @@ class TestParseThreadLink:
     def setup_main_guild_id(self):
         """注入 main_guild_id 到 banner 模块。"""
         import api.v1.routers.banner as banner_mod
+
         self._old_main_guild_id = banner_mod.main_guild_id
         banner_mod.main_guild_id = 1134557553011998840
         yield
@@ -113,6 +112,7 @@ class TestParseThreadLink:
 
     def _parse(self, link: str):
         from api.v1.routers.banner import parse_thread_link
+
         return parse_thread_link(link)
 
     def test_full_url(self):
@@ -151,6 +151,7 @@ class TestParseThreadLink:
     def test_no_main_guild_id(self):
         """未配置 main_guild_id 时纯数字 ID 返回 None。"""
         import api.v1.routers.banner as banner_mod
+
         banner_mod.main_guild_id = 0
         try:
             assert self._parse("1234567890123456789") is None
@@ -222,6 +223,7 @@ class TestBannerServiceTargetDetection:
         """Thread 表中找到 → target_type=THREAD，检查作者。"""
         # 需要一条 Thread 记录
         from models.thread import Thread
+
         async with db_session_factory() as session:
             thread = Thread(
                 thread_id=1234567890123456789,
@@ -248,6 +250,7 @@ class TestBannerServiceTargetDetection:
     async def test_forum_thread_wrong_author(self, db_session_factory):
         """Thread 表中找到但作者不匹配 → 拒绝。"""
         from models.thread import Thread
+
         async with db_session_factory() as session:
             thread = Thread(
                 thread_id=1234567890123456789,
@@ -525,6 +528,7 @@ class TestFilterThreadBannersByPrefs:
     def empty_prefs(self):
         """空偏好（无任何排除条件）。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         return UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=None,
@@ -534,6 +538,7 @@ class TestFilterThreadBannersByPrefs:
 
     def _filter(self, banners, thread_map, prefs):
         from api.v1.routers.banner import _filter_thread_banners_by_prefs
+
         return _filter_thread_banners_by_prefs(banners, thread_map, prefs)
 
     # ── exclude_authors ──
@@ -543,6 +548,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """exclude_authors 偏好 → 对应作者的 banner 被过滤。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=[111],
@@ -560,6 +566,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """排除多个作者。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=[111, 333],
@@ -579,6 +586,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """exclude_tags 偏好 → 含对应标签的 banner 被过滤。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=None,
@@ -599,6 +607,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """exclude_tags 不区分大小写。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=None,
@@ -616,6 +625,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """exclude_keywords 命中标题 → 过滤。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=None,
@@ -634,6 +644,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """exclude_keywords 命中 first_message_excerpt → 过滤。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=None,
@@ -652,6 +663,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """exclude_keywords 按空格/逗号分词，分别匹配。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=None,
@@ -671,6 +683,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """exclude_keywords 不区分大小写。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=None,
@@ -686,6 +699,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """首楼摘要为 None 时仅检查标题，不报错。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=None,
@@ -699,11 +713,10 @@ class TestFilterThreadBannersByPrefs:
 
     # ── 组合过滤 ──
 
-    def test_combined_filters(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
+    def test_combined_filters(self, sample_banners, sample_threads, empty_prefs):
         """同时应用多种排除条件。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=[111],
@@ -711,7 +724,6 @@ class TestFilterThreadBannersByPrefs:
             exclude_keywords="新手",
         )
         result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
         # Banner A: author 排除
         # Banner B: keyword "新手" 命中 excerpt 排除
         # Banner C: tag "同人" 排除
@@ -719,9 +731,7 @@ class TestFilterThreadBannersByPrefs:
 
     # ── 空偏好 / 边界情况 ──
 
-    def test_no_prefs_returns_all(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
+    def test_no_prefs_returns_all(self, sample_banners, sample_threads, empty_prefs):
         """空偏好 → 全部保留。"""
         result = self._filter(sample_banners, sample_threads, empty_prefs)
         assert len(result) == 3
@@ -731,6 +741,7 @@ class TestFilterThreadBannersByPrefs:
     ):
         """thread_map 中不存在的 banner 保留（线程可能已被删除）。"""
         from dto.preferences import UserSearchPreferencesDTO
+
         banners = sample_banners[:1]  # 只取 Banner A
         # thread_map 不含 thread_id=100
         prefs = UserSearchPreferencesDTO(
@@ -744,9 +755,7 @@ class TestFilterThreadBannersByPrefs:
         assert len(result) == 1
         assert result[0].thread_id == 100
 
-    def test_empty_list_returns_empty(
-        self, sample_threads, empty_prefs
-    ):
+    def test_empty_list_returns_empty(self, sample_threads, empty_prefs):
         """空 banner 列表 → 返回空列表。"""
         result = self._filter([], sample_threads, empty_prefs)
         assert result == []
@@ -756,6 +765,7 @@ class TestFilterThreadBannersByPrefs:
         # 此测试仅确认函数签名可接受空列表
         from api.v1.routers.banner import _filter_thread_banners_by_prefs
         from dto.preferences import UserSearchPreferencesDTO
+
         prefs = UserSearchPreferencesDTO(
             user_id=1,
             exclude_authors=[111],

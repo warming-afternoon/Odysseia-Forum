@@ -39,22 +39,28 @@ async def seeded_fts_session(
         now = datetime.now()
         threads = [
             Thread(
-                thread_id=601, channel_id=1,
+                thread_id=601,
+                channel_id=1,
                 title="关于百合破坏的讨论",
                 first_message_excerpt="百合和GL的讨论",
-                author_id=1, created_at=now,
+                author_id=1,
+                created_at=now,
             ),
             Thread(
-                thread_id=602, channel_id=1,
+                thread_id=602,
+                channel_id=1,
                 title="纯爱小说分享",
                 first_message_excerpt="推荐一些女性视角的小说",
-                author_id=2, created_at=now,
+                author_id=2,
+                created_at=now,
             ),
             Thread(
-                thread_id=603, channel_id=1,
+                thread_id=603,
+                channel_id=1,
                 title="催眠洗脑魔法少女",
                 first_message_excerpt="MC相关话题讨论",
-                author_id=3, created_at=now,
+                author_id=3,
+                created_at=now,
             ),
         ]
         session.add_all(threads)
@@ -77,7 +83,9 @@ class TestFTSQueryCaching:
     def _make_mock_redis(self, cached_data=None):
         """构造模拟 Redis 客户端。"""
         mock = AsyncMock()
-        mock.get = AsyncMock(return_value=json.dumps(cached_data) if cached_data else None)
+        mock.get = AsyncMock(
+            return_value=json.dumps(cached_data) if cached_data else None
+        )
         mock.setex = AsyncMock()
         return mock
 
@@ -172,7 +180,9 @@ class TestFTSQueryCaching:
         assert "ig" in cached_value  # 正选词的 tsquery
 
     @pytest.mark.asyncio
-    async def test_exclude_keywords_cache_hit_rebuilds_exclude_stmt(self, seeded_fts_session):
+    async def test_exclude_keywords_cache_hit_rebuilds_exclude_stmt(
+        self, seeded_fts_session
+    ):
         """排除关键词缓存命中后正确重建 exclude_stmt 子查询。"""
         repo = ThreadRepository(seeded_fts_session)
 
@@ -237,7 +247,9 @@ class TestFTSQueryCaching:
         assert "百合GLy" in cache_key  # "百合GLyuri"[:5] == "百合GLy"
 
     @pytest.mark.asyncio
-    async def test_cache_key_with_none_keywords_uses_none_prefix(self, seeded_fts_session):
+    async def test_cache_key_with_none_keywords_uses_none_prefix(
+        self, seeded_fts_session
+    ):
         """keywords 为 None 时，前缀取 'none'。"""
         repo = ThreadRepository(seeded_fts_session)
         mock_redis = self._make_mock_redis(cached_data=None)
@@ -264,7 +276,8 @@ class TestFTSQueryCaching:
         service1 = SearchService(seeded_fts_session, tag_cache)
         threads1, total1 = await service1.search_threads_with_count(
             ThreadSearchQuery(keywords="百合"),
-            limit=50, offset=0,
+            limit=50,
+            offset=0,
             total_display_count=1000,
             exploration_factor=1.414,
             strength_weight=10.0,
@@ -275,7 +288,8 @@ class TestFTSQueryCaching:
         service2 = SearchService(seeded_fts_session, tag_cache)
         threads2, total2 = await service2.search_threads_with_count(
             ThreadSearchQuery(keywords="百合"),
-            limit=50, offset=0,
+            limit=50,
+            offset=0,
             total_display_count=1000,
             exploration_factor=1.414,
             strength_weight=10.0,
@@ -420,7 +434,9 @@ class TestRedisClientPassthrough:
         assert isinstance(threads, list)
 
     @pytest.mark.asyncio
-    async def test_search_service_without_redis_client_still_works(self, seeded_fts_session):
+    async def test_search_service_without_redis_client_still_works(
+        self, seeded_fts_session
+    ):
         """redis_client 为 None 时 search_threads_with_count() 正常工作。"""
         from search.search_service import SearchService
         from search.qo.thread_search import ThreadSearchQuery

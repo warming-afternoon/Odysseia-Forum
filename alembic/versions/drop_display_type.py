@@ -23,7 +23,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.add_column(
         "booklist",
-        sa.Column("display_type", sa.Integer(), nullable=False, server_default=sa.text("1")),
+        sa.Column(
+            "display_type", sa.Integer(), nullable=False, server_default=sa.text("1")
+        ),
     )
     # 根据新字段恢复 display_type
     op.execute(

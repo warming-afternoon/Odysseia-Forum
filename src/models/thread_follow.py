@@ -19,9 +19,7 @@ class ThreadFollow(SQLModel, table=True):
     thread_id: int = Field(
         sa_column=Column(BigInteger, index=True), description="帖子Discord ID"
     )
-    followed_at: datetime = Field(
-        default_factory=utc_now, description="关注时间"
-    )
+    followed_at: datetime = Field(default_factory=utc_now, description="关注时间")
     last_viewed_at: Optional[datetime] = Field(
         default=None, description="最后查看时间，用于计算未读更新"
     )

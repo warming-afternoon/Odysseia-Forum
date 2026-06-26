@@ -81,7 +81,7 @@ class BooklistDetail(BaseModel):
         """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
         return str(value)
 
-    @field_serializer("tournament_channel_id") 
+    @field_serializer("tournament_channel_id")
     def serialize_tournament_channel_id(self, value: int | None) -> str | None:
         """将 Discord 频道 ID 序列化为字符串，避免 JavaScript 精度丢失"""
         if value is None:

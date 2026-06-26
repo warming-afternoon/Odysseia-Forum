@@ -59,6 +59,7 @@ class TestReadAndReplayBody:
     @pytest.mark.asyncio
     async def test_empty_body(self):
         """空 body — GET 请求之类。"""
+
         async def receive():
             return {"type": "http.request", "body": b"", "more_body": False}
 

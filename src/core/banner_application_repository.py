@@ -56,9 +56,7 @@ class BannerApplicationRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_history_by_thread_id(
-        self, thread_id: int
-    ) -> List[BannerApplication]:
+    async def get_history_by_thread_id(self, thread_id: int) -> List[BannerApplication]:
         """查询同一 thread_id 的非 pending 申请，按 applied_at 倒序。
 
         仅返回有 review_message_id 的记录，确保能生成审核消息跳转链接。

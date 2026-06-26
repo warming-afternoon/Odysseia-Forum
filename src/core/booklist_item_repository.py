@@ -20,7 +20,12 @@ from shared.enum.search_config_type import SearchConfigDefaults
 logger = logging.getLogger(__name__)
 
 
-def _apply_item_sorting(query, sort_method: str, sort_order: str, time_decay: float = SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value):
+def _apply_item_sorting(
+    query,
+    sort_method: str,
+    sort_order: str,
+    time_decay: float = SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value,
+):
     """根据排序方式与顺序对书单帖子查询应用 ORDER BY。"""
     if sort_method == "hot":
         # Reddit Hot: log10(max(1, reaction_count)) + (epoch(created_at) / time_decay)
@@ -34,7 +39,9 @@ def _apply_item_sorting(query, sort_method: str, sort_order: str, time_decay: fl
             )
             / ln10
         )
-        time_score = func.extract("epoch", Thread.created_at).cast(Float) / float(time_decay)
+        time_score = func.extract("epoch", Thread.created_at).cast(Float) / float(
+            time_decay
+        )
         return query.order_by((reaction_score + time_score).desc())
 
     order_func = asc if sort_order == "asc" else desc
@@ -221,7 +228,9 @@ class BooklistItemRepository:
         total = count_result.scalar_one_or_none() or 0
 
         # 应用排序
-        sorted_query = _apply_item_sorting(base_query, default_sort_method, default_sort_order)
+        sorted_query = _apply_item_sorting(
+            base_query, default_sort_method, default_sort_order
+        )
 
         # 获取数据
         data_stmt = sorted_query.offset(offset).limit(limit)

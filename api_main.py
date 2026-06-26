@@ -99,8 +99,7 @@ def _inject_api_dependencies(
     discovery_ignore_channel_ids = [
         int(cid)
         for cid in raw_discovery.get("ignore_channel_ids", [])
-        if isinstance(cid, (int, str))
-        and str(cid).strip().lstrip("-").isdigit()
+        if isinstance(cid, (int, str)) and str(cid).strip().lstrip("-").isdigit()
     ]
     discovery_api.discovery_ignore_channel_ids = discovery_ignore_channel_ids
 
@@ -164,7 +163,9 @@ async def main():
         file_handler = TimedRotatingFileHandler(
             "/app/logs/api.log", when="midnight", backupCount=7, encoding="utf-8"
         )
-        file_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        )
         logging.getLogger().addHandler(file_handler)
     except Exception:
         logging.getLogger().warning("无法创建日志文件处理器，仅输出到控制台")

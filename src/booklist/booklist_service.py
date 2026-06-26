@@ -167,8 +167,9 @@ class BooklistService:
 
         # 3. 校验所有权：所有 scope 书单必须属于当前用户
         stmt = (
-            select(Booklist.id, Booklist.owner_id)
-            .where(Booklist.id.in_(list(scope_set)))  # type: ignore
+            select(Booklist.id, Booklist.owner_id).where(
+                Booklist.id.in_(list(scope_set))
+            )  # type: ignore
         )
         booklist_rows = (await self.session.execute(stmt)).all()
         found_ids = {row[0] for row in booklist_rows}

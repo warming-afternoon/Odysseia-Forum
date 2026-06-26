@@ -13,12 +13,11 @@ PG 关注点：datetime naive 比较（followed_at, last_viewed_at），FK-free 
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from shared.time_utils import utc_now
 
-from models import Thread, ThreadFollow
+from models import Thread
 from core.follow_repository import ThreadFollowRepository
 
 
@@ -38,17 +37,26 @@ async def seeded_follow_session(
     """预填充帖子数据的会话。"""
     threads = [
         Thread(
-            channel_id=1, thread_id=101, title="Follow Thread 1",
-            author_id=1, created_at=utc_now(),
+            channel_id=1,
+            thread_id=101,
+            title="Follow Thread 1",
+            author_id=1,
+            created_at=utc_now(),
         ),
         Thread(
-            channel_id=1, thread_id=102, title="Follow Thread 2",
-            author_id=2, created_at=utc_now(),
+            channel_id=1,
+            thread_id=102,
+            title="Follow Thread 2",
+            author_id=2,
+            created_at=utc_now(),
             latest_update_at=utc_now(),
         ),
         Thread(
-            channel_id=1, thread_id=103, title="Follow Thread 3",
-            author_id=3, created_at=utc_now(),
+            channel_id=1,
+            thread_id=103,
+            title="Follow Thread 3",
+            author_id=3,
+            created_at=utc_now(),
         ),
     ]
     follow_session.add_all(threads)
@@ -66,7 +74,9 @@ class TestAddFollow:
         result = await repo.add_follow(user_id=1, thread_id=101)
         assert result is True
 
-    async def test_duplicate_follow_idempotent(self, seeded_follow_session: AsyncSession):
+    async def test_duplicate_follow_idempotent(
+        self, seeded_follow_session: AsyncSession
+    ):
         """重复关注幂等 → 返回 False，不报错"""
         repo = ThreadFollowRepository(seeded_follow_session)
         await repo.add_follow(user_id=1, thread_id=101)
@@ -83,7 +93,9 @@ class TestAddFollow:
         assert len(follows) == 1
         assert follows[0].last_viewed_at is not None
 
-    async def test_add_follow_without_auto_view(self, seeded_follow_session: AsyncSession):
+    async def test_add_follow_without_auto_view(
+        self, seeded_follow_session: AsyncSession
+    ):
         """auto_view=False（默认）→ last_viewed_at 为 None"""
         repo = ThreadFollowRepository(seeded_follow_session)
         await repo.add_follow(user_id=1, thread_id=101, auto_view=False)
@@ -104,7 +116,9 @@ class TestBatchAddFollows:
         for uid in [10, 20, 30]:
             assert await repo.is_following(uid, 101)
 
-    async def test_batch_add_partial_existing(self, seeded_follow_session: AsyncSession):
+    async def test_batch_add_partial_existing(
+        self, seeded_follow_session: AsyncSession
+    ):
         """部分已存在 → 只计算新增"""
         repo = ThreadFollowRepository(seeded_follow_session)
         await repo.add_follow(user_id=10, thread_id=101)
@@ -161,7 +175,9 @@ class TestLastViewed:
         for f in follows:
             assert f.last_viewed_at is not None
 
-    async def test_update_last_viewed_nonexistent(self, seeded_follow_session: AsyncSession):
+    async def test_update_last_viewed_nonexistent(
+        self, seeded_follow_session: AsyncSession
+    ):
         """更新未关注帖子的已读时间 → False"""
         repo = ThreadFollowRepository(seeded_follow_session)
         result = await repo.update_last_viewed(user_id=1, thread_id=101)
@@ -214,7 +230,9 @@ class TestGetFollows:
 class TestUnreadCount:
     """未读计数"""
 
-    async def test_unread_count_zero_when_no_follows(self, seeded_follow_session: AsyncSession):
+    async def test_unread_count_zero_when_no_follows(
+        self, seeded_follow_session: AsyncSession
+    ):
         """无关注 → 未读计数 0"""
         repo = ThreadFollowRepository(seeded_follow_session)
         count = await repo.get_unread_count(user_id=999)
@@ -253,7 +271,9 @@ class TestIsFollowing:
         repo = ThreadFollowRepository(seeded_follow_session)
         assert not await repo.is_following(1, 101)
 
-    async def test_is_following_inactive_not_counted(self, seeded_follow_session: AsyncSession):
+    async def test_is_following_inactive_not_counted(
+        self, seeded_follow_session: AsyncSession
+    ):
         """非活跃关注 → active_only=True 时返回 False"""
         repo = ThreadFollowRepository(seeded_follow_session)
         await repo.add_follow(user_id=1, thread_id=101)
@@ -285,7 +305,9 @@ class TestMarkInactive:
         count = await repo.batch_mark_inactive(thread_id=101, user_ids=[])
         assert count == 0
 
-    async def test_mark_inactive_already_inactive(self, seeded_follow_session: AsyncSession):
+    async def test_mark_inactive_already_inactive(
+        self, seeded_follow_session: AsyncSession
+    ):
         """已是非活跃 → 幂等，返回 0"""
         repo = ThreadFollowRepository(seeded_follow_session)
         await repo.add_follow(user_id=1, thread_id=101)

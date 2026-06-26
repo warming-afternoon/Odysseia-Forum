@@ -64,9 +64,7 @@ class Indexer(commands.Cog):
         dashboard = IndexerDashboard(self, channel, self.config)
         await dashboard.start(interaction)
 
-    @app_commands.command(
-        name="移除索引", description="移除当前论坛频道的所有帖子索引"
-    )
+    @app_commands.command(name="移除索引", description="移除当前论坛频道的所有帖子索引")
     @is_admin_or_bot_admin()
     async def remove_index(self, interaction: discord.Interaction):
         """移除当前所在帖子所属论坛频道的全部索引。"""

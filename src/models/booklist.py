@@ -96,9 +96,7 @@ class Booklist(SQLModel, table=True):
     )
     """展示服务器的 Discord ID"""
 
-    created_at: datetime = Field(
-        default_factory=utc_now, description="创建时间"
-    )
+    created_at: datetime = Field(default_factory=utc_now, description="创建时间")
     """创建时间"""
 
     updated_at: datetime = Field(

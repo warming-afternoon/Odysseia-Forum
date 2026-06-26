@@ -90,7 +90,9 @@ class TournamentService:
                 )
             )
 
-        result = await self.booklist_repo.add_threads_to_booklist(booklist.id, converted)  # type: ignore[arg-type]
+        result = await self.booklist_repo.add_threads_to_booklist(
+            booklist.id, converted
+        )  # type: ignore[arg-type]
         await self._invalidate_thread_cache([item.thread_id for item in items])
         return result
 
@@ -100,7 +102,8 @@ class TournamentService:
         """从赛事书单移除帖子（BOT 调用，不校验 owner）"""
         booklist = await self._get_tournament(tournament_channel_id)
         result = await self.booklist_repo.remove_threads_from_booklist(
-            booklist.id, thread_ids  # type: ignore[arg-type]
+            booklist.id,
+            thread_ids,  # type: ignore[arg-type]
         )
         await self._invalidate_thread_cache(thread_ids)
         return result
@@ -120,7 +123,9 @@ class TournamentService:
             tournament_participated_at=update_data.tournament_participated_at,
         )
         return await self.booklist_item_repo.update_booklist_item(
-            booklist.id, thread_id, converted  # type: ignore[arg-type]
+            booklist.id,
+            thread_id,
+            converted,  # type: ignore[arg-type]
         )
 
     async def delete_tournament(self, tournament_channel_id: int) -> bool:
@@ -163,10 +168,7 @@ class TournamentService:
         if not self._redis or not thread_ids:
             return
 
-        keys = [
-            CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
-            for tid in thread_ids
-        ]
+        keys = [CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid) for tid in thread_ids]
         try:
             await self._redis.delete(*keys)
         except Exception:

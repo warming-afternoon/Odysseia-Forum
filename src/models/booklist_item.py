@@ -56,9 +56,7 @@ class BooklistItem(SQLModel, table=True):
     )
     """展示消息的 Discord ID"""
 
-    created_at: datetime = Field(
-        default_factory=utc_now, description="加入书单的时间"
-    )
+    created_at: datetime = Field(default_factory=utc_now, description="加入书单的时间")
     """加入书单的时间"""
 
     updated_at: datetime = Field(

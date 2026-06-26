@@ -26,9 +26,7 @@ class BannerWaitlistRepository:
         channel_id_col = cast(ColumnElement, BannerWaitlist.channel_id)
 
         result = await self.session.execute(
-            select(BannerWaitlist)
-            .where(channel_id_col == channel_id)
-            .limit(1)
+            select(BannerWaitlist).where(channel_id_col == channel_id).limit(1)
         )
         return result.scalar_one_or_none() is not None
 

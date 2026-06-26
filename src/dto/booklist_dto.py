@@ -18,7 +18,9 @@ class BooklistDTO(BaseModel):
     is_anonymous: bool = Field(default=False, description="是否匿名")
     is_default: bool = Field(default=False, description="是否为用户的默认书单")
     is_tournament: bool = Field(default=False, description="是否为赛事书单")
-    tournament_channel_id: Optional[int] = Field(default=None, description="赛事关联的 Discord 频道 ID")
+    tournament_channel_id: Optional[int] = Field(
+        default=None, description="赛事关联的 Discord 频道 ID"
+    )
     default_sort_method: str = Field(default="join_time", description="默认排序方式")
     default_sort_order: str = Field(default="desc", description="默认排序顺序")
     item_count: int = Field(default=0, description="书单内帖子数量")

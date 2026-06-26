@@ -13,7 +13,6 @@ PG 关注点：pg_insert(Tag).on_conflict_do_update()
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator
-from datetime import datetime
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
@@ -36,23 +35,48 @@ async def seeded_tag_session(tag_session: AsyncSession) -> AsyncSession:
     """预填充 Tag + Thread + ThreadTagLink 数据。"""
     # 创建线程
     threads = [
-        Thread(channel_id=1, thread_id=101, title="Tagged Thread 1",
-               author_id=1, created_at=utc_now()),
-        Thread(channel_id=1, thread_id=102, title="Tagged Thread 2",
-               author_id=1, created_at=utc_now()),
-        Thread(channel_id=2, thread_id=201, title="Channel 2 Thread",
-               author_id=2, created_at=utc_now()),
-        Thread(channel_id=1, thread_id=103, title="No Tags Thread",
-               author_id=3, created_at=utc_now()),
+        Thread(
+            channel_id=1,
+            thread_id=101,
+            title="Tagged Thread 1",
+            author_id=1,
+            created_at=utc_now(),
+        ),
+        Thread(
+            channel_id=1,
+            thread_id=102,
+            title="Tagged Thread 2",
+            author_id=1,
+            created_at=utc_now(),
+        ),
+        Thread(
+            channel_id=2,
+            thread_id=201,
+            title="Channel 2 Thread",
+            author_id=2,
+            created_at=utc_now(),
+        ),
+        Thread(
+            channel_id=1,
+            thread_id=103,
+            title="No Tags Thread",
+            author_id=3,
+            created_at=utc_now(),
+        ),
     ]
     tag_session.add_all(threads)
     await tag_session.commit()
 
     # 创建标签
     repo = TagRepository(tag_session)
-    await repo.get_or_create_tags({
-        10: "百合", 20: "纯爱", 30: "后宫", 40: "异世界",
-    })
+    await repo.get_or_create_tags(
+        {
+            10: "百合",
+            20: "纯爱",
+            30: "后宫",
+            40: "异世界",
+        }
+    )
 
     # 获取内部 ID → 直接创建 ThreadTagLink（与生产代码一致：ThreadTagLink.thread_id = Thread.id）
     for t in threads:
@@ -118,6 +142,7 @@ class TestGetTagsForChannels:
     async def test_get_tags_in_channel_direct(self, seeded_tag_session: AsyncSession):
         """直接 SQL：channel 1 应有 3 个标签"""
         from sqlalchemy import select, func
+
         stmt = (
             select(func.count(func.distinct(Tag.id)))
             .select_from(Tag)
@@ -133,6 +158,7 @@ class TestGetTagsForChannels:
     async def test_get_tags_in_channel_2_direct(self, seeded_tag_session: AsyncSession):
         """直接 SQL：channel 2 只有 异世界"""
         from sqlalchemy import select
+
         stmt = (
             select(Tag.name)
             .select_from(Tag)
@@ -175,11 +201,16 @@ class TestGetAllTags:
         names = {t.name for t in tags}
         assert names == {"百合", "纯爱", "后宫", "异世界"}
 
-    async def test_get_unique_tags_from_indexed_threads(self, seeded_tag_session: AsyncSession):
+    async def test_get_unique_tags_from_indexed_threads(
+        self, seeded_tag_session: AsyncSession
+    ):
         """直接 SQL：所有标签都关联了帖子"""
         from sqlalchemy import select, func
-        stmt = select(func.count(func.distinct(Tag.id))).select_from(Tag).join(
-            ThreadTagLink, Tag.id == ThreadTagLink.tag_id
+
+        stmt = (
+            select(func.count(func.distinct(Tag.id)))
+            .select_from(Tag)
+            .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id)
         )
         r = await seeded_tag_session.execute(stmt)
         count = r.scalar_one()

@@ -15,7 +15,6 @@ from api.v1.schemas.search.author_detail import AuthorDetail
 from api.v1.schemas.tournament import (
     TournamentCreateRequest,
     TournamentCreateResponse,
-    TournamentItemAddData,
     TournamentItemsAddRequest,
     TournamentItemUpdateRequest,
     TournamentUpdateRequest,
@@ -64,6 +63,7 @@ def _apply_author_to_detail(
             author_map[booklist.owner_id], from_attributes=True
         )
 
+
 router = APIRouter(prefix="/tournament", tags=["赛事"])
 
 
@@ -81,7 +81,9 @@ async def create_tournament(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
+            service = TournamentService(
+                session, redis_client=getattr(cache_service_instance, "_redis", None)
+            )
             booklist, created = await service.create_or_get_tournament(request)
 
             return TournamentCreateResponse(
@@ -105,9 +107,7 @@ async def create_tournament(
     response_model=PaginatedResponse[BooklistDetail],
 )
 async def list_tournaments(
-    tournament_channel_id: Optional[int] = Query(
-        None, description="按赛事频道ID筛选"
-    ),
+    tournament_channel_id: Optional[int] = Query(None, description="按赛事频道ID筛选"),
     sort_method: int = Query(
         4,
         description="排序方法: 1-帖子数, 2-浏览数, 3-收藏数, 4-创建时间, 5-最后更新时间",
@@ -282,7 +282,9 @@ async def add_tournament_items(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
+            service = TournamentService(
+                session, redis_client=getattr(cache_service_instance, "_redis", None)
+            )
             added = await service.add_items(tournament_channel_id, request.items)
 
         return {
@@ -317,8 +319,12 @@ async def remove_tournament_items(
     try:
         thread_ids = [int(tid) for tid in request.thread_ids]
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
-            deleted_count = await service.remove_items(tournament_channel_id, thread_ids)
+            service = TournamentService(
+                session, redis_client=getattr(cache_service_instance, "_redis", None)
+            )
+            deleted_count = await service.remove_items(
+                tournament_channel_id, thread_ids
+            )
 
         return {
             "message": f"成功从赛事移除 {deleted_count} 个帖子",
@@ -346,7 +352,9 @@ async def delete_tournament(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
+            service = TournamentService(
+                session, redis_client=getattr(cache_service_instance, "_redis", None)
+            )
             success = await service.delete_tournament(tournament_channel_id)
 
         if not success:
@@ -380,7 +388,9 @@ async def update_tournament(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
+            service = TournamentService(
+                session, redis_client=getattr(cache_service_instance, "_redis", None)
+            )
             booklist = await service.update_tournament(tournament_channel_id, request)
 
             return {
@@ -420,7 +430,9 @@ async def update_tournament_item(
     """
     try:
         async with AsyncSessionFactory() as session:
-            service = TournamentService(session, redis_client=getattr(cache_service_instance, '_redis', None))
+            service = TournamentService(
+                session, redis_client=getattr(cache_service_instance, "_redis", None)
+            )
             updated = await service.update_item(
                 tournament_channel_id, thread_id, update_data
             )

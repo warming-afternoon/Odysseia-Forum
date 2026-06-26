@@ -19,9 +19,7 @@ class TagVote(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(sa_column=Column(BigInteger, index=True))
-    tag_id: int = Field(
-        sa_column=Column(BigInteger, index=True)
-    )
+    tag_id: int = Field(sa_column=Column(BigInteger, index=True))
     thread_id: int = Field(sa_column=Column(BigInteger, index=True))
     vote: int  # 1 代表赞成, -1 代表反对
 

@@ -113,7 +113,7 @@ def _filter_thread_banners_by_prefs(
 
         # 检查 exclude_keywords（匹配 title + first_message_excerpt）
         if exclude_keywords:
-            search_text = (thread.title or "")
+            search_text = thread.title or ""
             if thread.first_message_excerpt:
                 search_text += " " + thread.first_message_excerpt
             search_text_lower = search_text.lower()
@@ -176,9 +176,7 @@ async def apply_banner(
             )
 
             if not result.success:
-                return BannerApplicationResponse(
-                    success=False, message=result.message
-                )
+                return BannerApplicationResponse(success=False, message=result.message)
 
             application = result.application
 

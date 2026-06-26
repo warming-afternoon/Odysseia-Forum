@@ -36,8 +36,12 @@ def upgrade() -> None:
     )
 
     # 改为 NOT NULL 并设置 server_default
-    op.alter_column("booklist", "default_sort_method", nullable=False, server_default="join_time")
-    op.alter_column("booklist", "default_sort_order", nullable=False, server_default="desc")
+    op.alter_column(
+        "booklist", "default_sort_method", nullable=False, server_default="join_time"
+    )
+    op.alter_column(
+        "booklist", "default_sort_order", nullable=False, server_default="desc"
+    )
 
     # 创建索引
     op.create_index(

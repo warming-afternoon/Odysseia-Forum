@@ -30,9 +30,7 @@ class ApplicationFormModal(discord.ui.Modal, title="Banner申请"):
 
         thread_id_str = str(self.thread_id.value).strip()
         if not thread_id_str.isdigit():
-            await interaction.followup.send(
-                "❌ 帖子ID必须是纯数字", ephemeral=True
-            )
+            await interaction.followup.send("❌ 帖子ID必须是纯数字", ephemeral=True)
             return
 
         cover_url = str(self.cover_image_url.value).strip()

@@ -118,7 +118,7 @@ async def execute_search(
 
     # 处理偏好合并：仅在用户已登录且 apply_preferences 为 True 时执行
     if request.apply_preferences and user_id:
-        redis_client = getattr(cache_service_instance, '_redis', None)
+        redis_client = getattr(cache_service_instance, "_redis", None)
         if redis_client:
             prefs = await get_user_preferences_cached(
                 redis_client, async_session_factory, user_id, main_guild_id
@@ -264,7 +264,8 @@ async def execute_search(
 
             # 全站搜索时 channel_to_virtual 为 None，Builder 自动使用全局虚拟标签映射
             results = builder.build_list(
-                threads, collected_thread_ids,
+                threads,
+                collected_thread_ids,
                 channel_to_virtual=channel_to_virtual,
                 tournament_thread_map=tournament_thread_map,
             )
@@ -298,10 +299,12 @@ async def execute_search(
             virtual_tags=virtual_tags,
         )
     except asyncio.TimeoutError:
-        logger.warning(f"搜索超时（{SearchTimeout.SEARCH.value}s），请求参数: {request.model_dump()}")
+        logger.warning(
+            f"搜索超时（{SearchTimeout.SEARCH.value}s），请求参数: {request.model_dump()}"
+        )
         raise HTTPException(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail=f"搜索请求超时，请尝试缩小搜索范围或稍后重试",
+            detail="搜索请求超时，请尝试缩小搜索范围或稍后重试",
         )
     except Exception as e:
         logger.error(f"搜索时发生内部错误: {e}", exc_info=True)
@@ -670,7 +673,7 @@ async def _perform_search_and_update_counts(
     """
     repo = SearchService(session, tag_cache_service_instance)  # type: ignore[arg-type]
     # 尝试获取 Redis 客户端用于 FTS tsquery 缓存
-    redis_client = getattr(cache_service_instance, '_redis', None)
+    redis_client = getattr(cache_service_instance, "_redis", None)
     threads, total_threads = await repo.search_threads_with_count(
         query_object,
         limit=limit,
@@ -774,7 +777,9 @@ async def _get_banner_and_unread_async(
 
             # 获取Banner轮播列表
             banner_service = BannerService(session)
-            banners = await banner_service.get_active_banners(channel_id=target_channel_id)
+            banners = await banner_service.get_active_banners(
+                channel_id=target_channel_id
+            )
             guild_map: dict[int, int] = {}
             if banners:
                 thread_tids = [
@@ -798,6 +803,7 @@ async def _get_banner_and_unread_async(
 
                 if channel_ids:
                     from models.channel import Channel as ChannelModel
+
                     channel_rows = await session.execute(
                         select(ChannelModel.channel_id, ChannelModel.guild_id).where(  # type: ignore[arg-type]
                             ChannelModel.channel_id.in_(channel_ids)  # type: ignore[arg-type]
@@ -824,7 +830,9 @@ async def _get_banner_and_unread_async(
             if user_id is not None:
                 try:
                     follow_service = ThreadFollowRepository(session)
-                    unread_count = await follow_service.get_unread_count(user_id=user_id)
+                    unread_count = await follow_service.get_unread_count(
+                        user_id=user_id
+                    )
                 except Exception:
                     unread_count = 0
 

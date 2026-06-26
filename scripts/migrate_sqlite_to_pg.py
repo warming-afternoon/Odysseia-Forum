@@ -22,7 +22,7 @@ import asyncio
 import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import asyncpg
@@ -73,17 +73,26 @@ def _convert_sqlite_value(val, col_name: str, col_type: str = ""):
         return None
     # JSON 列：保持为 JSON 字符串，PG 会自动解析
     if col_type == "JSON" or col_name in (
-        "thumbnail_urls", "preferred_channels", "include_authors",
-        "exclude_authors", "include_tags", "exclude_tags",
+        "thumbnail_urls",
+        "preferred_channels",
+        "include_authors",
+        "exclude_authors",
+        "include_tags",
+        "exclude_tags",
         "exclude_keyword_exemption_markers",
     ):
         if isinstance(val, str):
             return val if val else "[]"
         import json
+
         return json.dumps(val, ensure_ascii=False)
     # SQLite 的布尔值是 0/1，PG 需要 True/False
     if col_type in ("BOOLEAN", "BOOL") or col_name in (
-        "show_flag", "is_public", "is_anonymous", "is_default", "is_tournament",
+        "show_flag",
+        "is_public",
+        "is_anonymous",
+        "is_default",
+        "is_tournament",
     ):
         if isinstance(val, int):
             return bool(val)
@@ -228,10 +237,7 @@ async def main():
                 "SELECT name FROM sqlite_master WHERE type='table'"
             ).fetchall()
         }
-        missing = [
-            t for t in TABLE_ORDER
-            if _sqlite_name(t) not in sqlite_tables
-        ]
+        missing = [t for t in TABLE_ORDER if _sqlite_name(t) not in sqlite_tables]
         if missing:
             print(f"SQLite 中不存在的表（将跳过）: {', '.join(missing)}")
 
@@ -256,13 +262,13 @@ async def main():
             columns = [row["name"] for row in pragma]
             col_types = {row["name"]: row["type"] for row in pragma}
             col_list = ", ".join(columns)
-            placeholders = ", ".join(f"${i+1}" for i in range(len(columns)))
+            placeholders = ", ".join(f"${i + 1}" for i in range(len(columns)))
 
             # 读取数据
             rows = sqlite_conn.execute(f"SELECT {col_list} FROM {sq_name}").fetchall()
 
             if not rows:
-                print(f"  空表，跳过")
+                print("  空表，跳过")
                 continue
 
             # 批量插入 PG
@@ -295,7 +301,9 @@ async def main():
         )
         updated = 0
         for row in thread_rows:
-            tokens_text = _build_search_tokens(row["title"], row["first_message_excerpt"])
+            tokens_text = _build_search_tokens(
+                row["title"], row["first_message_excerpt"]
+            )
             if tokens_text:
                 await pg_conn.execute(
                     "UPDATE thread SET search_vector = to_tsvector('simple', $1) WHERE id = $2",
