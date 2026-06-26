@@ -29,9 +29,10 @@ from core.author_repository import AuthorRepository
 from core.booklist_item_repository import BooklistItemRepository
 from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
-from models import BooklistItem
+from models import Author, BooklistItem
 from shared.database import AsyncSessionFactory
-from sqlmodel import select
+from shared.keyword_parser import parse_search_keywords
+from sqlmodel import func, select
 from shared.enum import CollectionType
 from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
 from shared.enum.booklist_sort_method import BooklistSortMethod
@@ -278,13 +279,40 @@ async def list_public_booklists(
         if search_by_collect:
             collected_by_user_id = int(current_user["id"])
 
+        # 解析高级搜索关键词（author:Name, "精确短语", -排除词）
+        parsed_author_name, final_keywords, final_exclude_keywords = (
+            parse_search_keywords(keywords, None)
+        )
+
         async with AsyncSessionFactory() as session:
+            # 若解析出 author:Name，查询 Author 表获取匹配的 owner_id 列表
+            resolved_owner_ids: list[int] | None = None
+            if parsed_author_name:
+                search_pattern = f"%{parsed_author_name}%"
+                author_stmt = select(Author.id).where(
+                    (func.lower(Author.name) == parsed_author_name.lower())  # type: ignore
+                    | (Author.global_name.like(search_pattern))  # type: ignore
+                    | (Author.display_name.like(search_pattern))  # type: ignore
+                )
+                author_rows = await session.execute(author_stmt)
+                matched = set(author_rows.scalars().all())
+                if matched:
+                    if owner_id is not None:
+                        resolved_owner_ids = list(matched & {owner_id})
+                    else:
+                        resolved_owner_ids = list(matched)
+                else:
+                    # 作者未找到，用哨兵值确保空结果
+                    resolved_owner_ids = [-1]
+
             service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
-                owner_id=owner_id,
+                owner_id=owner_id if resolved_owner_ids is None else None,
                 is_public=True,  # 强制只搜索公开书单
                 is_tournament=is_tournament,
-                keywords=keywords,
+                keywords=final_keywords,
+                exclude_keywords=final_exclude_keywords,
+                owner_ids=resolved_owner_ids,
                 included_thread_id=included_thread_id,
                 collected_by_user_id=collected_by_user_id,
                 sort_method=sort_method,
@@ -387,12 +415,39 @@ async def list_my_booklists(
         if collect_by_current_user:
             collected_by_user_id = user_id
 
+        # 解析高级搜索关键词（author:Name, "精确短语", -排除词）
+        parsed_author_name, final_keywords, final_exclude_keywords = (
+            parse_search_keywords(keywords, None)
+        )
+
         async with AsyncSessionFactory() as session:
+            # 若解析出 author:Name，查询 Author 表获取匹配的 owner_id 列表
+            resolved_owner_ids: list[int] | None = None
+            if parsed_author_name:
+                search_pattern = f"%{parsed_author_name}%"
+                author_stmt = select(Author.id).where(
+                    (func.lower(Author.name) == parsed_author_name.lower())  # type: ignore
+                    | (Author.global_name.like(search_pattern))  # type: ignore
+                    | (Author.display_name.like(search_pattern))  # type: ignore
+                )
+                author_rows = await session.execute(author_stmt)
+                matched = set(author_rows.scalars().all())
+                if matched:
+                    if owner_id is not None:
+                        resolved_owner_ids = list(matched & {owner_id})
+                    else:
+                        resolved_owner_ids = list(matched)
+                else:
+                    # 作者未找到，用哨兵值确保空结果
+                    resolved_owner_ids = [-1]
+
             service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
-                owner_id=owner_id,
+                owner_id=owner_id if resolved_owner_ids is None else None,
                 is_public=is_public,
-                keywords=keywords,
+                keywords=final_keywords,
+                exclude_keywords=final_exclude_keywords,
+                owner_ids=resolved_owner_ids,
                 collected_by_user_id=collected_by_user_id,
                 sort_method=sort_method,
                 sort_order=sort_order,

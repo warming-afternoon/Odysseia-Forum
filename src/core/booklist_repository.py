@@ -8,8 +8,10 @@ from sqlmodel import and_, asc, delete, desc, func, or_, select
 
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
+from dto.search.fts_result_dto import FTSResultDTO
 from models import Booklist, BooklistItem, UserCollection
 from shared.enum import CollectionType
+from shared.fts_utils import build_fts_conditions
 
 logger = logging.getLogger(__name__)
 
@@ -184,12 +186,32 @@ class BooklistRepository:
             logger.info(f"书单 {booklist_id} 已删除")
         return deleted
 
+    async def get_fts_matched_booklist_ids(
+        self,
+        keywords: str | None,
+        exclude_keywords: str | None,
+        redis_client=None,
+    ) -> FTSResultDTO:
+        """FTS 书单搜索，返回可直接嵌入 WHERE 的 filter 条件。
+
+        委托给共享模块 ``shared.fts_utils.build_fts_conditions``。
+        """
+        return await build_fts_conditions(
+            Booklist.search_vector,
+            keywords,
+            exclude_keywords,
+            exemption_markers=None,
+            redis_client=redis_client,
+        )
+
     async def list_booklists(
         self,
         owner_id: Optional[int] = None,
         is_public: Optional[bool] = None,
         is_tournament: Optional[bool] = None,
         keywords: Optional[str] = None,
+        exclude_keywords: Optional[str] = None,
+        owner_ids: Optional[list[int]] = None,
         included_thread_id: Optional[int] = None,
         collected_by_user_id: Optional[int] = None,
         tournament_channel_id: Optional[int] = None,
@@ -199,12 +221,14 @@ class BooklistRepository:
         offset: int = 0,
     ) -> Tuple[List[Booklist], int]:
         """
-        分页搜索书单
+        分页搜索书单（支持 FTS 全文搜索）
         """
         query = select(Booklist)
 
         if owner_id is not None:
             query = query.where(Booklist.owner_id == owner_id)
+        if owner_ids is not None:
+            query = query.where(Booklist.owner_id.in_(owner_ids))  # type: ignore
         if is_public is not None:
             query = query.where(Booklist.is_public == is_public)
         if is_tournament is not None:
@@ -212,13 +236,15 @@ class BooklistRepository:
         if tournament_channel_id is not None:
             query = query.where(Booklist.tournament_channel_id == tournament_channel_id)
         if keywords:
-            search_pattern = f"%{keywords}%"
-            query = query.where(
-                or_(
-                    getattr(Booklist.title, "ilike")(search_pattern),
-                    getattr(Booklist.description, "ilike")(search_pattern),
-                )
+            fts_result = await self.get_fts_matched_booklist_ids(
+                keywords=keywords,
+                exclude_keywords=exclude_keywords,
             )
+            if fts_result.has_include:
+                for cond in fts_result.include_conditions:
+                    query = query.where(cond)
+            if fts_result.has_exclude:
+                query = query.where(~fts_result.exclude_condition)
         if collected_by_user_id is not None:
             query = query.join(
                 UserCollection,

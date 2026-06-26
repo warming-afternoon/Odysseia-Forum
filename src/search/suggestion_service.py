@@ -98,10 +98,16 @@ class SuggestionService:
                 or_(
                     func.cast(Booklist.id, String).like(search_pattern),  # type: ignore[arg-type]
                     Booklist.title.like(search_pattern),  # type: ignore[attr-defined]
+                    Booklist.description.like(search_pattern),  # type: ignore[attr-defined]
                 )
             )
         else:
-            booklist_stmt = booklist_stmt.where(Booklist.title.like(search_pattern))  # type: ignore[attr-defined]
+            booklist_stmt = booklist_stmt.where(
+                or_(
+                    Booklist.title.like(search_pattern),  # type: ignore[attr-defined]
+                    Booklist.description.like(search_pattern),  # type: ignore[attr-defined]
+                )
+            )
         booklist_stmt = booklist_stmt.order_by(Booklist.view_count.desc()).limit(limit)  # type: ignore[attr-defined]
 
         author_res = await self.session.execute(author_stmt)

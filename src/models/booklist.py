@@ -1,9 +1,11 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger
+from sqlalchemy import BigInteger, Index, event, func, inspect
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlmodel import Column, Field, SQLModel
 
+from shared.text_utils import build_search_vector_text
 from shared.time_utils import utc_now
 
 
@@ -11,6 +13,14 @@ class Booklist(SQLModel, table=True):
     """书单元数据"""
 
     __tablename__ = "booklist"  # type: ignore
+
+    __table_args__ = (
+        Index(
+            "ix_booklist_search_vector",
+            "search_vector",
+            postgresql_using="gin",
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     """主键ID"""
@@ -105,3 +115,37 @@ class Booklist(SQLModel, table=True):
         description="最后更新时间",
     )
     """最后更新时间"""
+
+    search_vector: Optional[str] = Field(
+        default=None,
+        sa_column=Column(TSVECTOR, nullable=True),
+        description="预计算的 PostgreSQL 全文搜索向量（rjieba 分词 + to_tsvector('simple')）",
+    )
+    """全文搜索向量"""
+
+
+# ── search_vector 自动维护 ────────────────────────────
+
+
+@event.listens_for(Booklist, "before_insert")
+def _on_booklist_before_insert(mapper, connection, target: Booklist):
+    """INSERT 前自动填充 search_vector。"""
+    tokens_text = build_search_vector_text(target.title, target.description)
+    target.search_vector = (  # type: ignore[assignment]
+        func.to_tsvector("simple", tokens_text) if tokens_text else None
+    )
+
+
+@event.listens_for(Booklist, "before_update")
+def _on_booklist_before_update(mapper, connection, target: Booklist):
+    """仅当 title 或 description 变化时重新计算 search_vector。"""
+    insp = inspect(target)
+    assert insp is not None, f"Expected ORM-mapped instance, got {type(target)}"
+    title_changed = insp.attrs.title.history.has_changes()
+    desc_changed = insp.attrs.description.history.has_changes()
+    if not title_changed and not desc_changed:
+        return
+    tokens_text = build_search_vector_text(target.title, target.description)
+    target.search_vector = (  # type: ignore[assignment]
+        func.to_tsvector("simple", tokens_text) if tokens_text else None
+    )

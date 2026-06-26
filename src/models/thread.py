@@ -147,7 +147,7 @@ class Thread(SQLModel, table=True):
 def _on_thread_before_insert(mapper, connection, target: Thread):
     """INSERT 前自动填充 search_vector。"""
     tokens_text = build_search_vector_text(target.title, target.first_message_excerpt)
-    target.search_vector = (
+    target.search_vector = (  # type: ignore[assignment]
         func.to_tsvector("simple", tokens_text) if tokens_text else None
     )
 
@@ -156,11 +156,12 @@ def _on_thread_before_insert(mapper, connection, target: Thread):
 def _on_thread_before_update(mapper, connection, target: Thread):
     """仅当 title 或 first_message_excerpt 变化时重新计算 search_vector。"""
     insp = inspect(target)
+    assert insp is not None, f"Expected ORM-mapped instance, got {type(target)}"
     title_changed = insp.attrs.title.history.has_changes()
     excerpt_changed = insp.attrs.first_message_excerpt.history.has_changes()
     if not title_changed and not excerpt_changed:
         return
     tokens_text = build_search_vector_text(target.title, target.first_message_excerpt)
-    target.search_vector = (
+    target.search_vector = (  # type: ignore[assignment]
         func.to_tsvector("simple", tokens_text) if tokens_text else None
     )

@@ -39,7 +39,7 @@ from search.search_service import SearchService
 from search.suggestion_service import SuggestionService
 from shared.enum import AbyssDefaults, CollectionType, SearchTimeout, TargetType
 from shared.channel_mapping_utils import ChannelMappingUtils
-from shared.keyword_parser import KeywordParser
+from shared.keyword_parser import parse_search_keywords
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ async def execute_search(
         t_after_prefs = time.perf_counter()
 
     # 解析高级搜索语法，提取作者名和最终搜索词
-    author_name, final_keywords, final_exclude_keywords = _parse_search_keywords(
+    author_name, final_keywords, final_exclude_keywords = parse_search_keywords(
         request.keywords, request.exclude_keywords
     )
 
@@ -608,52 +608,6 @@ def _merge_user_preferences(request: SearchRequest, prefs: UserSearchPreferences
             if pref_value is not None and pref_value != "":
                 setattr(request, req_key, pref_value)
 
-
-def _parse_search_keywords(
-    keywords: str | None, exclude_keywords: str | None
-) -> tuple[str | None, str | None, str | None]:
-    """
-    解析搜索关键词，提取作者名、包含词和排除词。
-
-    使用 KeywordParser 解析高级搜索语法（支持 author:xxx 语法），
-    将精确匹配词用引号包围以支持短语搜索，合并解析出的排除词与原有排除词。
-
-    Returns:
-        tuple: (作者名, 最终关键词字符串, 最终排除词字符串)
-    """
-    author_name = None
-    parsed_include_keywords: list[str] = []
-    parsed_exclude_keywords: list[str] = []
-    remaining_keywords = keywords or ""
-
-    if keywords:
-        # 清理并解析关键词，提取作者名和各类关键词
-        sanitized_keywords = KeywordParser.sanitize(keywords)
-        (
-            author_name,
-            parsed_include_keywords,
-            parsed_exclude_keywords,
-            remaining_keywords,
-        ) = KeywordParser.parse(sanitized_keywords)
-
-    # 合并解析出的排除词与原有的排除词，以空格分隔
-    final_exclude_keywords = exclude_keywords or ""
-    if parsed_exclude_keywords:
-        if final_exclude_keywords:
-            final_exclude_keywords += " " + " ".join(parsed_exclude_keywords)
-        else:
-            final_exclude_keywords = " ".join(parsed_exclude_keywords)
-
-    # 构建最终关键词：精确匹配词加引号，保留剩余普通关键词
-    final_keywords_parts: list[str] = []
-    if parsed_include_keywords:
-        for kw in parsed_include_keywords:
-            final_keywords_parts.append(f'"{kw}"')
-    if remaining_keywords:
-        final_keywords_parts.append(remaining_keywords)
-
-    final_keywords = " ".join(final_keywords_parts) if final_keywords_parts else None
-    return author_name, final_keywords, final_exclude_keywords or None
 
 
 async def _perform_search_and_update_counts(
