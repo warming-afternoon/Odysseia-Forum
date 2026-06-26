@@ -185,7 +185,15 @@ async def create_booklist(
     - cover_image_url: 封面图 URL（可选）
     - is_public: 是否公开，默认为 True
     - is_anonymous: 是否匿名，默认为 False
-    - default_sort_method: 默认排序方式，默认为 join_time
+    - default_sort_method: 默认排序方式，默认为 join_time。可选值:
+        - "hot": Reddit Hot 算法 — score = log10(max(1, reaction_count)) + created_at_epoch / time_decay
+        - "created_at": 按发帖时间排序
+        - "reaction_count": 按点赞数排序
+        - "reply_count": 按回复数排序
+        - "collection_count": 按收藏数排序
+        - "last_active_at": 按最后发言时间排序
+        - "join_time": 按加入书单时间排序 (默认)
+        - "display_order": 按作者自定义排序权重排序
     - default_sort_order: 默认排序顺序，默认为 desc
     """
     try:
@@ -588,7 +596,15 @@ async def update_booklist(
     - cover_image_url: 新封面图URL（可选）
     - is_public: 是否公开（可选）
     - is_anonymous: 是否匿名（可选）
-    - default_sort_method: 默认排序方式（可选）
+    - default_sort_method: 默认排序方式（可选）。可选值:
+        - "hot": Reddit Hot 算法 — score = log10(max(1, reaction_count)) + created_at_epoch / time_decay
+        - "created_at": 按发帖时间排序
+        - "reaction_count": 按点赞数排序
+        - "reply_count": 按回复数排序
+        - "collection_count": 按收藏数排序
+        - "last_active_at": 按最后发言时间排序
+        - "join_time": 按加入书单时间排序
+        - "display_order": 按作者自定义排序权重排序
     - default_sort_order: 默认排序顺序（可选）
     """
     try:
@@ -831,6 +847,17 @@ async def get_booklist_items(
         description="每次请求返回的数量 (范围: 1-100)",
     ),
     offset: int = Query(default=0, ge=0, description="结果的偏移量，从0开始"),
+    sort_method: Optional[str] = Query(
+        None,
+        description="排序方式: hot(热门-Reddit Hot算法), created_at(发帖时间), "
+        "reaction_count(点赞数), reply_count(回复数), collection_count(收藏数), "
+        "last_active_at(最后发言时间), join_time(加入书单时间), "
+        "display_order(作者自定义排序)。不传则使用书单默认排序",
+    ),
+    sort_order: Optional[str] = Query(
+        None,
+        description="排序顺序: asc(升序) 或 desc(降序)。不传则使用书单默认排序",
+    ),
     current_user: Dict[str, Any] = Depends(require_auth),
 ):
     """
@@ -839,6 +866,8 @@ async def get_booklist_items(
     - booklist_id: 书单ID
     - limit: 返回数量
     - offset: 偏移量
+    - sort_method: 排序方式（可选），覆盖书单默认排序
+    - sort_order: 排序顺序（可选），覆盖书单默认排序
     """
     try:
         async with AsyncSessionFactory() as session:
@@ -854,11 +883,33 @@ async def get_booklist_items(
                     status_code=status.HTTP_403_FORBIDDEN, detail="无权查看此书单内容"
                 )
 
+            # 解析排序参数：用户传参 > 书单默认 > 系统默认
+            if sort_method is not None:
+                valid_methods = {m.value for m in BooklistSortMethod}
+                if sort_method not in valid_methods:
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"无效的排序方式: {sort_method}. 可选值: {', '.join(sorted(valid_methods))}",
+                    )
+                resolved_method = sort_method
+            else:
+                resolved_method = booklist.default_sort_method or DEFAULT_SORT_METHOD.value
+
+            if sort_order is not None:
+                if sort_order not in ("asc", "desc"):
+                    raise HTTPException(
+                        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                        detail=f"无效的排序顺序: {sort_order}. 可选值: asc, desc",
+                    )
+                resolved_order = sort_order
+            else:
+                resolved_order = booklist.default_sort_order or DEFAULT_SORT_ORDER.value
+
             item_service = BooklistItemRepository(session)
             items, total = await item_service.get_booklist_items_with_details(
                 booklist_id=booklist_id,
-                default_sort_method=booklist.default_sort_method,
-                default_sort_order=booklist.default_sort_order,
+                default_sort_method=resolved_method,
+                default_sort_order=resolved_order,
                 limit=limit,
                 offset=offset,
             )
