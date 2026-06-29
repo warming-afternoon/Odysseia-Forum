@@ -1,11 +1,11 @@
 """关注列表中单个帖子的响应模型 — 继承 ThreadDetail 追加关注专用字段。"""
 
-from datetime import datetime
 from typing import Optional
 
 from pydantic import Field
 
 from api.v1.schemas.search.thread_detail import ThreadDetail
+from shared.utc_datetime import UTCDateTime
 
 
 class FollowedThreadResponse(ThreadDetail):
@@ -15,7 +15,7 @@ class FollowedThreadResponse(ThreadDetail):
     追加 latest_update_at / latest_update_link / followed_at / last_viewed_at / has_update。
     """
 
-    latest_update_at: Optional[datetime] = Field(
+    latest_update_at: Optional[UTCDateTime] = Field(
         default=None, description="帖子最近一次有新消息的时间"
     )
 
@@ -23,9 +23,9 @@ class FollowedThreadResponse(ThreadDetail):
         default=None, description="最新更新的消息链接"
     )
 
-    followed_at: datetime = Field(description="用户关注该帖子的时间")
+    followed_at: UTCDateTime = Field(description="用户关注该帖子的时间")
 
-    last_viewed_at: Optional[datetime] = Field(
+    last_viewed_at: Optional[UTCDateTime] = Field(
         default=None, description="用户最近一次查看该帖子的时间"
     )
 

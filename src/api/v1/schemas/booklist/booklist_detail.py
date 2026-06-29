@@ -1,8 +1,9 @@
-from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
 from api.v1.schemas.search.author_detail import AuthorDetail
+from shared.utc_datetime import UTCDateTime
 
 
 class BooklistDetail(BaseModel):
@@ -61,10 +62,10 @@ class BooklistDetail(BaseModel):
     view_count: int = Field(description="被浏览次数")
     """被浏览次数"""
 
-    created_at: datetime = Field(description="创建时间")
+    created_at: UTCDateTime = Field(description="创建时间")
     """创建时间"""
 
-    updated_at: datetime = Field(description="最后更新时间")
+    updated_at: UTCDateTime = Field(description="最后更新时间")
     """最后更新时间"""
 
     collected_flag: bool = Field(False, description="当前用户是否收藏了该书单")

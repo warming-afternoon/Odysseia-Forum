@@ -1,9 +1,9 @@
-from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from api.v1.schemas.search.author_detail import AuthorDetail
+from shared.utc_datetime import UTCDateTime
 
 
 class BooklistItemDetail(BaseModel):
@@ -27,10 +27,10 @@ class BooklistItemDetail(BaseModel):
     author: AuthorDetail = Field(description="帖子作者信息")
     """帖子作者信息"""
 
-    created_at: datetime = Field(description="帖子创建时间")
+    created_at: UTCDateTime = Field(description="帖子创建时间")
     """帖子创建时间"""
 
-    last_active_at: Optional[datetime] = Field(
+    last_active_at: Optional[UTCDateTime] = Field(
         default=None, description="帖子最后活跃时间"
     )
     """帖子最后活跃时间"""
@@ -49,7 +49,7 @@ class BooklistItemDetail(BaseModel):
     )
     """帖子首条消息摘要"""
 
-    latest_update_at: Optional[datetime] = Field(
+    latest_update_at: Optional[UTCDateTime] = Field(
         default=None, description="最新更新时间"
     )
     """最新更新时间"""
@@ -76,7 +76,7 @@ class BooklistItemDetail(BaseModel):
     comment: Optional[str] = Field(None, description="书单主对该帖子的推荐语")
     """书单主对该帖子的推荐语"""
 
-    tournament_participated_at: Optional[datetime] = Field(
+    tournament_participated_at: Optional[UTCDateTime] = Field(
         None, description="参赛时间（赛事专用）"
     )
     """参赛时间（赛事专用）"""
@@ -84,7 +84,7 @@ class BooklistItemDetail(BaseModel):
     display_order: int = Field(description="排序权重")
     """排序权重"""
 
-    added_at: datetime = Field(description="加入书单的时间")
+    added_at: UTCDateTime = Field(description="加入书单的时间")
     """加入书单的时间"""
 
     collected_flag: bool = Field(False, description="当前用户是否收藏了该帖子")

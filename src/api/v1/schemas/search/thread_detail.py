@@ -1,7 +1,8 @@
-from datetime import datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+from shared.utc_datetime import UTCDateTime
 
 from api.v1.schemas.search.author_detail import AuthorDetail
 from api.v1.schemas.search.tournament_info import TournamentInfo
@@ -27,10 +28,10 @@ class ThreadDetail(BaseModel):
     )
     """帖子作者的详细信息"""
 
-    created_at: datetime = Field(description="帖子创建时间")
+    created_at: UTCDateTime = Field(description="帖子创建时间")
     """帖子创建时间"""
 
-    last_active_at: Optional[datetime] = Field(
+    last_active_at: Optional[UTCDateTime] = Field(
         default=None, description="帖子最后活跃时间"
     )
     """帖子最后活跃时间"""
