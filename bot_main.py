@@ -55,6 +55,7 @@ class MyBot(commands.Bot):
             "intents": intents,
             "max_messages": 0,
             "chunk_guilds_at_startup": False,
+            "enable_debug_events": True,
         }
         if proxy:
             bot_kwargs["proxy"] = proxy

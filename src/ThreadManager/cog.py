@@ -2,6 +2,7 @@
 
 import asyncio
 import datetime
+import json
 from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
@@ -137,24 +138,121 @@ class ThreadManager(commands.Cog):
         except Exception as e:
             logger.error(f"用户加入帖子自动关注失败: {e}", exc_info=True)
 
-    @commands.Cog.listener()
-    async def on_thread_member_remove(self, member: discord.ThreadMember):
-        """成员被移出帖子时：将关注标记为过去关注（经 Redis 缓冲批量写入 DB）。"""
-        try:
-            thread = member.thread
-            if not thread or not self.is_channel_indexed(thread.parent_id):
-                return
+    # ---------------------------------------------------------
+    # 取消关注处理（公共逻辑 + 两个事件入口）
+    # ---------------------------------------------------------
 
-            # 跳过 bot
-            user = thread.guild.get_member(member.id) or self.bot.get_user(member.id)
+    async def _process_removed_members(
+        self,
+        thread_id: int,
+        parent_id: int,
+        guild: discord.Guild,
+        removed_member_ids: list[int],
+    ) -> None:
+        """遍历被移除的帖子成员，写入 Redis 缓冲等待批量标记 inactive。"""
+        for user_id in removed_member_ids:
+            user = guild.get_member(user_id) or self.bot.get_user(user_id)
             if user and user.bot:
-                return
+                continue
 
             await self.inactive_follow_buffer.add(
-                thread_id=thread.id, user_id=member.id
+                thread_id=thread_id, user_id=user_id
+            )
+
+    @commands.Cog.listener()
+    async def on_socket_raw_receive(self, msg: str):
+        """拦截因帖子缓存缺失被 discord.py 丢弃的 THREAD_MEMBERS_UPDATE 事件。
+
+        当帖子被归档后，discord.py 会将帖子从 guild._threads 缓存中移除。
+        此后 THREAD_MEMBERS_UPDATE 会被 parse_thread_members_update 直接丢弃，
+        不派发 raw_thread_member_remove。此 handler 在 JSON 解析前进行快速字符串过滤。
+        """
+        if "THREAD_MEMBERS_UPDATE" not in msg:
+            return
+
+        try:
+            data = json.loads(msg)
+            if data.get("t") != "THREAD_MEMBERS_UPDATE":
+                return
+
+            d = data.get("d", {})
+            removed_ids = d.get("removed_member_ids", [])
+            if not removed_ids:
+                return
+
+            guild_id = int(d["guild_id"])
+            thread_id = int(d["id"])
+
+            guild = self.bot.get_guild(guild_id)
+            if not guild:
+                return
+
+            # 帖子在缓存中 → discord.py 会正常派发 raw_thread_member_remove，不重复处理
+            if guild.get_thread(thread_id) is not None:
+                return
+
+            # 帖子不在缓存 → 从 DB 获取 parent_id
+            async with self.session_factory() as session:
+                repo = ThreadRepository(session)
+                channel_id = await repo.get_thread_channel_id(thread_id)
+            if channel_id is None:
+                return
+            if not self.is_channel_indexed(channel_id):
+                return
+
+            removed_member_ids = [int(uid) for uid in removed_ids]
+            await self._process_removed_members(
+                thread_id=thread_id,
+                parent_id=channel_id,
+                guild=guild,
+                removed_member_ids=removed_member_ids,
+            )
+        except Exception:
+            pass  # 不阻塞网关事件循环
+
+    @commands.Cog.listener()
+    async def on_raw_thread_member_remove(self, payload: discord.RawThreadMembersUpdate):
+        """成员被移出帖子时：将关注标记为过去关注（经 Redis 缓冲批量写入 DB）。
+
+        使用 raw 事件而非高级事件 on_thread_member_remove：
+        - discord.py 的高级事件仅在 ThreadMember 对象存在于本地 thread._members 缓存时派发
+        - Bot 重启后缓存清空，高级事件可能静默丢失
+        - raw 事件始终派发（只要 guild 和 thread 在 discord.py 缓存中），更可靠
+        """
+        try:
+            removed_member_ids = [
+                int(uid) for uid in payload.data.get("removed_member_ids", [])
+            ]
+            if not removed_member_ids:
+                return
+
+            guild = self.bot.get_guild(payload.guild_id)
+            if not guild:
+                return
+
+            # 获取 parent_id（论坛频道 ID）：优先从 guild 缓存拿，没有则回退 DB
+            thread = guild.get_thread(payload.thread_id)
+            if thread is not None:
+                parent_id = thread.parent_id
+            else:
+                async with self.session_factory() as session:
+                    repo = ThreadRepository(session)
+                    channel_id = await repo.get_thread_channel_id(payload.thread_id)
+                if channel_id is None:
+                    return
+                parent_id = channel_id
+
+            if not self.is_channel_indexed(parent_id):
+                return
+
+            await self._process_removed_members(
+                thread_id=payload.thread_id,
+                parent_id=parent_id,
+                guild=guild,
+                removed_member_ids=removed_member_ids,
             )
         except Exception as e:
-            logger.error(f"处理成员移除事件失败: {e}", exc_info=True)
+            logger.error(f"处理 raw 成员移除事件失败: {e}", exc_info=True)
 
     @commands.Cog.listener()
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):

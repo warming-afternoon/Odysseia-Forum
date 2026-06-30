@@ -416,6 +416,12 @@ class ThreadRepository:
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_thread_channel_id(self, thread_id: int) -> Optional[int]:
+        """获取帖子所属的频道 ID（parent_id），用于 InactiveFollowBuffer 渠道校验。"""
+        stmt = select(Thread.channel_id).where(Thread.thread_id == thread_id)
+        result = await self.session.execute(stmt)
+        return result.scalar_one_or_none()
+
     async def get_thread_with_tags(self, thread_id: int) -> Optional[Thread]:
         """获取帖子及其标签（预加载）。"""
         stmt = (
