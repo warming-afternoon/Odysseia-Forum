@@ -63,6 +63,11 @@ class Booklist(SQLModel, table=True):
     )
     """赛事关联的 Discord 频道ID"""
 
+    publish_status: int = Field(
+        default=0, index=True, description="发布状态: 0-未发布 1-待处理 2-成功 3-失败"
+    )
+    """发布状态: 0-未发布 1-待处理 2-成功 3-失败"""
+
     default_sort_method: str = Field(
         default="join_time",
         description="默认排序方式: hot, created_at, reaction_count, reply_count, collection_count, last_active_at, join_time, display_order",

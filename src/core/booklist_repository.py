@@ -4,12 +4,12 @@ from typing import List, Optional, Set, Tuple
 from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import and_, asc, delete, desc, func, or_, select
+from sqlmodel import and_, asc, delete, desc, func, select
 
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
 from dto.search.fts_result_dto import FTSResultDTO
-from models import Booklist, BooklistItem, UserCollection
+from models import Booklist, BooklistItem, BooklistPublish, UserCollection
 from shared.enum import CollectionType
 from shared.fts_utils import build_fts_conditions
 
@@ -111,6 +111,20 @@ class BooklistRepository:
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 
+    async def set_publish_status(
+        self, booklist_id: int, publish_status: int, *, commit: bool = True
+    ) -> bool:
+        """更新书单发布状态。"""
+        statement = (
+            update(Booklist)
+            .where(Booklist.id == booklist_id)  # type: ignore
+            .values(publish_status=publish_status)
+        )
+        result = await self.session.execute(statement)
+        if commit:
+            await self.session.commit()
+        return result.rowcount > 0
+
     async def update_booklist(
         self,
         booklist_id: int,
@@ -172,11 +186,16 @@ class BooklistRepository:
         """
         删除书单及其所有关联项
         """
-        # 先删除所有关联项
+        # 删除所有关联项
         statement_items = delete(BooklistItem).where(
             BooklistItem.booklist_id == booklist_id  # type: ignore
         )
         await self.session.execute(statement_items)
+        # 删除所有发布记录
+        statement_publish = delete(BooklistPublish).where(
+            BooklistPublish.booklist_id == booklist_id  # type: ignore
+        )
+        await self.session.execute(statement_publish)
         # 删除书单
         statement = delete(Booklist).where(Booklist.id == booklist_id)  # type: ignore
         result = await self.session.execute(statement)

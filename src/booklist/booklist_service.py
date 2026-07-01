@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import List
@@ -15,6 +16,32 @@ from models import Booklist, BooklistItem, Thread
 from shared.enum import ConstantEnum
 
 logger = logging.getLogger(__name__)
+
+# 由 api_main.py 注入的发布配置
+_booklist_publish_base_url: str = ""
+_booklist_publish_api_key: str = ""
+
+
+async def _delayed_publish_sync(booklist_id: int, delay: float = 5.0) -> None:
+    """等待 delay 秒后，若书单已发布则重新同步 embed 到 Discord"""
+    if not _booklist_publish_base_url:
+        return
+    await asyncio.sleep(delay)
+    try:
+        from booklist.booklist_publish_service import BooklistPublishService
+        from shared.database import AsyncSessionFactory
+
+        async with AsyncSessionFactory() as session:
+            service = BooklistPublishService(
+                session,
+                base_url=_booklist_publish_base_url,
+                api_key=_booklist_publish_api_key,
+            )
+            await service.sync_published_booklist(booklist_id)
+    except Exception:
+        logger.warning(
+            "延迟同步书单 %d 的发布内容失败", booklist_id, exc_info=True
+        )
 
 
 class BooklistService:
@@ -89,6 +116,9 @@ class BooklistService:
                 for tid in valid_ids:
                     await trend_service.record_increment("collection", tid, 1)
 
+        # 触发发布内容同步（异步后台，5 秒延迟）
+        asyncio.create_task(_delayed_publish_sync(booklist_id))
+
         return item_dtos
 
     async def remove_threads(
@@ -128,6 +158,10 @@ class BooklistService:
             if net_removed_ids:
                 # 更新数据库中的帖子全局收藏数（仅递减净减项）
                 await self.thread_repo.update_collection_counts(net_removed_ids, -1)
+
+        # 触发发布内容同步（异步后台，5 秒延迟）
+        if deleted_count > 0:
+            asyncio.create_task(_delayed_publish_sync(booklist_id))
 
         return deleted_count
 

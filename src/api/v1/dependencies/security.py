@@ -28,7 +28,7 @@ def initialize_api_security():
             logger.info("JWT 密钥已加载")
 
         # 加载 API Key（用于BOT机机通信认证）
-        _API_KEY = config.get("api", {}).get("api_key")
+        _API_KEY = config.get("integration", {}).get("tournament_api_key")
         if _API_KEY:
             logger.info("API Key 已加载")
 

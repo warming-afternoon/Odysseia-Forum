@@ -1,92 +1,15 @@
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import Field
 
-from api.v1.schemas.search.author_detail import AuthorDetail
-from shared.utc_datetime import UTCDateTime
+from api.v1.schemas.booklist.booklist_publish_info import BooklistPublishInfo
+from api.v1.schemas.booklist.booklist_summary import BooklistSummary
 
 
-class BooklistDetail(BaseModel):
-    """书单详情"""
+class BooklistDetail(BooklistSummary):
+    """书单详情（继承摘要，附加发布信息）"""
 
-    id: int = Field(description="书单ID")
-    """书单ID"""
-
-    owner_id: int = Field(description="创建者用户ID")
-    """创建者用户ID"""
-
-    title: str = Field(description="书单标题")
-    """书单标题"""
-
-    description: Optional[str] = Field(None, description="书单简介")
-    """书单简介"""
-
-    cover_image_url: Optional[str] = Field(None, description="书单封面图URL")
-    """书单封面图URL"""
-
-    author: Optional[AuthorDetail] = Field(None, description="创建者信息")
-    """创建者信息"""
-
-    is_public: bool = Field(description="是否公开")
-    """是否公开"""
-
-    is_anonymous: bool = Field(description="是否匿名")
-    """是否匿名"""
-
-    is_default: bool = Field(description="是否为用户的默认书单")
-    """是否为用户的默认书单"""
-
-    is_tournament: bool = Field(False, description="是否为赛事书单")
-    """是否为赛事书单"""
-
-    tournament_channel_id: Optional[int] = Field(None, description="赛事频道ID")
-    """赛事频道ID"""
-
-    default_sort_method: str = Field(
-        default="join_time",
-        description="默认排序方式: hot, created_at, reaction_count, reply_count, collection_count, last_active_at, join_time, display_order",
+    publish_info: Optional[BooklistPublishInfo] = Field(
+        None, description="发布信息（仅已发布书单返回）"
     )
-    """默认排序方式"""
-
-    default_sort_order: str = Field(
-        default="desc", description="默认排序顺序: asc, desc"
-    )
-    """默认排序顺序"""
-
-    item_count: int = Field(description="书单内帖子数量")
-    """书单内帖子数量"""
-
-    collection_count: int = Field(description="被收藏次数")
-    """被收藏次数"""
-
-    view_count: int = Field(description="被浏览次数")
-    """被浏览次数"""
-
-    created_at: UTCDateTime = Field(description="创建时间")
-    """创建时间"""
-
-    updated_at: UTCDateTime = Field(description="最后更新时间")
-    """最后更新时间"""
-
-    collected_flag: bool = Field(False, description="当前用户是否收藏了该书单")
-    """当前用户是否收藏了该书单"""
-
-    is_marked: bool = Field(
-        False,
-        description="是否被标记帖子命中 (仅当请求传入mark_thread_id时有效)",
-    )
-    """是否被标记帖子命中"""
-
-    @field_serializer("owner_id")
-    def serialize_owner_id(self, value: int) -> str:
-        """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
-        return str(value)
-
-    @field_serializer("tournament_channel_id")
-    def serialize_tournament_channel_id(self, value: int | None) -> str | None:
-        """将 Discord 频道 ID 序列化为字符串，避免 JavaScript 精度丢失"""
-        if value is None:
-            return None
-        return str(value)
-
-    model_config = ConfigDict(from_attributes=True)
+    """发布信息（仅已发布书单返回）"""

@@ -44,15 +44,27 @@
     "cors_origins": [],
     "_comment_cors_origins": "允许跨域请求的来源（CORS），支持配置多个域名",
 
-    "api_key": "",
-    "_comment_api_key": "BOT 机机通信 API Key，调用赛事等接口时需在请求头 X-API-Key 中携带",
-
     "rate_limit": {
       "_comment": "请求频率限制配置（Redis 固定窗口算法）",
       "search": {
         "max_requests": 60,
         "_comment_max_requests": "每个窗口（60秒）内允许的最大请求数"
       }
+    }
+  },
+
+  "integration": {
+    "_comment": "第三方系统集成配置",
+
+    "tournament_api_key": "",
+    "_comment_tournament_api_key": "赛事 BOT 通信 API Key，调用赛事接口时需在请求头 X-API-Key 中携带",
+
+    "booklist_publish": {
+      "api_key": "",
+      "_comment_api_key": "书单发布 BOT 的通信 API Key",
+
+      "base_url": "",
+      "_comment_base_url": "书单发布服务的 IP:端口"
     }
   },
 

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
+
 from api.v1.dependencies.security import require_auth
 from api.v1.schemas.base import PaginatedResponse
 from shared.channel_mapping_utils import ChannelMappingUtils
@@ -21,17 +22,23 @@ from api.v1.schemas.booklist import (
     BooklistItemsSyncRequest,
     BooklistItemsSyncResponse,
     BooklistItemUpdateRequest,
+    BooklistPublishInfo,
+    BooklistPublishRequest,
+    BooklistSummary,
     BooklistUpdateResponse,
 )
 from api.v1.schemas.search.author_detail import AuthorDetail
+from booklist.booklist_publish_service import BooklistPublishService
 from booklist.booklist_service import BooklistService
 from core.author_repository import AuthorRepository
 from core.booklist_item_repository import BooklistItemRepository
+from core.booklist_publish_repository import BooklistPublishRepository
 from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
 from models import Author, BooklistItem
 from shared.database import AsyncSessionFactory
 from shared.keyword_parser import parse_search_keywords
+from shared.thread_link_parser import ThreadLinkParser
 from sqlmodel import func, select
 from shared.enum import CollectionType
 from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
@@ -41,6 +48,10 @@ from shared.redis_client import RedisManager
 
 # 频道映射配置
 channel_mappings_config: Dict[int, List[Dict]] = {}
+
+# 由 api_main.py 注入的书单发布配置
+_booklist_publish_base_url: str = ""
+_booklist_publish_api_key: str = ""
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +151,7 @@ async def _fill_fallback_covers(session: Any, booklists: List[Any]) -> Dict[int,
 
 
 def _apply_anonymous_author(
-    detail: BooklistDetail, booklist: Any, current_user_id: int, author_map: dict
+    detail: BooklistSummary, booklist: Any, current_user_id: int, author_map: dict
 ):
     if getattr(booklist, "is_anonymous", False):
         if current_user_id != booklist.owner_id:
@@ -239,7 +250,7 @@ async def create_booklist(
 @router.get(
     "/list/page",
     summary="分页搜索公开书单",
-    response_model=PaginatedResponse[BooklistDetail],
+    response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_public_booklists(
     owner_id: Optional[int] = Query(None, description="创建者用户ID"),
@@ -349,14 +360,14 @@ async def list_public_booklists(
 
             results = []
             for b in booklists:
-                detail = BooklistDetail.model_validate(b, from_attributes=True)
-                _apply_anonymous_author(detail, b, user_id, author_map)
+                summary = BooklistSummary.model_validate(b, from_attributes=True)
+                _apply_anonymous_author(summary, b, user_id, author_map)
 
                 if b.id in collected_booklist_ids:
-                    detail.collected_flag = True
-                if not detail.cover_image_url and b.id in fallback_covers:
-                    detail.cover_image_url = fallback_covers[b.id]
-                results.append(detail)
+                    summary.collected_flag = True
+                if not summary.cover_image_url and b.id in fallback_covers:
+                    summary.cover_image_url = fallback_covers[b.id]
+                results.append(summary)
 
         return PaginatedResponse(
             total=total, limit=limit, offset=offset, results=results
@@ -372,7 +383,7 @@ async def list_public_booklists(
 @router.get(
     "/my/list/page",
     summary="分页搜索我的书单",
-    response_model=PaginatedResponse[BooklistDetail],
+    response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_my_booklists(
     is_public: Optional[bool] = Query(None, description="筛选公开状态 (不传则不筛选)"),
@@ -494,16 +505,16 @@ async def list_my_booklists(
 
             results = []
             for b in booklists:
-                detail = BooklistDetail.model_validate(b, from_attributes=True)
-                _apply_anonymous_author(detail, b, user_id, author_map)
+                summary = BooklistSummary.model_validate(b, from_attributes=True)
+                _apply_anonymous_author(summary, b, user_id, author_map)
 
                 if b.id in collected_booklist_ids:
-                    detail.collected_flag = True
+                    summary.collected_flag = True
                 if b.id in marked_booklist_ids:
-                    detail.is_marked = True
-                if not detail.cover_image_url and b.id in fallback_covers:
-                    detail.cover_image_url = fallback_covers[b.id]
-                results.append(detail)
+                    summary.is_marked = True
+                if not summary.cover_image_url and b.id in fallback_covers:
+                    summary.cover_image_url = fallback_covers[b.id]
+                results.append(summary)
 
         return PaginatedResponse(
             total=total, limit=limit, offset=offset, results=results
@@ -555,6 +566,20 @@ async def get_booklist(
             detail = BooklistDetail.model_validate(booklist, from_attributes=True)
             detail.collected_flag = collected_flag
             _apply_anonymous_author(detail, booklist, user_id, author_map)
+
+            # 查询发布信息
+            publish_repo = BooklistPublishRepository(session)
+            record = await publish_repo.get_by_booklist(booklist_id)
+            if record:
+                detail.publish_info = BooklistPublishInfo(
+                    guild_id=record.guild_id,
+                    thread_id=record.thread_id,
+                    thread_url=f"https://discord.com/channels/{record.guild_id}/{record.thread_id}",
+                    message_id=record.message_id,
+                    message_url=record.message_url,
+                    published_at=record.created_at,
+                )
+
             # 增加查看次数（放最后，避免 commit 后 booklist 过期导致 MissingGreenlet）
             await service.increment_view_count(booklist_id)
             return detail
@@ -701,6 +726,116 @@ async def delete_booklist(
         logger.error(f"删除书单失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="删除书单失败"
+        )
+
+
+
+@router.post(
+    "/publish/{booklist_id}", summary="发布书单到 Discord", response_model=dict
+)
+async def publish_booklist(
+    booklist_id: int,
+    request: BooklistPublishRequest,
+    current_user: Dict[str, Any] = Depends(require_auth),
+):
+    """
+    发布（或更新）书单到指定的 Discord 讨论帖。
+
+    若该书单已发布到同一帖，则更新既有消息（幂等）。
+    接口立即返回，后台异步调用 discord-featured-bot 完成实际发布。
+    """
+    # 检查服务是否已配置
+    if not _booklist_publish_base_url:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="书单发布服务未配置",
+        )
+
+    try:
+        user_id = int(current_user["id"])
+        discord_user_id = int(current_user["id"])
+
+        # 解析 thread_url → guild_id + thread_id
+        guild_id, thread_id = ThreadLinkParser.parse_thread_url(request.thread_url)
+
+        async with AsyncSessionFactory() as session:
+            # 权限校验
+            booklist_repo = BooklistRepository(session)
+            booklist = await booklist_repo.get_booklist(booklist_id)
+            if not booklist:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="书单不存在"
+                )
+            if booklist.owner_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="无权发布此书单"
+                )
+
+            service = BooklistPublishService(
+                session,
+                base_url=_booklist_publish_base_url,
+                api_key=_booklist_publish_api_key,
+            )
+            await service.publish(booklist_id, guild_id, thread_id, discord_user_id)
+
+        return {
+            "message": "书单发布请求已提交",
+            "publish_status": 1,  # PENDING
+        }
+
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"发布书单失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="发布书单失败"
+        )
+
+
+@router.delete(
+    "/publish/{booklist_id}", summary="取消发布书单"
+)
+async def unpublish_booklist(
+    booklist_id: int,
+    current_user: Dict[str, Any] = Depends(require_auth),
+):
+    """
+    取消发布书单，删除所有发布记录。
+    """
+    try:
+        user_id = int(current_user["id"])
+        async with AsyncSessionFactory() as session:
+            # 权限校验
+            booklist_repo = BooklistRepository(session)
+            booklist = await booklist_repo.get_booklist(booklist_id)
+            if not booklist:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="书单不存在"
+                )
+            if booklist.owner_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="无权取消发布此书单"
+                )
+
+            service = BooklistPublishService(
+                session,
+                base_url=_booklist_publish_base_url,
+                api_key=_booklist_publish_api_key,
+            )
+            await service.unpublish(booklist_id)
+
+        return {"message": "书单已取消发布", "publish_status": 0}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"取消发布书单失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="取消发布书单失败"
         )
 
 

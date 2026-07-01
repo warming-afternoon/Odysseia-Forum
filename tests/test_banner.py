@@ -100,20 +100,10 @@ class TestChannelModel:
 class TestParseThreadLink:
     """parse_thread_link 解析测试。"""
 
-    @pytest.fixture(autouse=True)
-    def setup_main_guild_id(self):
-        """注入 main_guild_id 到 banner 模块。"""
-        import api.v1.routers.banner as banner_mod
+    def _parse(self, link: str, main_guild_id: int = 1134557553011998840):
+        from shared.thread_link_parser import ThreadLinkParser
 
-        self._old_main_guild_id = banner_mod.main_guild_id
-        banner_mod.main_guild_id = 1134557553011998840
-        yield
-        banner_mod.main_guild_id = self._old_main_guild_id
-
-    def _parse(self, link: str):
-        from api.v1.routers.banner import parse_thread_link
-
-        return parse_thread_link(link)
+        return ThreadLinkParser.parse_thread_link(link, main_guild_id)
 
     def test_full_url(self):
         """完整 Discord URL 解析。"""
@@ -150,13 +140,7 @@ class TestParseThreadLink:
 
     def test_no_main_guild_id(self):
         """未配置 main_guild_id 时纯数字 ID 返回 None。"""
-        import api.v1.routers.banner as banner_mod
-
-        banner_mod.main_guild_id = 0
-        try:
-            assert self._parse("1234567890123456789") is None
-        finally:
-            banner_mod.main_guild_id = 1134557553011998840
+        assert self._parse("1234567890123456789", main_guild_id=0) is None
 
 
 class TestBannerApplicationRequest:

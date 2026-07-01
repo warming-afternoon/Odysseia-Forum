@@ -5,6 +5,7 @@ from models.channel import Channel
 from models.banner_waitlist import BannerWaitlist
 from models.booklist import Booklist
 from models.booklist_item import BooklistItem
+from models.booklist_publish import BooklistPublish
 from models.bot_config import BotConfig
 from models.mutex_tag_group import MutexTagGroup
 from models.mutex_tag_rule import MutexTagRule
@@ -35,5 +36,6 @@ __all__ = [
     "UserCollection",
     "Booklist",
     "BooklistItem",
+    "BooklistPublish",
     "Channel",
 ]

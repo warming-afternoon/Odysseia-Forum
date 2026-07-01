@@ -25,40 +25,15 @@ from models.thread import Thread
 from models.channel import Channel
 from shared.enum import TargetType
 from shared.redis_client import RedisManager
+from shared.thread_link_parser import ThreadLinkParser
 
 logger = logging.getLogger(__name__)
-
-DISCORD_LINK_RE = re.compile(
-    r"^https?://(?:.*\.)?discord\.com/channels/(\d{17,20})/(\d{17,20})/?$"
-)
 
 # 全局变量，将在应用启动时注入
 async_session_factory: async_sessionmaker | None = None
 banner_config: dict | None = None
 main_guild_id: int = 0
 bot_token: str = ""
-
-
-def parse_thread_link(link: str) -> tuple[int, int] | None:
-    """解析 thread_link，返回 (guild_id, target_id) 或 None。
-
-    支持 Discord 链接和纯数字 ID。
-    纯数字 ID 时使用 main_guild_id 拼接。
-    """
-    link = link.strip()
-
-    # Discord URL 解析
-    m = DISCORD_LINK_RE.match(link)
-    if m:
-        return int(m.group(1)), int(m.group(2))
-
-    # 纯数字 ID
-    if link.isdigit():
-        if main_guild_id:
-            return main_guild_id, int(link)
-        return None
-
-    return None
 
 
 _EXCLUDE_KEYWORD_SPLIT_RE = re.compile(r"[,，/\\\s]+")
@@ -149,7 +124,7 @@ async def apply_banner(
         )
 
     # 解析链接
-    parsed = parse_thread_link(request.thread_link)
+    parsed = ThreadLinkParser.parse_thread_link(request.thread_link, main_guild_id)
     if parsed is None:
         return BannerApplicationResponse(
             success=False,

@@ -18,6 +18,7 @@ import uvicorn
 
 from shared.database import AsyncSessionFactory, init_db, close_db
 from shared.redis_client import RedisManager
+import booklist.booklist_service as booklist_service_module
 from core.api_cache_service import ApiCacheService
 from core.impression_cache_service import ImpressionCacheService
 from core.tag_cache_service import TagCacheService
@@ -83,6 +84,14 @@ def _inject_api_dependencies(
     discovery_api.channel_mappings_config = channel_mappings_config
     booklists_api.channel_mappings_config = channel_mappings_config
     follows_api.channel_mappings_config = channel_mappings_config
+
+    # 注入书单发布配置
+    publish_cfg = config.get("integration", {}).get("booklist_publish", {})
+    booklists_api._booklist_publish_base_url = publish_cfg.get("base_url", "")
+    booklists_api._booklist_publish_api_key = publish_cfg.get("api_key", "")
+
+    booklist_service_module._booklist_publish_base_url = publish_cfg.get("base_url", "")
+    booklist_service_module._booklist_publish_api_key = publish_cfg.get("api_key", "")
 
     raw_abyss = config.get("abyss", {}) if isinstance(config, dict) else {}
     abyss_config = {
