@@ -12,16 +12,30 @@ class AuditorService:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_all_thread_ids(self) -> list[int]:
+    async def get_thread_ids_batch(
+        self, cursor: int, batch_size: int
+    ) -> list[tuple[int, int]]:
         """
-        从数据库中获取所有已索引帖子的 ID。
+        使用 keyset 分页，从数据库中获取一批帖子的 (id, thread_id)。
+
+        以自增主键 ``id`` 作为游标，保证严格单调递增，
+        新插入的行永远在游标前方，不会遗漏。
+
+        Args:
+            cursor: 上一批最后一个 id（起始传 0）。
+            batch_size: 本批最多返回的行数。
 
         Returns:
-            一个包含所有帖子 ID 的列表。
+            [(id, thread_id), ...] 列表，按 id 升序排列。
         """
-        stmt = select(Thread.thread_id)  # type: ignore
+        stmt = (
+            select(Thread.id, Thread.thread_id)  # type: ignore
+            .where(Thread.id > cursor)  # type: ignore
+            .order_by(Thread.id)
+            .limit(batch_size)
+        )
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        return list(result.all())  # type: ignore[return-value]
 
     async def delete_stale_threads(self, threshold: int) -> int:
         """
