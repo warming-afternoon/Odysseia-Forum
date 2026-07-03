@@ -27,6 +27,7 @@ from core.tag_cache_service import TagCacheService
 from core.cache_service import CacheService
 from core.sync_service import SyncService
 from core.impression_cache_service import ImpressionCacheService
+from core.discord_parser_patch import install_uncached_thread_members_patch
 from indexer.cog import Indexer
 from search.cog import Search
 from preferences.cog import Preferences
@@ -55,11 +56,11 @@ class MyBot(commands.Bot):
             "intents": intents,
             "max_messages": 0,
             "chunk_guilds_at_startup": False,
-            "enable_debug_events": True,
         }
         if proxy:
             bot_kwargs["proxy"] = proxy
         super().__init__(**bot_kwargs)
+        install_uncached_thread_members_patch(self)
 
         self.config = config
         self.tag_cache_service: TagCacheService

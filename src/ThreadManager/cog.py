@@ -2,7 +2,6 @@
 
 import asyncio
 import datetime
-import json
 from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands
@@ -158,57 +157,6 @@ class ThreadManager(commands.Cog):
             await self.inactive_follow_buffer.add(
                 thread_id=thread_id, user_id=user_id
             )
-
-    @commands.Cog.listener()
-    async def on_socket_raw_receive(self, msg: str):
-        """拦截因帖子缓存缺失被 discord.py 丢弃的 THREAD_MEMBERS_UPDATE 事件。
-
-        当帖子被归档后，discord.py 会将帖子从 guild._threads 缓存中移除。
-        此后 THREAD_MEMBERS_UPDATE 会被 parse_thread_members_update 直接丢弃，
-        不派发 raw_thread_member_remove。此 handler 在 JSON 解析前进行快速字符串过滤。
-        """
-        if "THREAD_MEMBERS_UPDATE" not in msg:
-            return
-
-        try:
-            data = json.loads(msg)
-            if data.get("t") != "THREAD_MEMBERS_UPDATE":
-                return
-
-            d = data.get("d", {})
-            removed_ids = d.get("removed_member_ids", [])
-            if not removed_ids:
-                return
-
-            guild_id = int(d["guild_id"])
-            thread_id = int(d["id"])
-
-            guild = self.bot.get_guild(guild_id)
-            if not guild:
-                return
-
-            # 帖子在缓存中 → discord.py 会正常派发 raw_thread_member_remove，不重复处理
-            if guild.get_thread(thread_id) is not None:
-                return
-
-            # 帖子不在缓存 → 从 DB 获取 parent_id
-            async with self.session_factory() as session:
-                repo = ThreadRepository(session)
-                channel_id = await repo.get_thread_channel_id(thread_id)
-            if channel_id is None:
-                return
-            if not self.is_channel_indexed(channel_id):
-                return
-
-            removed_member_ids = [int(uid) for uid in removed_ids]
-            await self._process_removed_members(
-                thread_id=thread_id,
-                parent_id=channel_id,
-                guild=guild,
-                removed_member_ids=removed_member_ids,
-            )
-        except Exception:
-            pass  # 不阻塞网关事件循环
 
     @commands.Cog.listener()
     async def on_raw_thread_member_remove(self, payload: discord.RawThreadMembersUpdate):
