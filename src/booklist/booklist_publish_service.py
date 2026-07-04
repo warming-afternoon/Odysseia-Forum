@@ -1,4 +1,4 @@
-import asyncio
+﻿import asyncio
 import logging
 from datetime import datetime
 
@@ -245,7 +245,7 @@ class BooklistPublishService:
             "items": [
                 {
                     "title": item.title,
-                    "url": f"https://discord.com/channels/{item.guild_id}/{item.channel_id}/{item.thread_id}",
+                    "url": f"https://discord.com/channels/{item.guild_id}/{item.thread_id}",
                     "review": item.comment or "",
                 }
                 for item in items
