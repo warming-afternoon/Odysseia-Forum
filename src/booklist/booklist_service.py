@@ -12,6 +12,7 @@ from core.booklist_repository import BooklistRepository
 from core.redis_trend_service import RedisTrendService
 from core.thread_repository import ThreadRepository
 from dto.booklist_item_dto import BooklistItemDTO
+from dto.booklist_items_sync_dto import BooklistItemsSyncDTO
 from models import Booklist, BooklistItem, Thread
 from shared.enum import ConstantEnum
 
@@ -171,17 +172,15 @@ class BooklistService:
         thread_id: int,
         scope_booklist_ids: List[int],
         target_booklist_ids: List[int],
+        comment: str | None = None,
     ):
         """
         批量同步一个帖子在用户多个书单中的存在性。
 
         - scope_booklist_ids：操作范围（必须全属于当前用户）
         - target_booklist_ids：操作后应包含该帖子的书单（必须是 scope 的子集）
+        - comment：应用于目标书单项的推荐语
         """
-        from api.v1.schemas.booklist.booklist_items_sync_response import (
-            BooklistItemsSyncResponse,
-        )
-
         # 1. 校验 scope 不能为空
         if not scope_booklist_ids:
             raise HTTPException(
@@ -241,11 +240,18 @@ class BooklistService:
         removed_ids = []
         if add_to:
             added_ids = await self.booklist_repo.add_thread_to_booklists(
-                thread_id, add_to, user_id
+                thread_id, add_to, user_id, comment
             )
         if remove_from:
             removed_ids = await self.booklist_repo.remove_thread_from_booklists(
                 thread_id, remove_from
+            )
+
+        # 已有目标项需要单独同步推荐语，新增项已在插入时写入
+        existing_target_ids = target_set & existing_set
+        if comment is not None and existing_target_ids:
+            await self.booklist_repo.update_thread_comment_in_booklists(
+                thread_id, list(existing_target_ids), comment
             )
 
         # 7. 跨域同步 Thread.collection_count（净增减）
@@ -279,7 +285,7 @@ class BooklistService:
             # 用户完全取消收藏此帖
             await self.thread_repo.update_collection_counts([thread_id], -1)
 
-        return BooklistItemsSyncResponse(
+        return BooklistItemsSyncDTO(
             thread_id=thread_id,
             added_to_booklist_ids=added_ids,
             removed_from_booklist_ids=removed_ids,

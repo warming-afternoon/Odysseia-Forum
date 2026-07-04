@@ -3,8 +3,8 @@ from typing import List
 from pydantic import BaseModel, Field
 
 
-class BooklistItemsSyncResponse(BaseModel):
-    """批量同步结果"""
+class BooklistItemsSyncDTO(BaseModel):
+    """批量同步书单项的结果。"""
 
     thread_id: int = Field(description="帖子ID")
     added_to_booklist_ids: List[int] = Field(

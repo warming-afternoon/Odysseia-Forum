@@ -420,7 +420,11 @@ class BooklistRepository:
         return deleted_count
 
     async def add_thread_to_booklists(
-        self, thread_id: int, booklist_ids: List[int], owner_id: int
+        self,
+        thread_id: int,
+        booklist_ids: List[int],
+        owner_id: int,
+        comment: Optional[str] = None,
     ) -> List[int]:
         """
         将一个帖子批量添加到多个书单。
@@ -450,6 +454,7 @@ class BooklistRepository:
                 "thread_id": thread_id,
                 "owner_id": owner_id,
                 "display_order": max_orders.get(bid, 0) + 1,
+                "comment": comment,
             }
             for bid in booklist_ids
         ]
@@ -516,6 +521,26 @@ class BooklistRepository:
 
         await self.session.commit()
         return list(set(removed_ids))
+
+    async def update_thread_comment_in_booklists(
+        self, thread_id: int, booklist_ids: List[int], comment: str
+    ) -> None:
+        """批量更新一个帖子在多个书单中的推荐语。"""
+        if not booklist_ids:
+            return
+
+        statement = (
+            update(BooklistItem)
+            .where(
+                and_(
+                    BooklistItem.thread_id == thread_id,  # type: ignore
+                    BooklistItem.booklist_id.in_(booklist_ids),  # type: ignore
+                )
+            )
+            .values(comment=comment)
+        )
+        await self.session.execute(statement)
+        await self.session.commit()
 
     async def get_threads_in_users_booklists(
         self, owner_id: int, thread_ids: List[int]

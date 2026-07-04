@@ -4,7 +4,7 @@ from typing import AsyncGenerator
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
-from sqlmodel import delete
+from sqlmodel import delete, select
 
 from models import Booklist
 from models import BooklistItem
@@ -514,7 +514,10 @@ async def test_add_thread_to_booklists(seeded_db_session: AsyncSession):
 
     # 批量添加到三个书单
     added = await service.add_thread_to_booklists(
-        thread_id=1001, booklist_ids=[bid1, bid2, bid3], owner_id=100
+        thread_id=1001,
+        booklist_ids=[bid1, bid2, bid3],
+        owner_id=100,
+        comment="批量推荐语",
     )
     assert sorted(added) == sorted([bid1, bid3])  # bid2 已存在，跳过
 
@@ -526,6 +529,15 @@ async def test_add_thread_to_booklists(seeded_db_session: AsyncSession):
     assert bl1.item_count == 1
     assert bl2.item_count == 1  # 未变（已存在的未重复插入）
     assert bl3.item_count == 1
+
+    # 新增书单项在插入时直接写入推荐语
+    statement = select(BooklistItem).where(
+        BooklistItem.thread_id == 1001,
+        BooklistItem.booklist_id.in_([bid1, bid3]),
+    )
+    items = (await seeded_db_session.execute(statement)).scalars().all()
+    assert len(items) == 2
+    assert all(item.comment == "批量推荐语" for item in items)
 
 
 @pytest.mark.asyncio
@@ -648,6 +660,39 @@ async def test_sync_thread_in_booklists_pure_add(seeded_db_session: AsyncSession
     assert sorted(result.added_to_booklist_ids) == sorted([ids[0], ids[2]])
     assert result.removed_from_booklist_ids == []
     assert sorted(result.unchanged_booklist_ids) == sorted([ids[1]])
+
+
+@pytest.mark.asyncio
+async def test_sync_thread_in_booklists_updates_comment(
+    seeded_db_session: AsyncSession,
+):
+    """同步推荐语应同时覆盖新增项和已有项。"""
+    repository = BooklistRepository(seeded_db_session)
+    existing_booklist = await repository.create_booklist(owner_id=450, title="已有")
+    new_booklist = await repository.create_booklist(owner_id=450, title="新增")
+    assert existing_booklist.id is not None
+    assert new_booklist.id is not None
+    await repository.add_threads_to_booklist(
+        existing_booklist.id,
+        items=[BooklistItemAddData(thread_id=1001, comment="旧推荐语")],
+    )
+
+    service = BooklistService(seeded_db_session)
+    await service.sync_thread_in_booklists(
+        user_id=450,
+        thread_id=1001,
+        scope_booklist_ids=[existing_booklist.id, new_booklist.id],
+        target_booklist_ids=[existing_booklist.id, new_booklist.id],
+        comment="新推荐语",
+    )
+
+    for booklist_id in [existing_booklist.id, new_booklist.id]:
+        statement = select(BooklistItem).where(
+            BooklistItem.booklist_id == booklist_id,
+            BooklistItem.thread_id == 1001,
+        )
+        item = (await seeded_db_session.execute(statement)).scalar_one()
+        assert item.comment == "新推荐语"
 
 
 @pytest.mark.asyncio

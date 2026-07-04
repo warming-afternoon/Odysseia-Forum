@@ -20,7 +20,6 @@ from api.v1.schemas.booklist import (
     BooklistItemsAddRequest,
     BooklistItemsDeleteRequest,
     BooklistItemsSyncRequest,
-    BooklistItemsSyncResponse,
     BooklistItemUpdateRequest,
     BooklistPublishInfo,
     BooklistPublishRequest,
@@ -35,6 +34,7 @@ from core.booklist_item_repository import BooklistItemRepository
 from core.booklist_publish_repository import BooklistPublishRepository
 from core.booklist_repository import BooklistRepository
 from core.collection_repository import CollectionRepository
+from dto.booklist_items_sync_dto import BooklistItemsSyncDTO
 from models import Author, BooklistItem
 from shared.database import AsyncSessionFactory
 from shared.keyword_parser import parse_search_keywords
@@ -933,7 +933,7 @@ async def remove_threads_from_booklist(
 @router.post(
     "/item/sync",
     summary="批量修改帖子在多个书单中的存在性",
-    response_model=BooklistItemsSyncResponse,
+    response_model=BooklistItemsSyncDTO,
 )
 async def sync_thread_in_booklists(
     request: BooklistItemsSyncRequest,
@@ -945,6 +945,7 @@ async def sync_thread_in_booklists(
     - **thread_id**: 帖子ID
     - **scope_booklist_ids**: 操作范围（必须全是当前用户拥有的书单）
     - **target_booklist_ids**: 操作后应包含该帖子的书单（必须是 scope 的子集）
+    - **comment**: 应用于目标书单项的推荐语（可选）
     """
     try:
         user_id = int(current_user["id"])
@@ -955,6 +956,7 @@ async def sync_thread_in_booklists(
                 thread_id=request.thread_id,
                 scope_booklist_ids=request.scope_booklist_ids,
                 target_booklist_ids=request.target_booklist_ids,
+                comment=request.comment,
             )
         return result
 

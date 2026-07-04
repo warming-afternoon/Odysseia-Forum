@@ -15,9 +15,6 @@ from api.v1.schemas.booklist.booklist_items_delete_request import (
 from api.v1.schemas.booklist.booklist_items_sync_request import (
     BooklistItemsSyncRequest,
 )
-from api.v1.schemas.booklist.booklist_items_sync_response import (
-    BooklistItemsSyncResponse,
-)
 from api.v1.schemas.booklist.booklist_summary import BooklistSummary
 from api.v1.schemas.booklist.booklist_update_response import BooklistUpdateResponse
 
@@ -35,5 +32,4 @@ __all__ = [
     "BooklistItemsAddRequest",
     "BooklistItemsDeleteRequest",
     "BooklistItemsSyncRequest",
-    "BooklistItemsSyncResponse",
 ]

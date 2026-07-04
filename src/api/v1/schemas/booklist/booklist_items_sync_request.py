@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -11,3 +11,4 @@ class BooklistItemsSyncRequest(BaseModel):
     target_booklist_ids: List[int] = Field(
         description="修改后应包含该帖子的书单ID列表（必须是 scope 的子集）"
     )
+    comment: Optional[str] = Field(default=None, description="推荐语/备注")
