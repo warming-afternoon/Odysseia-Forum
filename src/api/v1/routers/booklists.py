@@ -712,11 +712,23 @@ async def delete_booklist(
                     status_code=status.HTTP_403_FORBIDDEN, detail="无权删除此书单"
                 )
 
+            # 删除前保存是否存在发布记录，供本地提交后通知外部服务。
+            publish_repo = BooklistPublishRepository(session)
+            publish_record = await publish_repo.get_by_booklist(booklist_id)
             success = await service.delete_booklist(booklist_id)
             if not success:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND, detail="书单不存在"
                 )
+
+            # 仅已发布书单需要清理其在所有帖子中的外部消息。
+            if publish_record:
+                publish_service = BooklistPublishService(
+                    session,
+                    base_url=_booklist_publish_base_url,
+                    api_key=_booklist_publish_api_key,
+                )
+                publish_service.schedule_unpublish(booklist_id)
 
         return {"message": "书单删除成功"}
 

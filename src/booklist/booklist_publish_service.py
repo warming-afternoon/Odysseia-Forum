@@ -10,13 +10,10 @@ from core.booklist_publish_repository import BooklistPublishRepository
 from core.booklist_repository import BooklistRepository
 from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
 from shared.database import AsyncSessionFactory
+from shared.enum.booklist_publish_api_path import BooklistPublishApiPath
 from shared.enum.booklist_publish_status import BooklistPublishStatus
 
 logger = logging.getLogger(__name__)
-
-# API 路径常量
-BOOKLIST_PUBLISH_PATH = "/booklist/publish"
-
 
 class BooklistPublishService:
     """书单发布业务逻辑服务层，负责协调发布记录与书单发布 BOT API 调用"""
@@ -35,7 +32,11 @@ class BooklistPublishService:
 
     @property
     def _publish_url(self) -> str:
-        return f"{self.base_url}{BOOKLIST_PUBLISH_PATH}"
+        return f"{self.base_url}{BooklistPublishApiPath.PUBLISH.value}"
+
+    @property
+    def _unpublish_url(self) -> str:
+        return f"{self.base_url}{BooklistPublishApiPath.UNPUBLISH.value}"
 
     def _ensure_configured(self) -> None:
         """若 base_url 未配置则抛出异常"""
@@ -85,11 +86,36 @@ class BooklistPublishService:
         )
 
     async def unpublish(self, booklist_id: int) -> None:
-        """取消发布：删除所有发布记录，设置 publish_status = NONE"""
+        """取消发布：完成本地处理后异步通知书单发布服务。"""
+        # 删除前保存发布目标，避免提交后无法构造外部请求。
+        record = await self.publish_repo.get_by_booklist(booklist_id)
+        thread_url = None
+        if record:
+            thread_url = (
+                f"https://discord.com/channels/{record.guild_id}/{record.thread_id}"
+            )
+
         await self.publish_repo.delete_by_booklist(booklist_id)
         await self.booklist_repo.set_publish_status(
             booklist_id, BooklistPublishStatus.NONE.value
         )
+
+        # 未发布的书单无需通知外部服务。
+        if record:
+            self.schedule_unpublish(booklist_id, thread_url)
+
+    def schedule_unpublish(
+        self, booklist_id: int, thread_url: str | None = None
+    ) -> None:
+        """创建外部取消发布后台任务，不阻塞本地主流程。"""
+        if not self.base_url:
+            logger.warning(
+                "书单 %d 已完成本地取消发布，但书单发布服务未配置",
+                booklist_id,
+            )
+            return
+
+        asyncio.create_task(self._do_call_unpublish_api(booklist_id, thread_url))
 
     async def sync_published_booklist(self, booklist_id: int) -> None:
         """
@@ -209,6 +235,38 @@ class BooklistPublishService:
                 logger.error(
                     "更新书单 %d 发布失败状态时出错", booklist_id, exc_info=True
                 )
+
+    async def _do_call_unpublish_api(
+        self, booklist_id: int, thread_url: str | None = None
+    ) -> None:
+        """后台调用取消发布 API，失败仅记录日志。"""
+        payload: dict[str, int | str] = {"booklist_id": booklist_id}
+        if thread_url is not None:
+            payload["thread_url"] = thread_url
+
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.post(
+                    self._unpublish_url,
+                    json=payload,
+                    headers={"X-API-Key": self.api_key},
+                    timeout=30.0,
+                )
+                resp.raise_for_status()
+                result = resp.json()
+
+            logger.info(
+                "书单 %d 外部取消发布完成: requested=%s, deleted=%s",
+                booklist_id,
+                result.get("requested"),
+                result.get("deleted"),
+            )
+        except Exception:
+            logger.warning(
+                "书单 %d 调用取消发布 API 失败",
+                booklist_id,
+                exc_info=True,
+            )
 
     async def _build_payload(
         self,

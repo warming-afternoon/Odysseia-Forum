@@ -12,6 +12,7 @@ from shared.enum.search_config_type import (
 from shared.enum.cache_keys import CacheKeys
 from shared.enum.search_timeout import SearchTimeout
 from shared.enum.rate_limit_defaults import RateLimitDefaults
+from shared.enum.booklist_publish_api_path import BooklistPublishApiPath
 
 __all__ = [
     "CacheKeys",
@@ -26,4 +27,5 @@ __all__ = [
     "SearchTimeout",
     "TargetType",
     "RateLimitDefaults",
+    "BooklistPublishApiPath",
 ]

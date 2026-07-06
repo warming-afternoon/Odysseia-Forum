@@ -1,14 +1,20 @@
 """书单发布功能测试"""
 
+import json
+from contextlib import asynccontextmanager
+from typing import AsyncGenerator
+from unittest.mock import AsyncMock, MagicMock
+
+import httpx
 import pytest
 import pytest_asyncio
-from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import delete
 
 from models import Author, Booklist, BooklistItem, BooklistPublish, Thread
+from api.v1.routers import booklists as booklists_router
 from core.booklist_publish_repository import BooklistPublishRepository
 from core.booklist_repository import BooklistRepository
 from booklist.booklist_publish_service import BooklistPublishService
@@ -268,6 +274,100 @@ async def test_delete_booklist_cascades_publish_records(seeded_session: AsyncSes
     assert await publish_repo.is_published(bl.id) is False
 
 
+@pytest.mark.asyncio
+async def test_delete_published_booklist_schedules_global_unpublish(
+    seeded_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """测试删除已发布书单后创建不带帖子地址的外部任务。"""
+    booklist_repo = BooklistRepository(seeded_session)
+    publish_repo = BooklistPublishRepository(seeded_session)
+    booklist = await booklist_repo.create_booklist(owner_id=123, title="Published")
+    assert booklist.id is not None
+    await publish_repo.upsert(booklist.id, 100, 200, 999)
+
+    @asynccontextmanager
+    async def session_factory():
+        yield seeded_session
+
+    schedule_unpublish = MagicMock()
+    monkeypatch.setattr(booklists_router, "AsyncSessionFactory", session_factory)
+    monkeypatch.setattr(
+        BooklistPublishService, "schedule_unpublish", schedule_unpublish
+    )
+
+    result = await booklists_router.delete_booklist(
+        booklist.id, current_user={"id": "123"}
+    )
+
+    assert result == {"message": "书单删除成功"}
+    schedule_unpublish.assert_called_once_with(booklist.id)
+
+
+@pytest.mark.asyncio
+async def test_delete_unpublished_booklist_skips_external_call(
+    seeded_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """测试删除未发布书单时不创建外部任务。"""
+    booklist_repo = BooklistRepository(seeded_session)
+    booklist = await booklist_repo.create_booklist(owner_id=123, title="Unpublished")
+    assert booklist.id is not None
+
+    @asynccontextmanager
+    async def session_factory():
+        yield seeded_session
+
+    schedule_unpublish = MagicMock()
+    monkeypatch.setattr(booklists_router, "AsyncSessionFactory", session_factory)
+    monkeypatch.setattr(
+        BooklistPublishService, "schedule_unpublish", schedule_unpublish
+    )
+
+    result = await booklists_router.delete_booklist(
+        booklist.id, current_user={"id": "123"}
+    )
+
+    assert result == {"message": "书单删除成功"}
+    schedule_unpublish.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_booklist_failure_skips_external_call(
+    seeded_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """测试本地删除失败时不创建外部任务。"""
+    booklist_repo = BooklistRepository(seeded_session)
+    publish_repo = BooklistPublishRepository(seeded_session)
+    booklist = await booklist_repo.create_booklist(owner_id=123, title="Failure")
+    assert booklist.id is not None
+    await publish_repo.upsert(booklist.id, 100, 200, 999)
+
+    @asynccontextmanager
+    async def session_factory():
+        yield seeded_session
+
+    schedule_unpublish = MagicMock()
+    monkeypatch.setattr(booklists_router, "AsyncSessionFactory", session_factory)
+    monkeypatch.setattr(
+        BooklistRepository,
+        "delete_booklist",
+        AsyncMock(return_value=False),
+    )
+    monkeypatch.setattr(
+        BooklistPublishService, "schedule_unpublish", schedule_unpublish
+    )
+
+    with pytest.raises(booklists_router.HTTPException) as exc_info:
+        await booklists_router.delete_booklist(
+            booklist.id, current_user={"id": "123"}
+        )
+
+    assert exc_info.value.status_code == 404
+    schedule_unpublish.assert_not_called()
+
+
 # ============================================================
 # BooklistPublishService 测试
 # ============================================================
@@ -434,15 +534,27 @@ async def test_same_target_stale_callback_cannot_overwrite_latest_request(
 
 
 @pytest.mark.asyncio
-async def test_unpublish_sets_none_status(seeded_session: AsyncSession, booklist: Booklist):
-    """测试 unpublish 删除记录并将状态重置为 NONE"""
+async def test_unpublish_sets_none_status_and_schedules_external_call(
+    seeded_session: AsyncSession,
+    booklist: Booklist,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """测试 unpublish 完成本地处理后按发布目标创建外部任务。"""
     assert booklist.id is not None
     svc = BooklistPublishService(
         seeded_session,
         base_url="http://127.0.0.1:10820",
         api_key="test-key",
     )
-    await svc.publish(booklist.id, guild_id=100, thread_id=200, discord_user_id=999)
+    await svc.publish_repo.upsert(
+        booklist.id, guild_id=100, thread_id=200, discord_user_id=999
+    )
+    await svc.booklist_repo.set_publish_status(
+        booklist.id, BooklistPublishStatus.SUCCESS.value
+    )
+    schedule_unpublish = MagicMock()
+    monkeypatch.setattr(svc, "schedule_unpublish", schedule_unpublish)
+
     await svc.unpublish(booklist.id)
 
     await seeded_session.refresh(booklist)
@@ -450,6 +562,97 @@ async def test_unpublish_sets_none_status(seeded_session: AsyncSession, booklist
 
     repo = BooklistPublishRepository(seeded_session)
     assert await repo.is_published(booklist.id) is False
+    schedule_unpublish.assert_called_once_with(
+        booklist.id,
+        "https://discord.com/channels/100/200",
+    )
+
+
+@pytest.mark.asyncio
+async def test_unpublish_without_record_does_not_schedule_external_call(
+    seeded_session: AsyncSession,
+    booklist: Booklist,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """测试未发布书单仅完成本地处理，不创建外部任务。"""
+    assert booklist.id is not None
+    svc = BooklistPublishService(seeded_session, base_url="http://publisher")
+    schedule_unpublish = MagicMock()
+    monkeypatch.setattr(svc, "schedule_unpublish", schedule_unpublish)
+
+    await svc.unpublish(booklist.id)
+
+    schedule_unpublish.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("thread_url", "expected_payload"),
+    [
+        (
+            "https://discord.com/channels/100/200",
+            {
+                "booklist_id": 1,
+                "thread_url": "https://discord.com/channels/100/200",
+            },
+        ),
+        (None, {"booklist_id": 1}),
+    ],
+)
+async def test_external_unpublish_request_payload(
+    seeded_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    thread_url: str | None,
+    expected_payload: dict,
+):
+    """测试外部取消发布请求的地址、鉴权和可选帖子地址。"""
+    captured_request: httpx.Request | None = None
+
+    def handle_request(request: httpx.Request) -> httpx.Response:
+        nonlocal captured_request
+        captured_request = request
+        return httpx.Response(200, json={"ok": True, "requested": 1, "deleted": 1})
+
+    transport = httpx.MockTransport(handle_request)
+    async_client_type = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda: async_client_type(transport=transport),
+    )
+    svc = BooklistPublishService(
+        seeded_session, base_url="http://publisher", api_key="test-key"
+    )
+
+    await svc._do_call_unpublish_api(1, thread_url)
+
+    assert captured_request is not None
+    assert captured_request.url == "http://publisher/booklist/unpublish"
+    assert captured_request.headers["X-API-Key"] == "test-key"
+    assert json.loads(captured_request.content) == expected_payload
+
+
+@pytest.mark.asyncio
+async def test_external_unpublish_failure_is_swallowed(
+    seeded_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    """测试外部取消发布失败不会向主流程抛出异常。"""
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(503, json={"error": "bot not ready"})
+    )
+    async_client_type = httpx.AsyncClient
+    monkeypatch.setattr(
+        httpx,
+        "AsyncClient",
+        lambda: async_client_type(transport=transport),
+    )
+    svc = BooklistPublishService(seeded_session, base_url="http://publisher")
+
+    await svc._do_call_unpublish_api(1)
+
+    assert "调用取消发布 API 失败" in caplog.text
 
 
 @pytest.mark.asyncio
