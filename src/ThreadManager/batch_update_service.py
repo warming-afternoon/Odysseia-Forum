@@ -151,7 +151,7 @@ class BatchUpdateService:
             )
 
             async with self.session_factory() as session:
-                stmt = select(Thread.thread_id).where(
+                stmt = select(Thread.thread_id, Thread.channel_id).where(
                     Thread.thread_id.in_(successful_ids),  # type: ignore
                     Thread.created_at >= threshold,
                 )
@@ -160,14 +160,21 @@ class BatchUpdateService:
                         Thread.channel_id.notin_(self.ignore_channel_ids)  # type: ignore
                     )
                 valid_result = await session.execute(stmt)
-                valid_ids = set(valid_result.scalars().all())
+                valid_channel_by_thread = {
+                    int(thread_id): int(channel_id)
+                    for thread_id, channel_id in valid_result.all()
+                }
 
             # 将讨论数的增量同步至趋势服务 (redis) (仅针对有效ID)
             trend_service = RedisTrendService()
             for tid in successful_ids:
-                if tid in valid_ids and updates_to_process[tid]["increment"] > 0:
+                channel_id = valid_channel_by_thread.get(tid)
+                if channel_id and updates_to_process[tid]["increment"] > 0:
                     await trend_service.record_increment(
-                        "reply", tid, updates_to_process[tid]["increment"]
+                        "reply",
+                        tid,
+                        channel_id,
+                        count=updates_to_process[tid]["increment"],
                     )
 
             # 处理可能不存在于数据库里的数据

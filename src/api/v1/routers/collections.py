@@ -34,14 +34,26 @@ async def batch_add_collections(
 
         async with AsyncSessionFactory() as session:
             collection_service = CollectionRepository(session)
+            already_collected: set[int] = set()
+            if target_type == CollectionType.THREAD.value:
+                already_collected = (
+                    await collection_service.get_collected_target_ids(
+                        user_id, CollectionType.THREAD, target_ids
+                    )
+                )
             result = await collection_service.add_collections(
                 user_id, target_type, target_ids
             )
 
             # 如果收藏的是帖子，则更新其收藏计数
             if target_type == CollectionType.THREAD.value and result.added_count > 0:
+                net_new_ids = [
+                    target_id
+                    for target_id in result.added_ids
+                    if target_id not in already_collected
+                ]
                 thread_service = ThreadRepository(session)
-                await thread_service.update_collection_counts(result.added_ids, 1)
+                await thread_service.update_collection_counts(net_new_ids, 1)
 
             # 如果收藏的是书单，则更新其收藏计数
             if target_type == CollectionType.BOOKLIST.value and result.added_count > 0:

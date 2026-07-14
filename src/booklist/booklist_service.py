@@ -106,16 +106,18 @@ class BooklistService:
             threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
                 days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value
             )
-            stmt = select(Thread.thread_id).where(
+            stmt = select(Thread.thread_id, Thread.channel_id).where(
                 Thread.thread_id.in_(net_new_ids),  # type: ignore
                 Thread.created_at >= threshold,
             )
-            valid_ids = set((await self.session.execute(stmt)).scalars().all())
+            valid_threads = (await self.session.execute(stmt)).all()
 
-            if valid_ids:
+            if valid_threads:
                 trend_service = RedisTrendService()
-                for tid in valid_ids:
-                    await trend_service.record_increment("collection", tid, 1)
+                for tid, channel_id in valid_threads:
+                    await trend_service.record_increment(
+                        "collection", int(tid), int(channel_id), count=1
+                    )
 
         # 触发发布内容同步（异步后台，5 秒延迟）
         asyncio.create_task(_delayed_publish_sync(booklist_id))
@@ -230,6 +232,11 @@ class BooklistService:
         existing_rows = await self.session.execute(existing_stmt)
         existing_set = set(existing_rows.scalars().all())
 
+        # 记录操作前用户任意书单是否已收藏，避免局部 scope 导致重复计数趋势。
+        collected_before = await self.booklist_repo.get_threads_in_users_booklists(
+            user_id, [thread_id]
+        )
+
         # 5. 计算 add_to / remove_from / unchanged
         add_to = list(target_set - existing_set)
         remove_from = list(existing_set - target_set)
@@ -256,7 +263,7 @@ class BooklistService:
 
         # 7. 跨域同步 Thread.collection_count（净增减）
         # 查询操作前：thread 是否已在用户任何书单中
-        had_before = bool(existing_set)
+        had_before = bool(collected_before)
 
         # 查询操作后：thread 是否仍在用户任何书单中
         still_exists = await self.booklist_repo.get_threads_in_users_booklists(
@@ -272,14 +279,19 @@ class BooklistService:
             threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
                 days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value
             )
-            check_stmt = select(Thread.thread_id).where(
+            check_stmt = select(Thread.thread_id, Thread.channel_id).where(
                 Thread.thread_id == thread_id,  # type: ignore
                 Thread.created_at >= threshold,
             )
-            valid = (await self.session.execute(check_stmt)).scalar_one_or_none()
-            if valid:
+            valid_thread = (await self.session.execute(check_stmt)).one_or_none()
+            if valid_thread:
                 trend_service = RedisTrendService()
-                await trend_service.record_increment("collection", thread_id, 1)
+                await trend_service.record_increment(
+                    "collection",
+                    thread_id,
+                    int(valid_thread.channel_id),
+                    count=1,
+                )
 
         elif had_before and not has_after:
             # 用户完全取消收藏此帖

@@ -194,6 +194,162 @@ class TestGetLatestThreads:
         thread_ids = {t.thread_id for t in threads}
         assert thread_ids == {201}  # 只有 channel 2 的帖子
 
+    async def test_get_latest_with_explicit_channels(
+        self, seeded_discovery_session: AsyncSession
+    ):
+        """显式频道范围使用 OR 匹配并在数据库层生效。"""
+        repo = DiscoveryRepository(seeded_discovery_session)
+        threads = await repo.get_latest_threads(
+            limit=10,
+            offset=0,
+            prefs=None,
+            channel_ids=[2],
+        )
+        assert {thread.thread_id for thread in threads} == {201}
+
+    async def test_get_latest_with_empty_explicit_scope(
+        self, seeded_discovery_session: AsyncSession
+    ):
+        """显式空频道范围不能退化为全频道查询。"""
+        repo = DiscoveryRepository(seeded_discovery_session)
+        threads = await repo.get_latest_threads(
+            limit=10,
+            offset=0,
+            prefs=None,
+            channel_ids=[],
+        )
+        assert threads == []
+
+    async def test_get_ordered_threads_with_channel_filter(
+        self, seeded_discovery_session: AsyncSession
+    ):
+        """趋势详情频道过滤后继续保持 Redis 成员顺序。"""
+        repo = DiscoveryRepository(seeded_discovery_session)
+        threads = await repo.get_threads_by_ids_ordered(
+            [201, 104, 101],
+            prefs=None,
+            channel_ids=[1],
+        )
+        assert [thread.thread_id for thread in threads] == [104, 101]
+
+
+class TestDiscoveryChannelResolution:
+    """Rails 路由频道映射与偏好覆盖规则。"""
+
+    def test_resolve_parent_channel_and_ignored_channels(self, monkeypatch):
+        """目标频道展开来源频道后继续排除 discovery ignore 配置。"""
+        from api.v1.routers import discovery as discovery_router
+
+        class CacheStub:
+            """提供路由频道解析需要的最小缓存接口。"""
+
+            def get_indexed_channel_ids_list(self):
+                """返回测试中的全部索引频道。"""
+                return [10, 11, 12, 99]
+
+        monkeypatch.setattr(discovery_router, "cache_service_instance", CacheStub())
+        monkeypatch.setattr(
+            discovery_router,
+            "channel_mappings_config",
+            {10: [{"tag_name": "映射", "source_channel_ids": [11, 12]}]},
+        )
+        monkeypatch.setattr(discovery_router, "discovery_ignore_channel_ids", [12])
+
+        result = discovery_router._resolve_rails_channel_ids([10])
+
+        assert result == [10, 11]
+
+    def test_explicit_channels_override_only_channel_preference(self):
+        """显式频道覆盖 preferred_channels，但保留其他偏好。"""
+        from api.v1.routers import discovery as discovery_router
+        from dto.preferences.user_search_preferences_dto import (
+            UserSearchPreferencesDTO,
+        )
+
+        prefs = UserSearchPreferencesDTO(
+            user_id=1,
+            preferred_channels=[2],
+            exclude_authors=[9],
+            include_tags=["百合"],
+        )
+
+        result = discovery_router._override_preferred_channels(prefs, [1])
+
+        assert result is not prefs
+        assert result.preferred_channels is None
+        assert result.exclude_authors == [9]
+        assert result.include_tags == ["百合"]
+
+
+@pytest.mark.asyncio
+class TestDiscoveryServiceChannelSurge:
+    """频道趋势子榜的有限补偿和参数传递。"""
+
+    async def test_surge_retry_uses_channel_scope_and_rank_offsets(self):
+        """过滤不足时沿同一频道子榜补偿，且最多按批次向后读取。"""
+        from types import SimpleNamespace
+
+        from discovery.discovery_service import DiscoveryService
+
+        class TrendServiceStub:
+            """按 offset 返回可预测的趋势成员。"""
+
+            def __init__(self):
+                self.calls = []
+
+            async def get_top_surging_ids(
+                self,
+                metric,
+                days,
+                limit,
+                offset=0,
+                channel_ids=None,
+            ):
+                """记录调用并返回两批测试排名。"""
+                self.calls.append((metric, days, limit, offset, channel_ids))
+                if offset == 0:
+                    return [1, 2, 3, 4, 5, 6]
+                if offset == 6:
+                    return [7, 8]
+                return []
+
+        class RepositoryStub:
+            """模拟其他偏好过滤掉大部分第一批成员。"""
+
+            def __init__(self):
+                self.calls = []
+
+            async def get_threads_by_ids_ordered(
+                self, thread_ids, prefs, channel_ids=None
+            ):
+                """返回仍满足其他偏好的帖子并保持输入顺序。"""
+                self.calls.append((thread_ids, prefs, channel_ids))
+                allowed_ids = {3, 7, 8}
+                return [
+                    SimpleNamespace(thread_id=thread_id)
+                    for thread_id in thread_ids
+                    if thread_id in allowed_ids
+                ]
+
+        service = DiscoveryService(session=None)  # type: ignore[arg-type]
+        trend_service = TrendServiceStub()
+        repository = RepositoryStub()
+        service.trend_service = trend_service  # type: ignore[assignment]
+        service.repo = repository  # type: ignore[assignment]
+
+        result = await service._get_surge_threads_with_retry(
+            "reaction",
+            days=30,
+            limit=2,
+            prefs=None,
+            channel_ids=[10, 11],
+        )
+
+        assert [thread.thread_id for thread in result] == [3, 7]
+        assert [call[3] for call in trend_service.calls] == [0, 6]
+        assert all(call[4] == [10, 11] for call in trend_service.calls)
+        assert all(call[2] == [10, 11] for call in repository.calls)
+
 
 @pytest.mark.asyncio
 class TestGetRandomThreads:

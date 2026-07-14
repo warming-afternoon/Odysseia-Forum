@@ -19,10 +19,14 @@ class DiscoveryService:
         self.trend_service = RedisTrendService()
 
     async def _get_latest_threads_with_retry(
-        self, limit: int, prefs: Optional[UserSearchPreferencesDTO]
+        self,
+        limit: int,
+        prefs: Optional[UserSearchPreferencesDTO],
+        channel_ids: Optional[List[int]],
     ) -> List[Thread]:
         """获取最新轨道"""
         result_threads = []
+        result_thread_ids: set[int] = set()
         # 一次多查些去过滤
         batch_size = limit * 2
 
@@ -33,13 +37,16 @@ class DiscoveryService:
                 break
 
             offset = attempt * batch_size
-            threads = await self.repo.get_latest_threads(batch_size, offset, prefs)
+            threads = await self.repo.get_latest_threads(
+                batch_size, offset, prefs, channel_ids
+            )
             if not threads:
                 break  # 数据库这部分没有数据了
 
             for t in threads:
-                if t.thread_id not in [rt.thread_id for rt in result_threads]:
+                if t.thread_id not in result_thread_ids:
                     result_threads.append(t)
+                    result_thread_ids.add(t.thread_id)
                     if len(result_threads) >= limit:
                         break
 
@@ -55,9 +62,12 @@ class DiscoveryService:
         days: int,
         limit: int,
         prefs: Optional[UserSearchPreferencesDTO],
+        channel_ids: Optional[List[int]],
+        offset: int = 0,
     ) -> List[Thread]:
         """获取飙升轨道数据"""
         result_threads = []
+        result_thread_ids: set[int] = set()
         # 考虑到飙升轨道应用过滤后数据衰减可能更厉害，单次由Redis获取3倍数量
         batch_size = limit * 3
 
@@ -67,20 +77,27 @@ class DiscoveryService:
             if needed <= 0:
                 break
 
-            offset = attempt * batch_size
+            redis_offset = offset + attempt * batch_size
             # 带上 offset 去 Redis 请求排名继续顺延的下一段 ID
             ids = await self.trend_service.get_top_surging_ids(
-                metric, days, batch_size, offset
+                metric,
+                days,
+                batch_size,
+                redis_offset,
+                channel_ids=channel_ids,
             )
             if not ids:
                 break
 
-            threads = await self.repo.get_threads_by_ids_ordered(ids, prefs)
+            threads = await self.repo.get_threads_by_ids_ordered(
+                ids, prefs, channel_ids
+            )
 
             # 由于可能在 DB 层面因为 FTS、Tag 等过滤掉了部分，这里追加至数组（本身保持 Redis 里的顺序）
             for t in threads:
-                if t.thread_id not in [rt.thread_id for rt in result_threads]:
+                if t.thread_id not in result_thread_ids:
                     result_threads.append(t)
+                    result_thread_ids.add(t.thread_id)
                     if len(result_threads) >= limit:
                         break
 
@@ -91,21 +108,25 @@ class DiscoveryService:
         return result_threads[:limit]
 
     async def get_discovery_rails(
-        self, limit_per_rail: int, days: int, prefs: Optional[UserSearchPreferencesDTO]
+        self,
+        limit_per_rail: int,
+        days: int,
+        prefs: Optional[UserSearchPreferencesDTO],
+        channel_ids: Optional[List[int]] = None,
     ) -> Dict[str, List[Thread]]:
         """获取所有四条轨道数据，应用偏好并在数量不足时进行最多2次的补偿请求"""
 
         latest_threads = await self._get_latest_threads_with_retry(
-            limit_per_rail, prefs
+            limit_per_rail, prefs, channel_ids
         )
         reaction_threads = await self._get_surge_threads_with_retry(
-            "reaction", days, limit_per_rail, prefs
+            "reaction", days, limit_per_rail, prefs, channel_ids
         )
         discussion_threads = await self._get_surge_threads_with_retry(
-            "reply", days, limit_per_rail, prefs
+            "reply", days, limit_per_rail, prefs, channel_ids
         )
         collection_threads = await self._get_surge_threads_with_retry(
-            "collection", days, limit_per_rail, prefs
+            "collection", days, limit_per_rail, prefs, channel_ids
         )
 
         return {
@@ -122,10 +143,13 @@ class DiscoveryService:
         offset: int,
         days: int,
         prefs: Optional[UserSearchPreferencesDTO],
+        channel_ids: Optional[List[int]] = None,
     ) -> List[Thread]:
-        """获取单条轨道数据，支持 offset 分页（不做补偿重试）"""
+        """获取单条轨道数据，支持频道子榜 offset 分页和有限补偿。"""
         if rail_name == "latest":
-            return await self.repo.get_latest_threads(limit, offset, prefs)
+            return await self.repo.get_latest_threads(
+                limit, offset, prefs, channel_ids
+            )
 
         metric_map = {
             "reaction_surge": "reaction",
@@ -133,5 +157,11 @@ class DiscoveryService:
             "collection_surge": "collection",
         }
         metric = metric_map[rail_name]
-        ids = await self.trend_service.get_top_surging_ids(metric, days, limit, offset)
-        return await self.repo.get_threads_by_ids_ordered(ids, prefs)
+        return await self._get_surge_threads_with_retry(
+            metric,
+            days,
+            limit,
+            prefs,
+            channel_ids,
+            offset=offset,
+        )

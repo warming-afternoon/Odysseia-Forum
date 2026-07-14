@@ -79,12 +79,20 @@ class DiscoveryRepository:
         return stmt
 
     async def get_latest_threads(
-        self, limit: int, offset: int, prefs: Optional[UserSearchPreferencesDTO]
+        self,
+        limit: int,
+        offset: int,
+        prefs: Optional[UserSearchPreferencesDTO],
+        channel_ids: Optional[List[int]] = None,
     ) -> List[Thread]:
         """拉取最新的帖子列表"""
         stmt = select(Thread).where(
             Thread.not_found_count == 0, Thread.show_flag.is_(True)
         )  # type: ignore
+
+        # 显式频道范围为空时必须返回空结果，不能退化为全频道查询。
+        if channel_ids is not None:
+            stmt = stmt.where(Thread.channel_id.in_(channel_ids))  # type: ignore
 
         # 过滤广场推荐忽略频道
         if self.exclude_channel_ids:
@@ -100,7 +108,10 @@ class DiscoveryRepository:
         return list(result.scalars().unique().all())
 
     async def get_threads_by_ids_ordered(
-        self, thread_ids: List[int], prefs: Optional[UserSearchPreferencesDTO]
+        self,
+        thread_ids: List[int],
+        prefs: Optional[UserSearchPreferencesDTO],
+        channel_ids: Optional[List[int]] = None,
     ) -> List[Thread]:
         """拉取指定ID列表的帖子并依靠传入的列表保持顺序不变"""
         if not thread_ids:
@@ -111,6 +122,10 @@ class DiscoveryRepository:
             Thread.not_found_count == 0,
             Thread.show_flag.is_(True),  # type: ignore
         )
+
+        # 对迁移完成前的全局趋势回退和最终数据校验统一应用频道范围。
+        if channel_ids is not None:
+            stmt = stmt.where(Thread.channel_id.in_(channel_ids))  # type: ignore
 
         # 过滤广场推荐忽略频道
         if self.exclude_channel_ids:

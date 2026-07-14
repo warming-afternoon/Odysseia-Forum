@@ -308,7 +308,10 @@ class ThreadManager(commands.Cog):
                         )
                         if channel.parent_id not in discovery_ignore:
                             await RedisTrendService().record_increment(
-                                "reaction", channel.id, 1
+                                "reaction",
+                                channel.id,
+                                channel.parent_id,
+                                count=1,
                             )
 
                 await self.reaction_batch_service.add_update(channel.id)

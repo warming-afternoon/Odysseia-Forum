@@ -10,8 +10,8 @@ class ConstantEnum(IntEnum):
     MAX_SURGE_DAYS = 90
     """最大统计天数"""
 
-    TREND_CACHE_EXPIRE_SECONDS = 300
-    """趋势缓存过期时间（秒）"""
+    TREND_CACHE_EXPIRE_SECONDS = 600
+    """趋势缓存过期时间（秒）—— 10 分钟"""
 
     CHANNELS_CACHE_EXPIRE_SECONDS = 1800
     """频道元数据缓存过期时间（秒）—— 30 分钟"""

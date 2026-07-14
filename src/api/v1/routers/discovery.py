@@ -13,6 +13,7 @@ from core.collection_repository import CollectionRepository
 from core.preferences_repository import PreferencesRepository
 from core.thread_repository import ThreadRepository
 from discovery.discovery_service import DiscoveryService
+from dto.preferences.user_search_preferences_dto import UserSearchPreferencesDTO
 from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.enum import AbyssDefaults, CollectionType
 
@@ -33,10 +34,49 @@ router = APIRouter(
 )
 
 
+def _resolve_rails_channel_ids(
+    requested_channel_ids: Optional[List[int]],
+) -> Optional[List[int]]:
+    """解析 rails 请求频道映射，并优先移除广场忽略频道。"""
+    if requested_channel_ids is None:
+        return None
+    if not requested_channel_ids:
+        return []
+    if not cache_service_instance:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="频道缓存尚未初始化",
+        )
+
+    all_indexed_channels = cache_service_instance.get_indexed_channel_ids_list()
+    resolution = ChannelMappingUtils(channel_mappings_config).resolve(
+        channel_ids=requested_channel_ids,
+        include_tags=[],
+        exclude_tags=[],
+        tag_logic="or",
+        all_indexed_channels=all_indexed_channels,
+    )
+    ignored_channels = set(discovery_ignore_channel_ids)
+    return sorted(resolution.searched_ids - ignored_channels)
+
+
+def _override_preferred_channels(
+    prefs: Optional[UserSearchPreferencesDTO],
+    requested_channel_ids: Optional[List[int]],
+) -> Optional[UserSearchPreferencesDTO]:
+    """显式请求频道时仅关闭频道偏好，保留其他用户偏好。"""
+    if prefs and requested_channel_ids is not None:
+        return prefs.model_copy(update={"preferred_channels": None})
+    return prefs
+
+
 @router.get("/rails", response_model=DiscoveryRailsResponse, summary="获取广场轨道数据")
 async def get_discovery_rails(
     limit: int = Query(default=10, ge=1, le=50, description="每条轨道返回的数量"),
     days: int = Query(default=30, ge=1, le=90, description="统计时间跨度(天数)"),
+    channel_ids: Optional[List[int]] = Query(
+        default=None, description="频道筛选范围，可重复传入多个频道 ID"
+    ),
     apply_preferences: bool = Query(
         default=True, description="是否应用当前用户的过滤偏好"
     ),
@@ -50,18 +90,22 @@ async def get_discovery_rails(
 
     user_id = int(current_user["id"]) if current_user and "id" in current_user else None
     prefs = None
+    effective_channel_ids = _resolve_rails_channel_ids(channel_ids)
 
     # 获取用户偏好设置
     if apply_preferences and user_id:
         async with async_session_factory() as session:
             pref_repo = PreferencesRepository(session)
             prefs = await pref_repo.get_user_preferences(user_id, main_guild_id)
+            prefs = _override_preferred_channels(prefs, channel_ids)
 
     try:
         async with async_session_factory() as session:
             service = DiscoveryService(session, discovery_ignore_channel_ids)
             # 获取四条轨道的原始数据
-            rails_data = await service.get_discovery_rails(limit, days, prefs)
+            rails_data = await service.get_discovery_rails(
+                limit, days, prefs, effective_channel_ids
+            )
 
             # 汇总所有轨道中出现的帖子 ID 以便批量查询收藏状态
             all_threads = []
@@ -222,6 +266,9 @@ async def get_single_rail(
     limit: int = Query(default=10, ge=1, le=50, description="返回数量"),
     days: int = Query(default=30, ge=1, le=90, description="统计时间跨度(天数)"),
     offset: int = Query(default=0, ge=0, description="偏移量，用于分页"),
+    channel_ids: Optional[List[int]] = Query(
+        default=None, description="频道筛选范围，可重复传入多个频道 ID"
+    ),
     apply_preferences: bool = Query(
         default=True, description="是否应用当前用户的过滤偏好"
     ),
@@ -243,18 +290,25 @@ async def get_single_rail(
 
     user_id = int(current_user["id"]) if current_user and "id" in current_user else None
     prefs = None
+    effective_channel_ids = _resolve_rails_channel_ids(channel_ids)
 
     # 获取用户偏好设置
     if apply_preferences and user_id:
         async with async_session_factory() as session:
             pref_repo = PreferencesRepository(session)
             prefs = await pref_repo.get_user_preferences(user_id, main_guild_id)
+            prefs = _override_preferred_channels(prefs, channel_ids)
 
     try:
         async with async_session_factory() as session:
             service = DiscoveryService(session, discovery_ignore_channel_ids)
             threads = await service.get_single_rail(
-                rail_name=rail_name, limit=limit, offset=offset, days=days, prefs=prefs
+                rail_name=rail_name,
+                limit=limit,
+                offset=offset,
+                days=days,
+                prefs=prefs,
+                channel_ids=effective_channel_ids,
             )
 
             # 批量查询收藏状态

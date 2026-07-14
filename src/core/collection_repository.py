@@ -28,6 +28,30 @@ class CollectionRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def _record_thread_collection_trends(
+        self, thread_ids: Sequence[int]
+    ) -> None:
+        """为近期帖子记录用户维度去重后的收藏趋势。"""
+        if not thread_ids:
+            return
+
+        threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value
+        )
+        statement = select(Thread.thread_id, Thread.channel_id).where(
+            Thread.thread_id.in_(thread_ids),  # type: ignore
+            Thread.created_at >= threshold,
+        )
+        valid_threads = (await self.session.execute(statement)).all()
+        trend_service = RedisTrendService()
+        for thread_id, channel_id in valid_threads:
+            await trend_service.record_increment(
+                "collection",
+                int(thread_id),
+                int(channel_id),
+                count=1,
+            )
+
     async def add_collection(
         self, user_id: int, target_type: int, target_id: int
     ) -> bool:
@@ -41,6 +65,12 @@ class CollectionRepository:
             # 帖子类型，路由到默认书单
             repo = BooklistRepository(self.session)
             booklist = await repo.get_or_create_default_booklist(user_id)
+
+            # 趋势和全局收藏数仅按“用户是否首次收藏该帖”计算一次。
+            already_collected = await self.get_collected_target_ids(
+                user_id, CollectionType.THREAD, [target_id]
+            )
+            is_net_new = target_id not in already_collected
 
             if booklist.id is None:
                 raise ValueError("创建的书单没有ID")
@@ -72,6 +102,8 @@ class CollectionRepository:
             self.session.add(new_item)
             booklist.item_count += 1
             await self.session.commit()
+            if is_net_new:
+                await self._record_thread_collection_trends([target_id])
             return True
         else:
             # target_type == 2 (书单) , 操作 UserCollection
@@ -170,6 +202,11 @@ class CollectionRepository:
             repo = BooklistRepository(self.session)
             booklist = await repo.get_or_create_default_booklist(user_id)
 
+            # 先记录用户在任意书单中的已有收藏，防止跨书单重复计入趋势。
+            already_collected = await self.get_collected_target_ids(
+                user_id, CollectionType.THREAD, target_ids
+            )
+
             # 确保书单有ID
             if booklist.id is None:
                 raise ValueError("创建的书单没有ID")
@@ -183,6 +220,7 @@ class CollectionRepository:
                 (await self.session.execute(existing_stmt)).scalars().all()
             )
             new_ids = [tid for tid in target_ids if tid not in existing_ids]
+            net_new_ids = [tid for tid in new_ids if tid not in already_collected]
 
             if not new_ids:
                 return BatchAddResult(
@@ -213,20 +251,8 @@ class CollectionRepository:
             booklist.item_count += len(new_ids)
             await self.session.commit()
 
-            # 保存统计趋势到 Redis
-            if new_ids:
-                threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
-                    days=ConstantEnum.STATISTICS_THRESHOLD_DAYS.value
-                )
-                stmt = select(Thread.thread_id).where(
-                    Thread.thread_id.in_(new_ids),  # type: ignore
-                    Thread.created_at >= threshold,
-                )
-                valid_ids = set((await self.session.execute(stmt)).scalars().all())
-                if valid_ids:
-                    trend_service = RedisTrendService()
-                    for tid in valid_ids:
-                        await trend_service.record_increment("collection", tid, 1)
+            # 仅为用户首次收藏的近期帖子记录趋势。
+            await self._record_thread_collection_trends(net_new_ids)
 
             return BatchAddResult(
                 added_ids=new_ids,

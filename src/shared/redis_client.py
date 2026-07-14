@@ -22,6 +22,7 @@ class RedisManager:
         """关闭Redis连接池"""
         if cls._client:
             await cls._client.aclose()
+            cls._client = None
             logger.info("Redis连接池已关闭")
 
     @classmethod
