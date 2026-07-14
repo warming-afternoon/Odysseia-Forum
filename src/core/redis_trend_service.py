@@ -12,7 +12,6 @@ class RedisTrendService:
     """处理基于 Redis 的趋势记录、聚合缓存和频道范围查询。"""
 
     EMPTY_MEMBER = "-1"
-    CHANNEL_MIGRATION_COMPLETE_KEY = "migration:trend-channel:v1:complete"
 
     def _get_daily_key(self, metric: str, dt: datetime) -> str:
         """格式化全局日榜 Redis 键名。"""
@@ -84,16 +83,9 @@ class RedisTrendService:
             if not normalized_channel_ids:
                 return []
 
-            # 回填完成前保持兼容：读取全局榜，最终仍由数据库执行频道过滤。
-            channel_index_ready = await redis.exists(
-                self.CHANNEL_MIGRATION_COMPLETE_KEY
+            cache_key = await self._get_or_build_channel_scope_cache(
+                metric, days, normalized_channel_ids
             )
-            if channel_index_ready:
-                cache_key = await self._get_or_build_channel_scope_cache(
-                    metric, days, normalized_channel_ids
-                )
-            else:
-                cache_key = await self._get_or_build_global_cache(metric, days)
         else:
             cache_key = await self._get_or_build_global_cache(metric, days)
 
