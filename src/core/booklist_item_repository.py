@@ -82,7 +82,7 @@ class BooklistItemRepository:
         try:
             await self.session.commit()
             await self.session.refresh(item)
-            logger.info(f"书单项 (书单ID: {booklist_id}, 帖子ID: {thread_id}) 已更新")
+            # logger.info(f"书单项 (书单ID: {booklist_id}, 帖子ID: {thread_id}) 已更新")
             return item
         except Exception as e:
             logger.error(f"更新书单项失败: {e}", exc_info=True)

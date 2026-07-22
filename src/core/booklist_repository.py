@@ -174,7 +174,7 @@ class BooklistRepository:
                 return None  # 书单不存在
 
             await self.session.commit()
-            logger.info(f"书单 {booklist_id} 已更新")
+            # logger.info(f"书单 {booklist_id} 已更新")
             return await self.get_booklist(booklist_id)
 
         except Exception as e:
