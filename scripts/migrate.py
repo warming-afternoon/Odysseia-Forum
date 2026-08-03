@@ -2,8 +2,9 @@
 
 1. 检查数据库可达
 2. 可选 pg_dump 备份（BACKUP_BEFORE_MIGRATE=1）
-3. 执行 alembic upgrade head
-4. 若 data/follow_bot.db 存在，迁移旧收藏数据到 booklist_item
+3. 检查并输出当前 Alembic 版本
+4. 执行 alembic upgrade head
+5. 若 data/follow_bot.db 存在，迁移旧收藏数据到 booklist_item
 """
 
 import os
@@ -114,6 +115,26 @@ def backup_db(db_url: str) -> Path | None:
 # ── Alembic 迁移 ───────────────────────────────────────────
 
 
+def get_current_database_version() -> str:
+    """获取当前数据库的 Alembic 版本。"""
+    try:
+        result = subprocess.run(
+            ["alembic", "current"],
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+        )
+        return result.stdout.strip()
+    except FileNotFoundError:
+        print_error("alembic 命令未找到，请确认依赖已安装")
+        sys.exit(1)
+    except subprocess.CalledProcessError as e:
+        print_error("获取当前数据库版本失败")
+        print(e.stderr)
+        sys.exit(1)
+
+
 def run_alembic_migration() -> None:
     """执行 alembic upgrade head。"""
     print_info("执行 alembic upgrade head ...")
@@ -136,15 +157,8 @@ def run_alembic_migration() -> None:
         print(e.stderr)
         sys.exit(1)
 
-    # 输出版本
-    result = subprocess.run(
-        ["alembic", "current"],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-    print_info(f"当前数据库版本: {result.stdout.strip()}")
+    # 输出迁移后版本
+    print_info(f"迁移后数据库版本: {get_current_database_version()}")
 
 
 # ── 旧收藏数据迁移（SQLite follow_bot.db → PostgreSQL booklist_item） ──
@@ -399,6 +413,14 @@ def main() -> None:
         backup_path = backup_db(sync_url)
         if backup_path:
             print_success(f"备份完成: {backup_path}")
+
+    # 迁移前确认当前数据库版本
+    current_version = get_current_database_version()
+    if not current_version:
+        print_error("当前数据库没有 Alembic 版本号，已中断迁移。")
+        print_warning("请人工判断数据库版本，切换到正确版本后重试。")
+        sys.exit(1)
+    print_info(f"当前数据库版本: {current_version}")
 
     # Alembic 迁移
     run_alembic_migration()
