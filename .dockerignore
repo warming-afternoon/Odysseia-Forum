@@ -19,11 +19,8 @@ venv/
 .vscode/
 .idea/
 data/
-webauth/
 tests/
 temp/
 logs/
-webpage/
-webpage-vue/
 deploy/
 config_production.json

@@ -128,9 +128,10 @@ uv run api_main.py    # 启动 API 服务
 
 ## 🌐 API 服务
 
-项目同时提供 FastAPI 搜索接口，供外部前端调用。API 服务默认运行在 `10810` 端口。
+项目提供基于 FastAPI 的 REST API，供配套前端及其他客户端调用。API 服务默认运行在 `10810` 端口。
 
-> 完整 API 文档请参阅 [src/api/README.md](src/api/README.md)
+- 配套前端项目：[Odysseia-Forum-webpage](https://github.com/shiyue137mh-netizen/Odysseia-Forum-webpage)
+- 完整 API 文档：[src/api/README.md](src/api/README.md)
 
 ## 🏗️ 项目架构
 
