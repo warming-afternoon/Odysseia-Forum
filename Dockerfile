@@ -5,9 +5,7 @@ FROM python:3.13-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app/src \
-    LD_PRELOAD=/usr/lib/libjemalloc.so.2 \
-    MALLOC_CONF="narenas:2"
+    PYTHONPATH=/app/src
 
 WORKDIR /app
 
@@ -15,6 +13,9 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends curl procps libjemalloc2 libpq-dev postgresql-client \
     && rm -rf /var/lib/apt/lists/* \
     && ln -s /usr/lib/*/libjemalloc.so.2 /usr/lib/libjemalloc.so.2
+
+ENV LD_PRELOAD=/usr/lib/libjemalloc.so.2 \
+    MALLOC_CONF="narenas:2"
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
