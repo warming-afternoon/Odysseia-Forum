@@ -86,7 +86,7 @@ class Auditor(commands.Cog):
                     ),
                     priority=10,
                 )
-                await sleep(4)
+                await sleep(3)
 
             self._audit_cursor = batch[-1][0]
             logger.debug(

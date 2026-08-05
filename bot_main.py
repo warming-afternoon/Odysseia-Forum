@@ -26,6 +26,8 @@ from ThreadManager.cog import ThreadManager
 from core.tag_cache_service import TagCacheService
 from core.cache_service import CacheService
 from core.sync_service import SyncService
+from open_graph.reindex_consumer import OpenGraphReindexConsumer
+from open_graph.reindex_queue import OpenGraphReindexQueue
 from core.impression_cache_service import ImpressionCacheService
 from core.discord_parser_patch import install_uncached_thread_members_patch
 from indexer.cog import Indexer
@@ -66,6 +68,7 @@ class MyBot(commands.Bot):
         self.tag_cache_service: TagCacheService
         self.cache_service: CacheService
         self.sync_service: SyncService
+        self.open_graph_reindex_consumer: OpenGraphReindexConsumer
         self.impression_cache_service: ImpressionCacheService
 
         # 从配置初始化API调度器
@@ -154,6 +157,11 @@ class MyBot(commands.Bot):
             bot=self,
             session_factory=AsyncSessionFactory,
         )
+        self.open_graph_reindex_consumer = OpenGraphReindexConsumer(
+            sync_service=self.sync_service,
+            reindex_queue=OpenGraphReindexQueue(RedisManager.get_client()),
+        )
+        self.open_graph_reindex_consumer.start()
         self.impression_cache_service = ImpressionCacheService(
             session_factory=AsyncSessionFactory, bot=self
         )
@@ -344,6 +352,7 @@ class MyBot(commands.Bot):
         if self._closing:
             return
         self._closing = True
+        await self.open_graph_reindex_consumer.stop()
         await self.impression_cache_service.stop()
         await self.api_scheduler.stop()
         await close_db()

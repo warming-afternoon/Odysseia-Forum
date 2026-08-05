@@ -27,6 +27,7 @@ from api.v1.routers import (
     preferences as preferences_api,
     search as search_api,
     meta as meta_api,
+    open_graph as open_graph_api,
     fetch_images as fetch_images_api,
     banner as banner_api,
     tags as tags_api,
@@ -117,6 +118,13 @@ def _inject_api_dependencies(
         session_factory=AsyncSessionFactory,
         bot_token=auth_section.get("bot_token"),
         guild_id=auth_section.get("guild_id"),
+    )
+
+    open_graph_config = config.get("integration", {}).get("open_graph", {})
+    open_graph_api.configure_open_graph_router(
+        session_factory=AsyncSessionFactory,
+        redis=RedisManager.get_client(),
+        config=open_graph_config,
     )
 
     logger.info("API 路由服务注入完成")

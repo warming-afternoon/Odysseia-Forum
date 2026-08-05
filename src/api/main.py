@@ -18,6 +18,7 @@ from api.v1.routers import (
     fetch_images,
     follows,
     meta,
+    open_graph,
     preferences,
     search,
     tags,
@@ -109,6 +110,7 @@ app.include_router(preferences.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(follows.router, prefix="/v1")
 app.include_router(meta.router, prefix="/v1")
+app.include_router(open_graph.router, prefix="/v1")
 app.include_router(fetch_images.router, prefix="/v1")
 app.include_router(banner.router, prefix="/v1")
 app.include_router(collections.router, prefix="/v1")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Any, List, Optional, Union
 
 import httpx
@@ -11,12 +10,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import require_auth
 from core.thread_repository import ThreadRepository
+from shared.image_url_utils import extract_message_image_urls
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
-IMAGE_URL_REGEX = re.compile(
-    r"https?://[^\s]+\.(?:jpg|jpeg|png|gif|webp)", re.IGNORECASE
-)
-IMAGE_EXTENSIONS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
 
 logger = logging.getLogger(__name__)
 
@@ -143,55 +139,14 @@ async def _process_single_item(
         return response_item
 
     message_payload = resp.json()
-    thumbnail_urls = _extract_thumbnail_urls(message_payload)
-
-    if not thumbnail_urls:
-        response_item.error = "no_image_found"
-        return response_item
-
+    thumbnail_urls = extract_message_image_urls(
+        attachments=message_payload.get("attachments") or [],
+        embeds=message_payload.get("embeds") or [],
+        content=message_payload.get("content") or "",
+    )
     response_item.thumbnail_urls = thumbnail_urls
     response_item.updated = await _persist_thumbnail(item.thread_id, thumbnail_urls)  # type: ignore
     return response_item
-
-
-def _is_image_attachment(attachment: dict[str, Any]) -> bool:
-    content_type = (attachment.get("content_type") or "").lower()
-    filename = (attachment.get("filename") or "").lower()
-    return content_type.startswith("image/") or filename.endswith(IMAGE_EXTENSIONS)
-
-
-def _extract_thumbnail_urls(message_payload: dict[str, Any]) -> List[str]:
-    urls: List[str] = []
-
-    attachments = message_payload.get("attachments") or []
-    for attachment in attachments:
-        if _is_image_attachment(attachment):
-            url = attachment.get("proxy_url") or attachment.get("url")
-            if url:
-                urls.append(url)
-
-    embeds = message_payload.get("embeds") or []
-    for embed in embeds:
-        image_block = embed.get("image") or embed.get("thumbnail")
-        if image_block:
-            url = image_block.get("proxy_url") or image_block.get("url")
-            if url:
-                urls.append(url)
-
-    content = message_payload.get("content") or ""
-    if content:
-        urls.extend(re.findall(IMAGE_URL_REGEX, content))
-
-    deduped: List[str] = []
-    seen: set[str] = set()
-    for url in urls:
-        if url and url not in seen:
-            seen.add(url)
-            deduped.append(url)
-
-    return deduped
-
-
 async def _persist_thumbnail(thread_id: int, thumbnail_urls: List[str]) -> bool:
     assert _async_session_factory is not None  # 为类型检查器准备
     try:

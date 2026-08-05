@@ -65,6 +65,14 @@
 
       "base_url": "",
       "_comment_base_url": "书单发布服务的 IP:端口"
+    },
+
+    "open_graph": {
+      "service_token": "",
+      "_comment_service_token": "必须设置为长随机值，并仅作为 Cloudflare Secret 保存；留空时内部 OG 接口返回 503",
+      "refresh_before_expiry_hours": 1,
+      "sync_wait_timeout_seconds": 2,
+      "_comment": "Pages Function 调用内部书单 OG 接口使用的服务令牌与 Discord 图片刷新窗口"
     }
   },
 

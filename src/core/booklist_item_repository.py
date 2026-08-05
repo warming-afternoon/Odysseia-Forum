@@ -14,7 +14,9 @@ from core.booklist_sort_constants import (
     DEFAULT_SORT_ORDER,
     SORT_METHOD_COLUMN_MAP,
 )
+from dto.open_graph import BooklistCoverCandidateDTO
 from models import Author, Booklist, BooklistItem, Thread
+from shared.image_url_utils import is_image_url
 from shared.enum.search_config_type import SearchConfigDefaults
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,37 @@ def _apply_item_sorting(
 class BooklistItemRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def get_open_graph_cover_candidate(
+        self,
+        booklist_id: int,
+        default_sort_method: str,
+        default_sort_order: str,
+    ) -> Optional[BooklistCoverCandidateDTO]:
+        """按书单默认排序返回首个可见且有图的帖子。"""
+        query = (
+            select(Thread.thread_id, Thread.thumbnail_urls)
+            .join(BooklistItem, BooklistItem.thread_id == Thread.thread_id)  # type: ignore
+            .where(
+                and_(
+                    BooklistItem.booklist_id == booklist_id,
+                    Thread.show_flag.is_(True),  # type: ignore
+                    Thread.not_found_count == 0,
+                )
+            )
+        )
+        sorted_query = _apply_item_sorting(
+            query, default_sort_method, default_sort_order
+        )
+        result = await self.session.stream(sorted_query)
+
+        async for thread_id, thumbnail_urls in result:
+            for image_url in thumbnail_urls or []:
+                if is_image_url(image_url):
+                    return BooklistCoverCandidateDTO(
+                        thread_id=int(thread_id), image_url=image_url
+                    )
+        return None
 
     async def update_booklist_item(
         self, booklist_id: int, thread_id: int, update_data: BooklistItemUpdateRequest
