@@ -22,7 +22,7 @@ import os
 from dotenv import load_dotenv
 from shared.database import AsyncSessionFactory, init_db, close_db
 from shared.redis_client import RedisManager
-from ThreadManager.cog import ThreadManager
+# from ThreadManager.cog import ThreadManager
 from core.tag_cache_service import TagCacheService
 from core.cache_service import CacheService
 from core.sync_service import SyncService
@@ -30,7 +30,7 @@ from open_graph.reindex_consumer import OpenGraphReindexConsumer
 from open_graph.reindex_queue import OpenGraphReindexQueue
 from core.impression_cache_service import ImpressionCacheService
 from core.discord_parser_patch import install_uncached_thread_members_patch
-from indexer.cog import Indexer
+# from indexer.cog import Indexer
 from search.cog import Search
 from preferences.cog import Preferences
 from auditor.cog import Auditor
@@ -39,8 +39,8 @@ from banner.cog import BannerManagement
 from banner.listeners.banner_event_listener import BannerEventListener
 from core.config_repository import ConfigRepository
 from collection.cog import CollectionCog
-from update_detector.cog import UpdateDetector
-from author.cog import AuthorCog
+# from update_detector.cog import UpdateDetector
+# from author.cog import AuthorCog
 from backup.cog import BackupCog
 from shared.api_scheduler import APIScheduler
 from shared.enum import SearchConfigDefaultsInt
@@ -161,7 +161,8 @@ class MyBot(commands.Bot):
             sync_service=self.sync_service,
             reindex_queue=OpenGraphReindexQueue(RedisManager.get_client()),
         )
-        self.open_graph_reindex_consumer.start()
+        # 特权 Intent 审核期间停止 Discord 内容重索引，避免空内容覆盖现有数据
+        # self.open_graph_reindex_consumer.start()
         self.impression_cache_service = ImpressionCacheService(
             session_factory=AsyncSessionFactory, bot=self
         )
@@ -178,16 +179,17 @@ class MyBot(commands.Bot):
 
         # 加载 Cogs
         cogs_to_load = [
-            ThreadManager(
-                bot=self,
-                session_factory=AsyncSessionFactory,
-                config=self.config,
-            ),
-            Indexer(
-                bot=self,
-                session_factory=AsyncSessionFactory,
-                config=self.config,
-            ),
+            # 特权 Intent 审核期间暂停 Discord 内容和成员数据写入
+            # ThreadManager(
+            #     bot=self,
+            #     session_factory=AsyncSessionFactory,
+            #     config=self.config,
+            # ),
+            # Indexer(
+            #     bot=self,
+            #     session_factory=AsyncSessionFactory,
+            #     config=self.config,
+            # ),
             Search(
                 bot=self,
                 session_factory=AsyncSessionFactory,
@@ -219,21 +221,24 @@ class MyBot(commands.Bot):
                 bot=self,
                 session_factory=AsyncSessionFactory,
             ),
-            UpdateDetector(
-                bot=self,
-                session_factory=AsyncSessionFactory,
-                config=self.config,
-            ),
-            AuthorCog(
-                bot=self,
-                session_factory=AsyncSessionFactory,
-            ),
+            # UpdateDetector(
+            #     bot=self,
+            #     session_factory=AsyncSessionFactory,
+            #     config=self.config,
+            # ),
+            # AuthorCog(
+            #     bot=self,
+            #     session_factory=AsyncSessionFactory,
+            # ),
             BackupCog(bot=self, config=self.config),
         ]
         await asyncio.gather(
             *(self.add_cog(cog) for cog in cogs_to_load), return_exceptions=True
         )
         logger.info("所有 Cogs 已加载。")
+        logger.warning(
+            "BOT 正在临时只读降级模式下运行：Discord 内容同步、成员同步和重索引已停用。"
+        )
 
         # 注册全局事件监听器
         self.add_listener(self.on_index_updated_global, "on_index_updated")
@@ -398,9 +403,10 @@ async def main():
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     intents = discord.Intents.default()
-    intents.message_content = True
+    # 特权 Intent 审核期间不请求消息内容和服务器成员权限
+    intents.message_content = False
     intents.guilds = True
-    intents.members = True
+    intents.members = False
     intents.reactions = True
 
     with open("config.json", "r", encoding="utf-8") as f:
