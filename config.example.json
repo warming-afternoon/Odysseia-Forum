@@ -95,9 +95,6 @@
     "jwt_secret": "your_jwt_secret_key_here_make_it_long_and_random",
     "_comment_jwt_secret": "JWT 签名密钥，请使用长随机字符串",
     
-    "bot_token": "your_bot_token_here",
-    "_comment_bot_token": "Discord Bot Token，用于验证用户身份组（可选，建议配置）",
-    
     "frontend_url": "https://your-frontend-domain.com",
     "_comment_frontend_url": "前端应用 URL，用于 OAuth2 回调后重定向",
     

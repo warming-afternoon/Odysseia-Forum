@@ -91,6 +91,7 @@ services:
       - ./logs:/app/logs
     environment:
       PYTHONPATH: /app/src
+      BOT_TOKEN: "${BOT_TOKEN}"
       REDIS_URL: redis://odysseia-redis:6379/0
       DATABASE_URL: "postgresql+asyncpg://odysseia:${PG_PASSWORD:-changeme}@odysseia-postgres:5432/odysseia"
     depends_on:

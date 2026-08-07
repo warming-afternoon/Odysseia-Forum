@@ -429,7 +429,9 @@ async def main():
 
     try:
         async with bot:
-            token = os.environ.get("BOT_TOKEN", config.get("token"))
+            token = os.environ.get("BOT_TOKEN", "").strip()
+            if not token:
+                raise RuntimeError("BOT_TOKEN 环境变量未设置")
             await bot.start(token)  # type: ignore[arg-type]
     finally:
         # 服务关闭时切断与Redis的连接

@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from typing import Optional
 from urllib.parse import urlencode
 
@@ -30,6 +31,11 @@ def initialize_auth_config():
         auth_config = config.get("auth", {})
         if not auth_config:
             raise ValueError("认证配置 (auth) 未在 config.json 中配置")
+
+        bot_token = os.environ.get("BOT_TOKEN", "").strip()
+        if not bot_token:
+            raise ValueError("BOT_TOKEN 环境变量未设置")
+        auth_config = {**auth_config, "bot_token": bot_token}
 
         required_fields = [
             "client_id",

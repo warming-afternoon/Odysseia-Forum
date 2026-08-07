@@ -2,6 +2,8 @@ import logging
 
 import discord
 
+from shared.permissions import check_can_review_banner
+
 logger = logging.getLogger(__name__)
 
 
@@ -47,9 +49,7 @@ class ReviewView(discord.ui.View):
     ):
         """同意按钮 → 分发 banner_review_approve 事件。"""
         # 权限检查：需要服务器管理员或Bot管理员
-        from shared.permissions import check_is_admin_or_bot_admin
-
-        if not await check_is_admin_or_bot_admin(interaction):
+        if not await check_can_review_banner(interaction):
             await interaction.response.send_message(
                 "❌ 您没有审核权限。需要服务器管理员或Bot管理员权限。",
                 ephemeral=True,
@@ -72,9 +72,7 @@ class ReviewView(discord.ui.View):
         self, interaction: discord.Interaction, button: discord.ui.Button
     ):
         """拒绝按钮 → 弹出理由输入框，理由提交后分发事件。"""
-        from shared.permissions import check_is_admin_or_bot_admin
-
-        if not await check_is_admin_or_bot_admin(interaction):
+        if not await check_can_review_banner(interaction):
             await interaction.response.send_message(
                 "❌ 您没有审核权限。需要服务器管理员或Bot管理员权限。",
                 ephemeral=True,

@@ -12,9 +12,13 @@ if sys.platform != "win32":
 
 import json
 import logging
+import os
 from logging.handlers import TimedRotatingFileHandler
 import asyncio
 import uvicorn
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from shared.database import AsyncSessionFactory, init_db, close_db
 from shared.redis_client import RedisManager
@@ -76,7 +80,8 @@ def _inject_api_dependencies(
     banner_api.async_session_factory = AsyncSessionFactory
     banner_api.banner_config = config.get("banner", {})
     banner_api.main_guild_id = main_guild_id
-    banner_api.bot_token = config.get("auth", {}).get("bot_token", "")
+    bot_token = os.environ.get("BOT_TOKEN", "").strip()
+    banner_api.bot_token = bot_token
 
     channel_mappings_config = _build_channel_mappings_config(config)
     search_api.channel_mappings_config = channel_mappings_config
@@ -116,7 +121,7 @@ def _inject_api_dependencies(
     auth_section = config.get("auth", {}) if isinstance(config, dict) else {}
     fetch_images_api.configure_fetch_images_router(
         session_factory=AsyncSessionFactory,
-        bot_token=auth_section.get("bot_token"),
+        bot_token=bot_token,
         guild_id=auth_section.get("guild_id"),
     )
 
