@@ -1,18 +1,21 @@
-"""书单动态 Open Graph 响应的数据传输对象。"""
-
-from datetime import datetime
-
 from pydantic import BaseModel, Field
+
+from dto.open_graph.booklist_share_stats_dto import BooklistShareStatsDTO
+from dto.open_graph.open_graph_work_dto import OpenGraphWorkDTO
+from shared.utc_datetime import UTCDateTime
 
 
 class BooklistShareMetadataDTO(BaseModel):
-    """对外分享所需的最小书单元数据。"""
+    """描述内部书单或赛事 Open Graph 接口的完整响应。"""
 
-    title: str = Field(description="书单标题")
-    description: str | None = Field(default=None, description="书单简介")
-    image_url: str | None = Field(
-        default=None,
-        description="当前可用于 OG 的封面 URL；为空时调用方应使用站点默认图",
+    title: str = Field(description="书单或赛事标题")
+    description: str | None = Field(default=None, description="书单或赛事简介")
+    cover_image_url: str | None = Field(
+        default=None, description="书单自定义封面 URL"
     )
-    item_count: int = Field(description="书单内帖子数量")
-    updated_at: datetime = Field(description="书单最后更新时间")
+    author_name: str | None = Field(default=None, description="非匿名书单作者名")
+    works: list[OpenGraphWorkDTO] = Field(description="最多五个带图代表作品")
+    stats: BooklistShareStatsDTO = Field(description="书单公开统计")
+    is_tournament: bool = Field(description="是否为赛事书单")
+    created_at: UTCDateTime = Field(description="书单创建时间")
+    updated_at: UTCDateTime = Field(description="书单更新时间")

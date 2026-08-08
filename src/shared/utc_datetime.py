@@ -4,21 +4,25 @@
 naive datetime 序列化时自动追加 Z 后缀，让前端的 new Date() 正确解析为 UTC。
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 
 from pydantic import PlainSerializer
 
 
 def _serialize_dt_as_utc(dt: datetime) -> str:
-    """将 datetime 序列化为 ISO 8601 字符串。
-
-    naive datetime（无时区信息）自动追加 Z 后缀，视为 UTC。
-    aware datetime 按自带时区序列化。
-    """
+    """将 naive 或 aware datetime 统一序列化为带 Z 的 UTC 时间。"""
+    # 数据库中的 naive datetime 按项目约定解释为 UTC，而不是服务器本地时区。
     if dt.tzinfo is None:
-        return dt.isoformat() + "Z"
-    return dt.isoformat()
+        utc_datetime = dt.replace(tzinfo=timezone.utc)
+    else:
+        utc_datetime = dt.astimezone(timezone.utc)
+
+    # Python 默认输出 +00:00，这里规范为接口契约要求的 Z 后缀。
+    serialized = utc_datetime.isoformat()
+    if serialized.endswith("+00:00"):
+        return f"{serialized[:-6]}Z"
+    return serialized
 
 
 UTCDateTime = Annotated[

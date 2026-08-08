@@ -6,6 +6,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Author, Thread
+from dto.open_graph import AuthorShareQueryDTO
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,24 @@ class AuthorRepository:
         statement = select(Author).where(Author.id == author_id)  # type: ignore
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
+
+    async def get_open_graph_author(
+        self, author_id: int
+    ) -> AuthorShareQueryDTO | None:
+        """查询作者分享所需标量并在 Session 内转换为 DTO。"""
+        statement = select(
+            Author.display_name,
+            Author.avatar_url,
+            Author.last_updated,
+        ).where(Author.id == author_id)
+        row = (await self.session.execute(statement)).first()
+        if row is None:
+            return None
+        return AuthorShareQueryDTO(
+            display_name=row.display_name,
+            avatar_url=row.avatar_url,
+            last_updated=row.last_updated,
+        )
 
     async def get_authors_by_ids(self, author_ids: List[int]) -> Sequence[Author]:
         """批量获取作者信息"""

@@ -88,6 +88,27 @@ def discord_expiry_remaining_seconds(
     return expiry_epoch - (time.time() if now_epoch is None else now_epoch)
 
 
+def image_url_identity(url: str | None) -> str | None:
+    """按 Discord 附件身份或规范化完整 URL 返回稳定的图片去重键。"""
+    if not is_http_url(url):
+        return None
+    assert url is not None
+
+    # Discord 的 cdn 与 media 地址指向同一附件时必须共享身份。
+    attachment_identity = discord_attachment_identity(url)
+    if attachment_identity is not None:
+        return f"discord:{attachment_identity}"
+
+    # 其他图床保留路径、查询参数与片段，只规范化协议和主机大小写。
+    parsed = urlsplit(url)
+    host = (parsed.hostname or "").lower()
+    port = f":{parsed.port}" if parsed.port else ""
+    normalized_url = urlunsplit(
+        (parsed.scheme.lower(), f"{host}{port}", parsed.path, parsed.query, parsed.fragment)
+    )
+    return f"url:{normalized_url}"
+
+
 def deduplicate_image_urls(urls: Iterable[str]) -> list[str]:
     """按附件身份或规范化完整 URL 去重，并保留更晚到期的 Discord URL。"""
     deduped: list[str] = []
@@ -97,22 +118,9 @@ def deduplicate_image_urls(urls: Iterable[str]) -> list[str]:
         if not is_image_url(url):
             continue
         identity = discord_attachment_identity(url)
-        if identity:
-            key = f"discord:{identity}"
-        else:
-            parsed = urlsplit(url)
-            host = (parsed.hostname or "").lower()
-            port = f":{parsed.port}" if parsed.port else ""
-            normalized_url = urlunsplit(
-                (
-                    parsed.scheme.lower(),
-                    f"{host}{port}",
-                    parsed.path,
-                    parsed.query,
-                    parsed.fragment,
-                )
-            )
-            key = f"url:{normalized_url}"
+        key = image_url_identity(url)
+        if key is None:
+            continue
         existing_position = positions.get(key)
         if existing_position is None:
             positions[key] = len(deduped)

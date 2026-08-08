@@ -72,7 +72,9 @@
       "_comment_service_token": "必须设置为长随机值，并仅作为 Cloudflare Secret 保存；留空时内部 OG 接口返回 503",
       "refresh_before_expiry_hours": 1,
       "sync_wait_timeout_seconds": 2,
-      "_comment": "Pages Function 调用内部书单 OG 接口使用的服务令牌与 Discord 图片刷新窗口"
+      "cache_ttl_seconds": 600,
+      "max_async_refresh_jobs": 5,
+      "_comment": "Pages Function 调用内部分享 OG 接口使用的服务令牌、图片刷新窗口与安全缓存配置"
     }
   },
 

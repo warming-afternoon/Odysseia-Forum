@@ -1,4 +1,5 @@
 import logging
+from collections.abc import AsyncIterator
 from typing import Dict, List, Optional, Tuple
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,9 +15,8 @@ from core.booklist_sort_constants import (
     DEFAULT_SORT_ORDER,
     SORT_METHOD_COLUMN_MAP,
 )
-from dto.open_graph import BooklistCoverCandidateDTO
+from dto.open_graph import OpenGraphWorkCandidateDTO
 from models import Author, Booklist, BooklistItem, Thread
-from shared.image_url_utils import is_image_url
 from shared.enum.search_config_type import SearchConfigDefaults
 
 logger = logging.getLogger(__name__)
@@ -55,36 +55,90 @@ class BooklistItemRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_open_graph_cover_candidate(
-        self,
-        booklist_id: int,
-        default_sort_method: str,
-        default_sort_order: str,
-    ) -> Optional[BooklistCoverCandidateDTO]:
-        """按书单默认排序返回首个可见且有图的帖子。"""
-        query = (
-            select(Thread.thread_id, Thread.thumbnail_urls)
-            .join(BooklistItem, BooklistItem.thread_id == Thread.thread_id)  # type: ignore
+    async def count_open_graph_visible_items(
+        self, booklist_id: int, excluded_channel_ids: set[int]
+    ) -> int:
+        """实时统计书单中当前公开且非深渊的作品数量。"""
+        statement = (
+            select(func.count(Thread.id))
+            .join(BooklistItem, BooklistItem.thread_id == Thread.thread_id)  # type: ignore[arg-type]
             .where(
-                and_(
-                    BooklistItem.booklist_id == booklist_id,
-                    Thread.show_flag.is_(True),  # type: ignore
-                    Thread.not_found_count == 0,
-                )
+                BooklistItem.booklist_id == booklist_id,
+                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
+                Thread.not_found_count == 0,
             )
         )
-        sorted_query = _apply_item_sorting(
-            query, default_sort_method, default_sort_order
-        )
-        result = await self.session.stream(sorted_query)
+        if excluded_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+            )
+        result = await self.session.execute(statement)
+        return int(result.scalar_one() or 0)
 
-        async for thread_id, thumbnail_urls in result:
-            for image_url in thumbnail_urls or []:
-                if is_image_url(image_url):
-                    return BooklistCoverCandidateDTO(
-                        thread_id=int(thread_id), image_url=image_url
-                    )
-        return None
+    async def stream_open_graph_works(
+        self, booklist_id: int, excluded_channel_ids: set[int]
+    ) -> AsyncIterator[OpenGraphWorkCandidateDTO]:
+        """按热度与稳定次序流式返回书单代表作品候选。"""
+        statement = (
+            select(
+                Thread.thread_id,
+                Thread.title,
+                Thread.thumbnail_urls,
+                Thread.reaction_count,
+                Thread.created_at,
+            )
+            .join(BooklistItem, BooklistItem.thread_id == Thread.thread_id)  # type: ignore[arg-type]
+            .where(
+                BooklistItem.booklist_id == booklist_id,
+                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
+                Thread.not_found_count == 0,
+            )
+            .order_by(
+                Thread.reaction_count.desc(),
+                Thread.created_at.desc(),
+                Thread.id.asc(),
+            )
+        )
+        if excluded_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+            )
+        result = await self.session.stream(statement)
+        async for row in result:
+            yield OpenGraphWorkCandidateDTO(
+                thread_id=int(row.thread_id),
+                title=row.title,
+                thumbnail_urls=list(row.thumbnail_urls or []),
+                reaction_count=int(row.reaction_count or 0),
+                created_at=row.created_at,
+            )
+
+    async def are_open_graph_sources_valid(
+        self,
+        booklist_id: int,
+        thread_ids: list[int],
+        excluded_channel_ids: set[int],
+    ) -> bool:
+        """批量确认缓存来源仍可见、非深渊且仍属于指定书单。"""
+        unique_thread_ids = set(thread_ids)
+        if not unique_thread_ids:
+            return True
+        statement = (
+            select(func.count(Thread.id))
+            .join(BooklistItem, BooklistItem.thread_id == Thread.thread_id)  # type: ignore[arg-type]
+            .where(
+                BooklistItem.booklist_id == booklist_id,
+                Thread.thread_id.in_(unique_thread_ids),  # type: ignore[attr-defined]
+                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
+                Thread.not_found_count == 0,
+            )
+        )
+        if excluded_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+            )
+        count = (await self.session.execute(statement)).scalar_one()
+        return int(count) == len(unique_thread_ids)
 
     async def update_booklist_item(
         self, booklist_id: int, thread_id: int, update_data: BooklistItemUpdateRequest

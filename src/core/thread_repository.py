@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from collections.abc import AsyncIterator
 from typing import List, Optional, Sequence, cast
 
 from sqlalchemy import ColumnElement, case, delete, func, update
@@ -8,8 +9,14 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import select
 
 from dto.meta import ChannelThreadCount
+from dto.open_graph import (
+    AuthorStatsQueryDTO,
+    OpenGraphLatestWorkDTO,
+    OpenGraphWorkCandidateDTO,
+    ThreadShareQueryDTO,
+)
 from dto.search.fts_result_dto import FTSResultDTO
-from models import Tag, TagVote, Thread, ThreadFollow, ThreadTagLink
+from models import Author, Tag, TagVote, Thread, ThreadFollow, ThreadTagLink
 from models.booklist_item import BooklistItem
 from models.user_collection import UserCollection
 from shared.enum import CollectionType
@@ -26,6 +33,162 @@ class ThreadRepository:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def get_open_graph_thread(
+        self, thread_id: int, excluded_channel_ids: set[int]
+    ) -> ThreadShareQueryDTO | None:
+        """查询一个可公开分享的帖子及其作者标量信息。"""
+        # 外连接作者，作者记录缺失时仍允许帖子以“未命名”作者展示。
+        statement = (
+            select(
+                Thread.thread_id,
+                Thread.title,
+                Thread.first_message_excerpt,
+                Thread.thumbnail_urls,
+                Thread.reaction_count,
+                Thread.reply_count,
+                Thread.collection_count,
+                Thread.created_at,
+                Thread.last_active_at,
+                Author.display_name,
+                Author.avatar_url,
+            )
+            .outerjoin(Author, Author.id == Thread.author_id)
+            .where(
+                Thread.thread_id == thread_id,
+                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
+                Thread.not_found_count == 0,
+            )
+        )
+        if excluded_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+            )
+        row = (await self.session.execute(statement)).first()
+        if row is None:
+            return None
+        return ThreadShareQueryDTO(
+            thread_id=int(row.thread_id),
+            title=row.title,
+            description=row.first_message_excerpt,
+            thumbnail_urls=list(row.thumbnail_urls or []),
+            author_name=row.display_name,
+            author_avatar_url=row.avatar_url,
+            reaction_count=int(row.reaction_count or 0),
+            reply_count=int(row.reply_count or 0),
+            collection_count=int(row.collection_count or 0),
+            created_at=row.created_at,
+            updated_at=row.last_active_at or row.created_at,
+        )
+
+    async def get_open_graph_author_stats(
+        self, author_id: int, excluded_channel_ids: set[int]
+    ) -> AuthorStatsQueryDTO:
+        """聚合作者全部可公开作品的数量、反应与回复统计。"""
+        statement = select(
+            func.count(Thread.id).label("thread_count"),
+            func.coalesce(func.sum(Thread.reaction_count), 0).label(
+                "reaction_count"
+            ),
+            func.coalesce(func.sum(Thread.reply_count), 0).label("reply_count"),
+        ).where(
+            Thread.author_id == author_id,
+            Thread.show_flag.is_(True),  # type: ignore[attr-defined]
+            Thread.not_found_count == 0,
+        )
+        if excluded_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+            )
+        row = (await self.session.execute(statement)).one()
+        return AuthorStatsQueryDTO(
+            thread_count=int(row.thread_count or 0),
+            reaction_count=int(row.reaction_count or 0),
+            reply_count=int(row.reply_count or 0),
+        )
+
+    async def get_open_graph_latest_author_work(
+        self, author_id: int, excluded_channel_ids: set[int]
+    ) -> OpenGraphLatestWorkDTO | None:
+        """按创建时间与帖子 ID 稳定选择作者最新公开作品。"""
+        statement = (
+            select(Thread.title, Thread.created_at)
+            .where(
+                Thread.author_id == author_id,
+                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
+                Thread.not_found_count == 0,
+            )
+            .order_by(Thread.created_at.desc(), Thread.id.asc())
+            .limit(1)
+        )
+        if excluded_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+            )
+        row = (await self.session.execute(statement)).first()
+        if row is None:
+            return None
+        return OpenGraphLatestWorkDTO(title=row.title, created_at=row.created_at)
+
+    async def stream_open_graph_author_works(
+        self, author_id: int, excluded_channel_ids: set[int]
+    ) -> AsyncIterator[OpenGraphWorkCandidateDTO]:
+        """按热度与稳定次序流式返回作者代表作品候选。"""
+        statement = (
+            select(
+                Thread.thread_id,
+                Thread.title,
+                Thread.thumbnail_urls,
+                Thread.reaction_count,
+                Thread.created_at,
+            )
+            .where(
+                Thread.author_id == author_id,
+                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
+                Thread.not_found_count == 0,
+            )
+            .order_by(
+                Thread.reaction_count.desc(),
+                Thread.created_at.desc(),
+                Thread.id.asc(),
+            )
+        )
+        if excluded_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+            )
+        result = await self.session.stream(statement)
+        async for row in result:
+            yield OpenGraphWorkCandidateDTO(
+                thread_id=int(row.thread_id),
+                title=row.title,
+                thumbnail_urls=list(row.thumbnail_urls or []),
+                reaction_count=int(row.reaction_count or 0),
+                created_at=row.created_at,
+            )
+
+    async def are_open_graph_author_sources_valid(
+        self,
+        author_id: int,
+        thread_ids: list[int],
+        excluded_channel_ids: set[int],
+    ) -> bool:
+        """批量确认缓存来源帖子仍公开、非深渊且属于指定作者。"""
+        unique_thread_ids = set(thread_ids)
+        if not unique_thread_ids:
+            return True
+        statement = select(func.count(Thread.id)).where(
+            Thread.thread_id.in_(unique_thread_ids),  # type: ignore[attr-defined]
+            Thread.author_id == author_id,
+            Thread.show_flag.is_(True),  # type: ignore[attr-defined]
+            Thread.not_found_count == 0,
+        )
+        if excluded_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+            )
+        count = (await self.session.execute(statement)).scalar_one()
+        return int(count) == len(unique_thread_ids)
 
     async def add_or_update_thread_with_tags(self, thread_data: dict, tags: list[Tag]):
         """

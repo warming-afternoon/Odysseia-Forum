@@ -9,6 +9,7 @@ from sqlmodel import and_, asc, delete, desc, func, select
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
 from dto.search.fts_result_dto import FTSResultDTO
+from dto.open_graph import BooklistShareQueryDTO
 from models import Booklist, BooklistItem, BooklistPublish, UserCollection
 from shared.enum import CollectionType
 from shared.fts_utils import build_fts_conditions
@@ -100,6 +101,38 @@ class BooklistRepository:
         statement = select(Booklist).where(Booklist.id == booklist_id)
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
+
+    async def get_open_graph_booklist(
+        self, booklist_id: int
+    ) -> BooklistShareQueryDTO | None:
+        """查询公开书单分享所需标量并在 Session 内转换为 DTO。"""
+        statement = select(
+            Booklist.owner_id,
+            Booklist.title,
+            Booklist.description,
+            Booklist.cover_image_url,
+            Booklist.is_anonymous,
+            Booklist.is_tournament,
+            Booklist.collection_count,
+            Booklist.view_count,
+            Booklist.created_at,
+            Booklist.updated_at,
+        ).where(Booklist.id == booklist_id, Booklist.is_public.is_(True))  # type: ignore[attr-defined]
+        row = (await self.session.execute(statement)).first()
+        if row is None:
+            return None
+        return BooklistShareQueryDTO(
+            owner_id=int(row.owner_id),
+            title=row.title,
+            description=row.description,
+            cover_image_url=row.cover_image_url,
+            is_anonymous=bool(row.is_anonymous),
+            is_tournament=bool(row.is_tournament),
+            collection_count=int(row.collection_count or 0),
+            view_count=int(row.view_count or 0),
+            created_at=row.created_at,
+            updated_at=row.updated_at,
+        )
 
     async def get_booklist_by_tournament_channel_id(
         self, tournament_channel_id: int

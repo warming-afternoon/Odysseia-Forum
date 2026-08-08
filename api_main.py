@@ -130,6 +130,7 @@ def _inject_api_dependencies(
         session_factory=AsyncSessionFactory,
         redis=RedisManager.get_client(),
         config=open_graph_config,
+        abyss_config=abyss_config,
     )
 
     logger.info("API 路由服务注入完成")
