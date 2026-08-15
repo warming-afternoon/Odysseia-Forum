@@ -26,6 +26,7 @@ import booklist.booklist_service as booklist_service_module
 from core.api_cache_service import ApiCacheService
 from core.impression_cache_service import ImpressionCacheService
 from core.tag_cache_service import TagCacheService
+from search.similar_threads_cache_service import SimilarThreadsCacheService
 from shared.enum import AbyssDefaults, SearchConfigDefaultsInt
 from api.v1.routers import (
     preferences as preferences_api,
@@ -51,6 +52,7 @@ def _inject_api_dependencies(
     cache_service: ApiCacheService,
     tag_cache_service: TagCacheService,
     impression_cache_service: ImpressionCacheService,
+    similar_threads_cache_service: SimilarThreadsCacheService,
     config: dict,
 ):
     """向 API 路由模块注入运行期依赖。"""
@@ -66,6 +68,7 @@ def _inject_api_dependencies(
     search_api.cache_service_instance = cache_service
     search_api.tag_cache_service_instance = tag_cache_service
     search_api.impression_cache_service_instance = impression_cache_service
+    search_api.similar_threads_cache_service_instance = similar_threads_cache_service
     search_api.main_guild_id = main_guild_id
 
     tags_api.async_session_factory = AsyncSessionFactory
@@ -229,11 +232,16 @@ async def main():
     )
     impression_cache_service.start()
 
+    similar_threads_cache_service = SimilarThreadsCacheService(
+        RedisManager.get_client()
+    )
+
     # 注入依赖到 API 路由模块
     _inject_api_dependencies(
         cache_service=cache_service,
         tag_cache_service=tag_cache_service,
         impression_cache_service=impression_cache_service,
+        similar_threads_cache_service=similar_threads_cache_service,
         config=config,
     )
 
@@ -258,6 +266,7 @@ async def main():
         await server.serve()
     finally:
         # 清理
+        await similar_threads_cache_service.close()
         await impression_cache_service.stop()
         await cache_service.stop()
         await close_db()

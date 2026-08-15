@@ -49,6 +49,10 @@
       "search": {
         "max_requests": 60,
         "_comment_max_requests": "每个窗口（60秒）内允许的最大请求数"
+      },
+      "similar": {
+        "max_requests": 60,
+        "_comment_max_requests": "相似推荐每个窗口（60秒）内允许的最大请求数"
       }
     }
   },

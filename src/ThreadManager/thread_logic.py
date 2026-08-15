@@ -9,6 +9,8 @@ from core.config_repository import ConfigRepository
 from core.tag_repository import TagRepository
 from core.thread_repository import ThreadRepository
 from shared.enum import SearchConfigType
+from shared.redis_client import RedisManager
+from shared.similar_threads_cache import invalidate_similar_candidate_pools
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -34,6 +36,7 @@ class ThreadLogic:
             repo = ThreadRepository(session)
             await repo.delete_thread_index(thread_id=thread_id)
             logger.info(f"帖子 {thread_id} 已从 Discord 删除，已同步清理数据库索引记录")
+        await self._invalidate_similarity_cache(thread_id)
 
     async def handle_first_message_deletion(self, thread: discord.Thread):
         """处理首楼被删除但帖子还在的逻辑：隐藏并发送恢复按钮"""
@@ -44,6 +47,8 @@ class ThreadLogic:
 
         if not success:
             return
+
+        await self._invalidate_similarity_cache(thread.id)
 
         logger.info(f"帖子 {thread.id}(频道:{thread.parent_id}) 首楼被删，已将其隐藏")
 
@@ -65,6 +70,17 @@ class ThreadLogic:
         #     )
         # except Exception as e:
         #     logger.error(f"向帖子 {thread.id} 发送可见性视图失败", exc_info=True)
+
+    async def _invalidate_similarity_cache(self, thread_id: int) -> None:
+        """尽力失效源帖的相似推荐候选池。"""
+        try:
+            await invalidate_similar_candidate_pools(
+                RedisManager.get_client(), thread_id
+            )
+        except Exception:
+            logger.warning(
+                "失效相似帖子候选池失败: thread_id=%s", thread_id, exc_info=True
+            )
 
     # ---------------------------------------------------------
     # 互斥标签逻辑

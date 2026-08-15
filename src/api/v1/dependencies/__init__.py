@@ -8,6 +8,7 @@ from api.v1.dependencies.security import (
 from api.v1.dependencies.rate_limit import (
     initialize_rate_limit,
     search_rate_limit,
+    similar_rate_limit,
 )
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "require_auth",
     "require_api_key",
     "search_rate_limit",
+    "similar_rate_limit",
     "initialize_rate_limit",
 ]

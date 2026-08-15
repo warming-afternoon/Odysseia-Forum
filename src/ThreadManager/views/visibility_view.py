@@ -4,7 +4,9 @@ import discord
 import logging
 from typing import TYPE_CHECKING
 from core.thread_repository import ThreadRepository
+from shared.redis_client import RedisManager
 from shared.safe_defer import safe_defer
+from shared.similar_threads_cache import invalidate_similar_candidate_pools
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -65,6 +67,18 @@ class ThreadVisibilityView(discord.ui.View):
 
                 new_status = not current_status
                 await repo.update_thread_visibility(thread.id, new_status)
+
+            # 可见性变化会改变推荐资格，立即清除源帖的两类候选池。
+            try:
+                await invalidate_similar_candidate_pools(
+                    RedisManager.get_client(), thread.id
+                )
+            except Exception:
+                logger.warning(
+                    "失效相似帖子候选池失败: thread_id=%s",
+                    thread.id,
+                    exc_info=True,
+                )
 
             status_text = "可见" if new_status else "隐藏"
             await interaction.followup.send(

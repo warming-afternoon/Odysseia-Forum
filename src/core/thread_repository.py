@@ -27,7 +27,6 @@ from shared.fts_utils import build_fts_conditions
 logger = logging.getLogger(__name__)
 
 
-
 class ThreadRepository:
     """封装与 Thread 表相关的数据库操作。"""
 
@@ -87,9 +86,7 @@ class ThreadRepository:
         """聚合作者全部可公开作品的数量、反应与回复统计。"""
         statement = select(
             func.count(Thread.id).label("thread_count"),
-            func.coalesce(func.sum(Thread.reaction_count), 0).label(
-                "reaction_count"
-            ),
+            func.coalesce(func.sum(Thread.reaction_count), 0).label("reaction_count"),
             func.coalesce(func.sum(Thread.reply_count), 0).label("reply_count"),
         ).where(
             Thread.author_id == author_id,
@@ -190,9 +187,11 @@ class ThreadRepository:
         count = (await self.session.execute(statement)).scalar_one()
         return int(count) == len(unique_thread_ids)
 
-    async def add_or_update_thread_with_tags(self, thread_data: dict, tags: list[Tag]):
+    async def add_or_update_thread_with_tags(
+        self, thread_data: dict, tags: list[Tag]
+    ) -> bool:
         """
-        添加或更新一个帖子及其标签。
+        添加或更新一个帖子及其标签，并返回标签集合是否变化。
         """
         # 查找现有帖子
         statement = (
@@ -214,6 +213,7 @@ class ThreadRepository:
 
             tags_to_add_ids = new_tag_ids - current_tag_ids
             tags_to_remove_ids = current_tag_ids - new_tag_ids
+            tags_changed = bool(tags_to_add_ids or tags_to_remove_ids)
 
             # 移除不再需要的标签关联
             if tags_to_remove_ids:
@@ -232,7 +232,9 @@ class ThreadRepository:
             new_thread = Thread(**thread_data)
             new_thread.tags = tags
             self.session.add(new_thread)
+            tags_changed = True
         await self.session.commit()
+        return tags_changed
 
     async def delete_thread_index(self, thread_id: int):
         """删除帖子记录"""
@@ -744,6 +746,25 @@ class ThreadRepository:
         stmt = select(Thread.show_flag).where(Thread.thread_id == thread_id)
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
+
+    async def is_thread_searchable(
+        self,
+        thread_id: int,
+        exclude_channel_ids: list[int] | None = None,
+    ) -> bool:
+        """轻量校验帖子是否存在、可见且位于用户可访问的频道。"""
+        filters = [
+            Thread.thread_id == thread_id,
+            Thread.not_found_count == 0,
+            Thread.show_flag,
+        ]
+        if exclude_channel_ids:
+            filters.append(
+                Thread.channel_id.notin_(exclude_channel_ids)  # type: ignore[arg-type]
+            )
+        statement = select(Thread.thread_id).where(*filters).limit(1)
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none() is not None
 
     async def get_fts_matched_thread_ids(
         self,

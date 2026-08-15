@@ -72,6 +72,7 @@ cp .env.example .env
 | `api.cors_origins` | string[] | [] | CORS 允许的来源域名列表 |
 | `api.api_key` | string | — | 机机通信 API Key（赛事等接口需要） |
 | `api.rate_limit.search.max_requests` | number | 60 | 搜索接口每窗口最大请求数 |
+| `api.rate_limit.similar.max_requests` | number | 60 | 相似推荐接口每窗口最大请求数 |
 
 #### 认证 (`auth`)
 
@@ -156,6 +157,9 @@ cp .env.example .env
 | `BOT_TOKEN` | 是 | Discord 机器人 Token（若 `config.json` 中未设置） |
 | `PG_PASSWORD` | 否 | PostgreSQL 密码（Docker 部署默认 `changeme`） |
 | `DATABASE_URL` | 否 | 完整数据库连接 URL（非 Docker 部署使用） |
+| `DB_POOL_SIZE` | 否 | 数据库常驻连接数，默认 `5` |
+| `DB_MAX_OVERFLOW` | 否 | 连接池临时溢出连接数，默认 `8` |
+| `DB_POOL_TIMEOUT` | 否 | 获取连接的最长等待秒数，默认 `30` |
 | `REDIS_URL` | 否 | 完整 Redis 连接 URL（非 Docker 部署使用） |
 | `BACKUP_ENCRYPTION_KEY` | 否 | 备份加密密钥（Base64 编码的 32 字节密钥） |
 

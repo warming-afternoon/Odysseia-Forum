@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 
 from api.v1.dependencies.security import get_current_user, require_auth
-from api.v1.dependencies.rate_limit import search_rate_limit
+from api.v1.dependencies.rate_limit import search_rate_limit, similar_rate_limit
 from api.v1.schemas.banner import BannerItem
 from api.v1.schemas.search import (
     AuthorSuggestion,
@@ -31,11 +31,14 @@ from core.follow_repository import ThreadFollowRepository
 from core.impression_cache_service import ImpressionCacheService
 from core.preferences_repository import PreferencesRepository
 from core.tag_cache_service import TagCacheService
+from core.thread_repository import ThreadRepository
 from dto.preferences import UserSearchPreferencesDTO
 from dto.search import SearchConfigDTO
 from search.qo.thread_search import ThreadSearchQuery
 from models import Thread
 from search.search_service import SearchService
+from search.similar_threads_busy_error import SimilarThreadsBusyError
+from search.similar_threads_cache_service import SimilarThreadsCacheService
 from search.suggestion_service import SuggestionService
 from shared.enum import AbyssDefaults, CollectionType, SearchTimeout, TargetType
 from shared.channel_mapping_utils import ChannelMappingUtils
@@ -48,6 +51,7 @@ async_session_factory: async_sessionmaker | None = None
 cache_service_instance: CacheService | None = None
 tag_cache_service_instance: TagCacheService | None = None
 impression_cache_service_instance: ImpressionCacheService | None = None
+similar_threads_cache_service_instance: SimilarThreadsCacheService | None = None
 # 频道映射配置: { target_channel_id: [ { "tag_name": str, "source_channel_ids": [int] } ] }
 channel_mappings_config: Dict[int, List[Dict]] = {}
 
@@ -379,6 +383,7 @@ async def get_similar_threads(
     thread_id: int | str,
     limit: int = Query(default=5, ge=1, le=20, description="最大返回结果数量"),
     current_user: Dict[str, Any] = Depends(get_current_user),
+    _rate_limit: None = Depends(similar_rate_limit),
 ):
     """根据指定帖子的 TAG 来匹配相似帖子。
 
@@ -400,6 +405,7 @@ async def get_similar_threads(
         or not cache_service_instance
         or not tag_cache_service_instance
         or not impression_cache_service_instance
+        or not similar_threads_cache_service_instance
     ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -411,36 +417,78 @@ async def get_similar_threads(
     # [深渊区权限判断] 读取用户身份组，屏蔽无权限查看的深渊区频道
     user_roles = current_user.get("roles", []) if current_user else []
     exclude_channel_ids: list[int] = []
+    include_abyss = False
     if abyss_config:
         required_role = str(abyss_config.get("required_role_id", ""))
         abyss_channels: list[int] = abyss_config.get("channel_ids", [])
-        if not user_roles or required_role not in [str(r) for r in user_roles]:
+        include_abyss = bool(user_roles) and required_role in [
+            str(role_id) for role_id in user_roles
+        ]
+        if not include_abyss:
             exclude_channel_ids.extend(abyss_channels)
     exclude_channel_ids = list(set(exclude_channel_ids))
 
     try:
+        redis_client = getattr(cache_service_instance, "_redis", None)
+        prefs = None
+        if user_id and redis_client:
+            prefs = await get_user_preferences_cached(
+                redis_client,
+                async_session_factory,
+                user_id,
+                main_guild_id,
+            )
+
+        # 每次请求只用单列投影实时校验源帖权限，不预加载作者和标签。
         async with async_session_factory() as session:
-            service = SearchService(session, tag_cache_service_instance)
-            source_thread = await asyncio.wait_for(
-                service.get_thread_by_discord_id(thread_id_int),
+            thread_repo = ThreadRepository(session)
+            source_is_searchable = await asyncio.wait_for(
+                thread_repo.is_thread_searchable(
+                    thread_id_int,
+                    exclude_channel_ids=exclude_channel_ids or None,
+                ),
                 timeout=SearchTimeout.THREAD_DETAIL.value,
             )
-            if not source_thread:
+            if not source_is_searchable:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="帖子不存在或不可查看",
                 )
 
-            ucb1_config = await cache_service_instance.get_ucb1_config()
+        ucb1_config = await cache_service_instance.get_ucb1_config()
 
-            threads, matched_tag_count = await asyncio.wait_for(
-                service.find_similar_threads(
-                    source_thread,
-                    limit=limit,
+        async def build_candidates():
+            """用独立 Session 构建可跨请求共享的候选池。"""
+            async with async_session_factory() as build_session:
+                build_service = SearchService(build_session, tag_cache_service_instance)
+                return await build_service.build_similar_thread_candidates(
+                    thread_id_int,
+                    candidate_limit=(
+                        similar_threads_cache_service_instance.CANDIDATE_LIMIT
+                    ),
                     exclude_channel_ids=exclude_channel_ids or None,
                     ucb1_config=ucb1_config,
-                ),
-                timeout=SearchTimeout.SIMILAR_THREADS.value,
+                    timeout_seconds=SearchTimeout.SIMILAR_THREADS.value,
+                )
+
+        candidate_pool = await similar_threads_cache_service_instance.get_or_build(
+            thread_id_int,
+            include_abyss,
+            build_candidates,
+        )
+
+        async with async_session_factory() as session:
+            service = SearchService(session, tag_cache_service_instance)
+            (
+                threads,
+                matched_tag_count,
+            ) = await service.filter_and_rank_similar_candidates(
+                candidate_pool.candidates,
+                limit=limit,
+                prefs=prefs,
+                exclude_channel_ids=exclude_channel_ids or None,
+                time_decay=ucb1_config.reddit_hot_time_decay,
+                redis_client=redis_client,
             )
 
             # 查当前用户的收藏状态
@@ -458,10 +506,21 @@ async def get_similar_threads(
             results = builder.build_list(threads, collected_thread_ids)
 
             return SimilarThreadsResponse(
-                source_thread_id=source_thread.thread_id,
+                source_thread_id=thread_id_int,
                 matched_tag_count=matched_tag_count,
                 results=results,
             )
+    except LookupError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="帖子不存在或不可查看",
+        )
+    except SimilarThreadsBusyError:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="相似推荐正在繁忙，请稍后重试",
+            headers={"Retry-After": "2"},
+        )
     except asyncio.TimeoutError:
         logger.warning(f"获取相似帖子超时: thread_id={thread_id}")
         raise HTTPException(
@@ -607,7 +666,6 @@ def _merge_user_preferences(request: SearchRequest, prefs: UserSearchPreferences
             # 如果偏好设置中有非空有效值，则覆盖默认值
             if pref_value is not None and pref_value != "":
                 setattr(request, req_key, pref_value)
-
 
 
 async def _perform_search_and_update_counts(

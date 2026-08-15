@@ -13,6 +13,8 @@ from core.thread_repository import ThreadRepository
 from dto.open_graph import ThreadSyncResult
 from shared.discord_utils import DiscordUtils
 from shared.image_url_utils import extract_message_image_urls
+from shared.redis_client import RedisManager
+from shared.similar_threads_cache import invalidate_similar_candidate_pools
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -32,6 +34,17 @@ class SyncService:
     ):
         self.bot = bot
         self.session_factory = session_factory
+
+    async def _invalidate_similarity_cache(self, thread_id: int) -> None:
+        """尽力失效源帖候选池，Redis 故障不影响同步主流程。"""
+        try:
+            await invalidate_similar_candidate_pools(
+                RedisManager.get_client(), thread_id
+            )
+        except Exception:
+            logger.warning(
+                "失效相似帖子候选池失败: thread_id=%s", thread_id, exc_info=True
+            )
 
     async def _save_author_to_db(
         self,
@@ -286,7 +299,11 @@ class SyncService:
                     )
                     async with self.session_factory() as session:
                         repo = ThreadRepository(session=session)
-                        await repo.increment_not_found_count(thread_id=thread_id)
+                        changed = await repo.increment_not_found_count(
+                            thread_id=thread_id
+                        )
+                    if changed:
+                        await self._invalidate_similarity_cache(thread_id)
                     return ThreadSyncResult(
                         success=False, error_code="discord_invalid_channel"
                     )
@@ -297,14 +314,18 @@ class SyncService:
                 )
                 async with self.session_factory() as session:
                     repo = ThreadRepository(session=session)
-                    await repo.increment_not_found_count(thread_id=thread_id)
+                    changed = await repo.increment_not_found_count(thread_id=thread_id)
+                if changed:
+                    await self._invalidate_similarity_cache(thread_id)
                 return ThreadSyncResult(success=False, error_code="discord_not_found")
             except Exception as e:
                 logger.error(
                     f"sync_thread: 通过ID {thread_id} 获取帖子时发生未知错误: {e}",
                     exc_info=True,
                 )
-                return ThreadSyncResult(success=False, error_code="discord_fetch_failed")
+                return ThreadSyncResult(
+                    success=False, error_code="discord_fetch_failed"
+                )
 
         elif fetch_if_incomplete:
             try:
@@ -319,7 +340,9 @@ class SyncService:
                 )
                 async with self.session_factory() as session:
                     repo = ThreadRepository(session=session)
-                    await repo.increment_not_found_count(thread_id=thread.id)
+                    changed = await repo.increment_not_found_count(thread_id=thread.id)
+                if changed:
+                    await self._invalidate_similarity_cache(thread.id)
                 return ThreadSyncResult(success=False, error_code="discord_not_found")
             except Exception as e:
                 logger.error(
@@ -354,12 +377,15 @@ class SyncService:
                 tags = await tag_repo.get_or_create_tags(tags_data)
 
                 repo = ThreadRepository(session=session)
-                await repo.add_or_update_thread_with_tags(
+                tags_changed = await repo.add_or_update_thread_with_tags(
                     thread_data=thread_data, tags=tags
                 )
         except Exception:
             logger.exception(f"帖子 {thread.id} 数据库提交失败")
             return ThreadSyncResult(success=False, error_code="database_failed")
+
+        if tags_changed:
+            await self._invalidate_similarity_cache(thread.id)
 
         try:
             # 检查是否是首次被关注（检查关注表而不是帖子表）

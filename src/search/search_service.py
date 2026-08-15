@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from typing import Sequence
@@ -8,7 +9,13 @@ from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
 from core.thread_repository import ThreadRepository
-from dto.search import SearchConfigDTO
+from dto.preferences import UserSearchPreferencesDTO
+from dto.search import (
+    SearchConfigDTO,
+    SimilarThreadCandidateDTO,
+    SimilarThreadSourceDTO,
+    SimilarThreadSourceTagDTO,
+)
 from models import Author, Tag, Thread, ThreadTagLink, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
@@ -500,7 +507,11 @@ class SearchService:
         result = await self.session.execute(statement)
         return result.scalars().all()
 
-    async def get_thread_by_discord_id(self, discord_thread_id: int) -> Thread | None:
+    async def get_thread_by_discord_id(
+        self,
+        discord_thread_id: int,
+        exclude_channel_ids: list[int] | None = None,
+    ) -> Thread | None:
         """按 Discord thread_id 取单帖（含标签与作者），仅返回仍参与搜索的帖子。"""
         statement = (
             select(Thread)
@@ -514,6 +525,10 @@ class SearchService:
                 joinedload(Thread.author),  # type: ignore
             )
         )
+        if exclude_channel_ids:
+            statement = statement.where(
+                Thread.channel_id.notin_(exclude_channel_ids)  # type: ignore[arg-type]
+            )
         result = await self.session.execute(statement)
         return result.scalars().first()
 
@@ -646,3 +661,231 @@ class SearchService:
                 break
 
         return collected, matched_tag_count
+
+    async def build_similar_thread_candidates(
+        self,
+        source_thread_id: int,
+        *,
+        candidate_limit: int,
+        exclude_channel_ids: list[int] | None,
+        ucb1_config: SearchConfigDTO,
+        timeout_seconds: float,
+    ) -> tuple[list[SimilarThreadCandidateDTO], bool]:
+        """按现有逐级放宽逻辑构建只包含 ID 的共享候选池。"""
+        if candidate_limit <= 0:
+            return [], True
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+
+        # 冷构建仅投影源帖 ID 与标签，避免加载完整 ORM 实体和作者。
+        source = await asyncio.wait_for(
+            self._get_similar_thread_source(
+                source_thread_id,
+                exclude_channel_ids=exclude_channel_ids,
+            ),
+            timeout=max(0.001, deadline - loop.time()),
+        )
+        if source is None:
+            raise LookupError("源帖不存在或当前用户不可查看")
+        if not source.tags:
+            return [], True
+
+        tag_id_to_name = {tag.tag_id: tag.tag_name for tag in source.tags}
+        usage_counts = await asyncio.wait_for(
+            self.get_tag_usage_counts(list(tag_id_to_name.keys())),
+            timeout=max(0.001, deadline - loop.time()),
+        )
+
+        name_to_count: dict[str, int] = {}
+        for tag_id, tag_name in tag_id_to_name.items():
+            name_to_count[tag_name] = name_to_count.get(tag_name, 0) + usage_counts.get(
+                tag_id, 0
+            )
+        ordered_tag_names = sorted(
+            name_to_count, key=lambda name: (-name_to_count[name], name)
+        )
+
+        candidates: list[SimilarThreadCandidateDTO] = []
+        seen_thread_ids = {source.thread_id}
+        for matched_tag_count in range(len(ordered_tag_names), 0, -1):
+            remaining = candidate_limit - len(candidates)
+            if remaining <= 0:
+                return candidates, True
+            try:
+                thread_ids = await asyncio.wait_for(
+                    self._find_similar_candidate_ids(
+                        tag_names=ordered_tag_names[:matched_tag_count],
+                        limit=remaining,
+                        exclude_thread_ids=seen_thread_ids,
+                        exclude_channel_ids=exclude_channel_ids,
+                        time_decay=ucb1_config.reddit_hot_time_decay,
+                    ),
+                    timeout=max(0.001, deadline - loop.time()),
+                )
+            except asyncio.TimeoutError:
+                if candidates:
+                    return candidates, False
+                raise
+
+            for thread_id in thread_ids:
+                if thread_id in seen_thread_ids:
+                    continue
+                candidates.append(
+                    SimilarThreadCandidateDTO(
+                        thread_id=thread_id,
+                        matched_tag_count=matched_tag_count,
+                    )
+                )
+                seen_thread_ids.add(thread_id)
+
+        return candidates, True
+
+    async def _get_similar_thread_source(
+        self,
+        source_thread_id: int,
+        *,
+        exclude_channel_ids: list[int] | None,
+    ) -> SimilarThreadSourceDTO | None:
+        """用单条投影查询读取可访问源帖及其标签。"""
+        filters = [
+            Thread.thread_id == source_thread_id,
+            Thread.not_found_count == 0,
+            Thread.show_flag,
+        ]
+        if exclude_channel_ids:
+            filters.append(
+                Thread.channel_id.notin_(exclude_channel_ids)  # type: ignore[arg-type]
+            )
+
+        # 外连接确保无标签的合法源帖仍能与无权限、已删除源帖区分。
+        statement = (
+            select(Thread.thread_id, Tag.id, Tag.name)
+            .select_from(Thread)
+            .outerjoin(
+                ThreadTagLink,
+                Thread.id == ThreadTagLink.thread_id,  # type: ignore[arg-type]
+            )
+            .outerjoin(Tag, ThreadTagLink.tag_id == Tag.id)  # type: ignore[arg-type]
+            .where(*filters)
+        )
+        rows = (await self.session.execute(statement)).all()
+        if not rows:
+            return None
+
+        tags = [
+            SimilarThreadSourceTagDTO(tag_id=tag_id, tag_name=tag_name)
+            for _, tag_id, tag_name in rows
+            if tag_id is not None and tag_name is not None
+        ]
+        return SimilarThreadSourceDTO(thread_id=rows[0][0], tags=tags)
+
+    async def filter_and_rank_similar_candidates(
+        self,
+        candidates: list[SimilarThreadCandidateDTO],
+        *,
+        limit: int,
+        prefs: UserSearchPreferencesDTO | None,
+        exclude_channel_ids: list[int] | None,
+        time_decay: float,
+        redis_client=None,
+    ) -> tuple[list[Thread], int]:
+        """实时应用用户反选项，并按匹配层级和最新 Reddit Hot 排序。"""
+        if not candidates or limit <= 0:
+            return [], 0
+
+        candidate_ids = [candidate.thread_id for candidate in candidates]
+        matched_levels = {
+            candidate.thread_id: candidate.matched_tag_count for candidate in candidates
+        }
+        original_positions = {
+            candidate.thread_id: index for index, candidate in enumerate(candidates)
+        }
+        filters = [
+            Thread.thread_id.in_(candidate_ids),  # type: ignore[arg-type]
+            Thread.not_found_count == 0,
+            Thread.show_flag,
+        ]
+        if exclude_channel_ids:
+            filters.append(
+                Thread.channel_id.notin_(exclude_channel_ids)  # type: ignore[arg-type]
+            )
+        if prefs and prefs.exclude_authors:
+            filters.append(
+                Thread.author_id.notin_(prefs.exclude_authors)  # type: ignore[arg-type]
+            )
+        if prefs and prefs.exclude_tags:
+            excluded_tag_ids = [
+                tag_id
+                for tag_name in prefs.exclude_tags
+                for tag_id in self.tag_cache_service.get_ids_by_tag_name(tag_name)
+            ]
+            if excluded_tag_ids:
+                filters.append(~Thread.tags.any(Tag.id.in_(excluded_tag_ids)))  # type: ignore
+
+        if prefs and prefs.exclude_keywords:
+            thread_repo = ThreadRepository(self.session)
+            fts_result = await thread_repo.get_fts_matched_thread_ids(
+                keywords=None,
+                exclude_keywords=prefs.exclude_keywords,
+                exemption_markers=prefs.exclude_keyword_exemption_markers,
+                redis_client=redis_client,
+            )
+            if fts_result.has_exclude:
+                filters.append(~fts_result.exclude_condition)
+
+        statement = select(Thread).where(and_(*filters))
+        statement = statement.options(
+            selectinload(Thread.tags),  # type: ignore
+            joinedload(Thread.author),  # type: ignore
+        )
+        statement, hot_score = self._apply_reddit_hot_ranking(statement, time_decay)
+        matched_level = case(
+            matched_levels,
+            value=Thread.thread_id,
+            else_=0,
+        )
+        original_position = case(
+            original_positions,
+            value=Thread.thread_id,
+            else_=len(candidates),
+        )
+        statement = statement.order_by(
+            matched_level.desc(), hot_score.desc(), original_position.asc()
+        ).limit(limit)
+
+        result = await self.session.execute(statement)
+        threads = list(result.scalars().unique().all())
+        selected_levels = [matched_levels[thread.thread_id] for thread in threads]
+        return threads, min(selected_levels, default=0)
+
+    async def _find_similar_candidate_ids(
+        self,
+        *,
+        tag_names: list[str],
+        limit: int,
+        exclude_thread_ids: set[int],
+        exclude_channel_ids: list[int] | None,
+        time_decay: float,
+    ) -> list[int]:
+        """查询一个标签匹配层级的候选 Discord 帖子 ID。"""
+        filters = [Thread.not_found_count == 0, Thread.show_flag]
+        if exclude_thread_ids:
+            filters.append(
+                Thread.thread_id.notin_(exclude_thread_ids)  # type: ignore[arg-type]
+            )
+        if exclude_channel_ids:
+            filters.append(
+                Thread.channel_id.notin_(exclude_channel_ids)  # type: ignore[arg-type]
+            )
+        for tag_name in tag_names:
+            tag_ids = self.tag_cache_service.get_ids_by_tag_name(tag_name)
+            if not tag_ids:
+                return []
+            filters.append(Thread.tags.any(Tag.id.in_(tag_ids)))  # type: ignore
+
+        statement = select(Thread.thread_id).where(and_(*filters))
+        statement, hot_score = self._apply_reddit_hot_ranking(statement, time_decay)
+        statement = statement.order_by(hot_score.desc()).limit(limit)
+        result = await self.session.execute(statement)
+        return list(result.scalars().all())

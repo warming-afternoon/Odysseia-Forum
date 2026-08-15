@@ -9,6 +9,9 @@ class RateLimitDefaults(IntEnum):
     SEARCH_MAX_REQUESTS = 60
     """搜索接口每分钟最大请求数"""
 
+    SIMILAR_MAX_REQUESTS = 60
+    """相似推荐接口每分钟最大请求数"""
+
     GLOBAL_MAX_REQUESTS = 1500
     """全局限流每分钟最大请求数（所有 /v1/* 接口）"""
 

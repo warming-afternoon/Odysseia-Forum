@@ -12,12 +12,31 @@ DATABASE_URL = os.environ.get(
     "postgresql+asyncpg://odysseia:changeme@localhost:5432/odysseia",
 )
 
+
+def _read_pool_int(name: str, default: int, *, minimum: int) -> int:
+    """读取并校验数据库连接池整数配置。"""
+    raw_value = os.environ.get(name)
+    if raw_value is None:
+        return default
+    try:
+        value = int(raw_value)
+    except ValueError as exc:
+        raise RuntimeError(f"{name} 必须是整数，当前值: {raw_value!r}") from exc
+    if value < minimum:
+        raise RuntimeError(f"{name} 必须大于等于 {minimum}，当前值: {value}")
+    return value
+
+
+DB_POOL_SIZE = _read_pool_int("DB_POOL_SIZE", 5, minimum=1)
+DB_MAX_OVERFLOW = _read_pool_int("DB_MAX_OVERFLOW", 8, minimum=0)
+DB_POOL_TIMEOUT = _read_pool_int("DB_POOL_TIMEOUT", 30, minimum=1)
+
 async_engine = create_async_engine(
     DATABASE_URL,
     echo=False,
-    pool_size=5,
-    max_overflow=8,
-    pool_timeout=30,
+    pool_size=DB_POOL_SIZE,
+    max_overflow=DB_MAX_OVERFLOW,
+    pool_timeout=DB_POOL_TIMEOUT,
     pool_pre_ping=True,
     pool_recycle=3600,
 )

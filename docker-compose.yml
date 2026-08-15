@@ -94,6 +94,8 @@ services:
       BOT_TOKEN: "${BOT_TOKEN}"
       REDIS_URL: redis://odysseia-redis:6379/0
       DATABASE_URL: "postgresql+asyncpg://odysseia:${PG_PASSWORD:-changeme}@odysseia-postgres:5432/odysseia"
+      DB_POOL_SIZE: "6"
+      DB_MAX_OVERFLOW: "12"
     depends_on:
       odysseia-postgres:
         condition: service_healthy
