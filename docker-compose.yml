@@ -92,6 +92,7 @@ services:
     environment:
       PYTHONPATH: /app/src
       BOT_TOKEN: "${BOT_TOKEN}"
+      AUTH_BOT_TOKENS: "${AUTH_BOT_TOKENS:-}"
       REDIS_URL: redis://odysseia-redis:6379/0
       DATABASE_URL: "postgresql+asyncpg://odysseia:${PG_PASSWORD:-changeme}@odysseia-postgres:5432/odysseia"
       DB_POOL_SIZE: "6"
