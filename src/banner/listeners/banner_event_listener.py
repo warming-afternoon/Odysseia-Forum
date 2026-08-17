@@ -130,16 +130,17 @@ class BannerEventListener(commands.Cog):
     async def on_banner_form_submit(
         self,
         interaction: discord.Interaction,
-        thread_id: int,
+        target_id: int,
         cover_image_url: str,
+        guild_id: int,
     ):
-        """处理 banner_form_submit 事件：预验证帖子 → 展示 ChannelSelectionView。"""
+        """处理 banner_form_submit 事件：预验证目标 → 展示 ChannelSelectionView。"""
         try:
             async with self.session_factory() as session:
                 service = BannerService(session)
                 validation = await service.validate_application_request(
-                    target_id=thread_id,
-                    guild_id=interaction.guild_id or 0,
+                    target_id=target_id,
+                    guild_id=guild_id,
                     applicant_id=interaction.user.id,
                     cover_image_url=cover_image_url,
                 )
@@ -153,25 +154,24 @@ class BannerEventListener(commands.Cog):
                 # 渠道目标使用 target_name，论坛帖子使用 thread.title
                 if validation.target_type == TargetType.CHANNEL.value:
                     target_title = validation.target_name
-                    target_channel_id = thread_id
+                    target_channel_id = target_id
                 elif validation.thread:
                     target_title = validation.thread.title
                     target_channel_id = validation.thread.channel_id
                 else:
                     await interaction.followup.send(
-                        "❌ 无法获取有效的目标信息，请检查ID或联系管理员。",
+                        "❌ 无法获取有效的目标信息，请检查链接或ID并联系管理员。",
                         ephemeral=True,
                     )
                     return
 
             # 构建目标链接
-            guild_id = interaction.guild_id or 0
-            target_link = f"https://discord.com/channels/{guild_id}/{thread_id}"
+            target_link = f"https://discord.com/channels/{guild_id}/{target_id}"
 
             # 展示频道选择视图
             view = ChannelSelectionView(
                 available_channels=self.config.get("available_channels", {}),
-                thread_id=thread_id,
+                thread_id=target_id,
                 channel_id=target_channel_id,
                 cover_image_url=cover_image_url,
                 applicant_id=interaction.user.id,

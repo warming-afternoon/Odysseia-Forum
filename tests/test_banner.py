@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 from api.v1.schemas.banner import BannerApplicationRequest
 from banner.banner_service import BannerService
 from banner.dto.application_result import ApplicationResult
+from banner.views.application_form_modal import ApplicationFormModal
 from models import BannerApplication, BannerCarousel, BannerWaitlist
 from models.channel import Channel as ChannelModel
 from shared.enum import ApplicationStatus, TargetType
@@ -125,6 +126,22 @@ class TestParseThreadLink:
         )
         assert result == (1134557553011998840, 1374474903981527082)
 
+    def test_message_url(self):
+        """带消息 ID 的 Discord URL 忽略末尾消息 ID。"""
+        result = self._parse(
+            "https://discord.com/channels/1134557553011998840/"
+            "1374474903981527082/1417064059782000640"
+        )
+        assert result == (1134557553011998840, 1374474903981527082)
+
+    def test_message_url_with_trailing_slash(self):
+        """带消息 ID 和尾部斜杠的 Discord URL 正常解析。"""
+        result = self._parse(
+            "https://discord.com/channels/1134557553011998840/"
+            "1374474903981527082/1417064059782000640/"
+        )
+        assert result == (1134557553011998840, 1374474903981527082)
+
     def test_plain_numeric_id(self):
         """纯数字 ID → 使用 main_guild_id 拼接。"""
         result = self._parse("1234567890123456789")
@@ -141,6 +158,75 @@ class TestParseThreadLink:
     def test_no_main_guild_id(self):
         """未配置 main_guild_id 时纯数字 ID 返回 None。"""
         assert self._parse("1234567890123456789", main_guild_id=0) is None
+
+
+class TestApplicationFormModal:
+    """Discord BOT Banner 申请弹窗测试。"""
+
+    @staticmethod
+    def _interaction(guild_id: int = 1134557553011998840) -> MagicMock:
+        """构造弹窗提交所需的 Discord 交互对象。"""
+        interaction = MagicMock()
+        interaction.guild_id = guild_id
+        interaction.response.defer = AsyncMock()
+        interaction.followup.send = AsyncMock()
+        interaction.client.dispatch = MagicMock()
+        return interaction
+
+    @pytest.mark.asyncio
+    async def test_submit_message_url(self):
+        """消息 URL 解析后分发中间的帖子或频道 ID。"""
+        modal = ApplicationFormModal()
+        modal.target_link._value = (
+            "https://discord.com/channels/1134557553011998840/"
+            "1374474903981527082/1417064059782000640"
+        )
+        modal.cover_image_url._value = "https://example.com/banner.png"
+        interaction = self._interaction()
+
+        await modal.on_submit(interaction)
+
+        interaction.client.dispatch.assert_called_once_with(
+            "banner_form_submit",
+            interaction,
+            1374474903981527082,
+            "https://example.com/banner.png",
+            1134557553011998840,
+        )
+
+    @pytest.mark.asyncio
+    async def test_submit_plain_id(self):
+        """纯数字 ID 使用当前交互的服务器 ID。"""
+        modal = ApplicationFormModal()
+        modal.target_link._value = "1374474903981527082"
+        modal.cover_image_url._value = "https://example.com/banner.png"
+        interaction = self._interaction()
+
+        await modal.on_submit(interaction)
+
+        interaction.client.dispatch.assert_called_once_with(
+            "banner_form_submit",
+            interaction,
+            1374474903981527082,
+            "https://example.com/banner.png",
+            1134557553011998840,
+        )
+
+    @pytest.mark.asyncio
+    async def test_reject_invalid_target(self):
+        """无效链接不分发申请事件。"""
+        modal = ApplicationFormModal()
+        modal.target_link._value = "https://example.com/not-discord"
+        modal.cover_image_url._value = "https://example.com/banner.png"
+        interaction = self._interaction()
+
+        await modal.on_submit(interaction)
+
+        interaction.followup.send.assert_awaited_once_with(
+            "❌ 请输入有效的 Discord 帖子/赛事频道链接或纯数字 ID",
+            ephemeral=True,
+        )
+        interaction.client.dispatch.assert_not_called()
 
 
 class TestBannerApplicationRequest:

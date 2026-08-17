@@ -7,7 +7,8 @@ class ThreadLinkParser:
     """Parse Discord thread/channel links without maintaining state."""
 
     _THREAD_LINK_PATTERN = re.compile(
-        r"^https?://(?:.*\.)?discord\.com/channels/(\d{17,20})/(\d{17,20})/?$"
+        r"^https?://(?:.*\.)?discord\.com/channels/(\d{17,20})/(\d{17,20})"
+        r"(?:/\d{17,20})?/?$"
     )
     _THREAD_URL_PATTERN = re.compile(
         r"https?://(?:www\.)?discord\.com/channels/(\d+)/(\d+)"

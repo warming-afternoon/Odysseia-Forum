@@ -139,7 +139,7 @@ class BannerManagement(commands.Cog):
             embed = discord.Embed(
                 title="🎨 Banner申请",
                 description=(
-                    "点击下方按钮申请将您的帖子展示在论坛Banner轮播中！\n\n"
+                    "点击下方按钮申请将您的帖子或赛事展示在论坛Banner轮播中！\n\n"
                     f"**申请资格**: {role_mention}\n"
                     "**展示时长**: 3天\n"
                     "**全频道限制**: 最多3个\n"
