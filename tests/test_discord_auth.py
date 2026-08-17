@@ -55,6 +55,10 @@ class FakeRedis:
         """模拟带过期时间的 Redis SETEX。"""
         self.values[key] = value
 
+    async def delete(self, key: str):
+        """删除内存键并返回是否存在。"""
+        return int(self.values.pop(key, None) is not None)
+
     async def eval(self, script: str, key_count: int, key: str, owner: str):
         """模拟仅由锁持有者释放锁。"""
         if self.values.get(key) == owner:
@@ -70,12 +74,28 @@ class FakeMemberVerifier:
         """保存固定结果。"""
         self.result = result
         self.delay = delay
+        self.call_count = 0
 
     async def verify_member(self, user_id: str, attempt_id: str, client=None):
         """返回固定成员结果。"""
+        self.call_count += 1
         if self.delay:
             await asyncio.sleep(self.delay)
         return self.result
+
+
+class QueueMemberVerifier:
+    """按顺序返回成员验证结果，用于模拟身份组恢复。"""
+
+    def __init__(self, results: list[DiscordMemberVerificationDto]):
+        """保存等待依次返回的验证结果。"""
+        self.results = deque(results)
+        self.call_count = 0
+
+    async def verify_member(self, user_id: str, attempt_id: str, client=None):
+        """返回下一项成员验证结果。"""
+        self.call_count += 1
+        return self.results.popleft()
 
 
 class FakeOAuthHttpClient:
@@ -175,6 +195,27 @@ def _stub_unread_query(monkeypatch) -> None:
     monkeypatch.setattr(
         core.follow_repository, "ThreadFollowRepository", FakeFollowRepository
     )
+
+
+@pytest.mark.asyncio
+async def test_member_cache_refuses_missing_required_role(monkeypatch):
+    """缓存写入层拒绝保存缺少论坛身份组的成员快照。"""
+    _configure_auth(monkeypatch)
+    fake_redis = FakeRedis()
+    cache_key = "user:discord:123"
+    fake_redis.values[cache_key] = "stale-value"
+    monkeypatch.setattr(auth.RedisManager, "get_client", lambda: fake_redis)
+
+    await auth._cache_member(
+        "123",
+        {
+            "roles": ["other-role"],
+            "user": {"id": "123", "username": "reader"},
+            "roles_verified_at": time.time(),
+        },
+    )
+
+    assert cache_key not in fake_redis.values
 
 
 @pytest.mark.asyncio
@@ -334,6 +375,76 @@ async def test_duplicate_oauth_callback_exchanges_code_once(monkeypatch, caplog)
 
 
 @pytest.mark.asyncio
+async def test_oauth_role_failure_does_not_block_same_code_retry(monkeypatch, caplog):
+    """缺少身份组不写长缓存，同一 code 可复用用户资料重新验证。"""
+    _configure_auth(monkeypatch)
+    fake_redis = FakeRedis()
+    verifier = QueueMemberVerifier(
+        [
+            DiscordMemberVerificationDto(
+                outcome="verified",
+                member={"roles": ["other-role"], "user": {"id": "123"}},
+                status_code=200,
+                token_alias="primary",
+            ),
+            DiscordMemberVerificationDto(
+                outcome="verified",
+                member={
+                    "roles": ["allowed-role"],
+                    "user": {"id": "123", "username": "reader"},
+                },
+                status_code=200,
+                token_alias="aux-1",
+            ),
+        ]
+    )
+    cache_writes: list[dict] = []
+    invalidations: list[tuple[str, str]] = []
+
+    async def stale_unauthorized_member(user_id: str):
+        return {
+            "roles": ["other-role"],
+            "user": {"id": user_id, "username": "reader"},
+            "roles_verified_at": time.time(),
+        }
+
+    async def record_cache_write(user_id: str, member: dict):
+        cache_writes.append(member)
+
+    async def record_invalidation(user_id: str, reason: str):
+        invalidations.append((user_id, reason))
+
+    monkeypatch.setattr(auth, "_OAUTH_CALLBACK_CACHE", OAuthCallbackCache(fake_redis))
+    monkeypatch.setattr(auth, "_MEMBER_VERIFIER", verifier)
+    monkeypatch.setattr(auth, "_get_cached_member", stale_unauthorized_member)
+    monkeypatch.setattr(auth, "_cache_member", record_cache_write)
+    monkeypatch.setattr(auth, "_delete_cached_member", record_invalidation)
+    monkeypatch.setattr(
+        auth.httpx, "AsyncClient", lambda *args, **kwargs: FakeOAuthHttpClient()
+    )
+    FakeOAuthHttpClient.token_request_count = 0
+    caplog.set_level(logging.INFO)
+    raw_code = "role-restored-code"
+
+    failed_response = await auth.callback(raw_code)
+    successful_response = await auth.callback(raw_code)
+
+    assert failed_response.headers["location"].startswith(
+        "https://forum.example/login?"
+    )
+    assert successful_response.headers["location"].startswith(
+        "https://forum.example#token="
+    )
+    assert FakeOAuthHttpClient.token_request_count == 1
+    assert verifier.call_count == 2
+    assert len(cache_writes) == 1
+    assert cache_writes[0]["roles"] == ["allowed-role"]
+    assert ("123", "cached_missing_required_role") in invalidations
+    assert ("123", "oauth_missing_required_role") in invalidations
+    assert "OAuth登录成功" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_oauth_failure_redirects_directly_to_login(monkeypatch):
     """OAuth 失败保持原有跳转流程，不由后端渲染错误页面。"""
     _configure_auth(monkeypatch)
@@ -342,6 +453,63 @@ async def test_oauth_failure_redirects_directly_to_login(monkeypatch):
 
     assert response.status_code == 302
     assert response.headers["location"].startswith("https://forum.example/login?")
+
+
+@pytest.mark.asyncio
+async def test_checkauth_revalidates_cached_missing_role(monkeypatch):
+    """历史失败缓存视为未命中，本次 checkauth 立即实时复验。"""
+    _configure_auth(monkeypatch)
+    _stub_unread_query(monkeypatch)
+    verifier = FakeMemberVerifier(
+        DiscordMemberVerificationDto(
+            outcome="verified",
+            member={
+                "roles": ["allowed-role"],
+                "user": {"id": "123", "username": "reader"},
+            },
+            status_code=200,
+            token_alias="aux-1",
+        )
+    )
+    invalidations: list[tuple[str, str]] = []
+    cache_writes: list[dict] = []
+
+    async def verify_jwt(token: str, secret: str):
+        return {
+            "id": "123",
+            "username": "reader",
+            "roles": ["allowed-role"],
+            "roles_verified_at": time.time(),
+            "exp": time.time() + 3600,
+        }
+
+    async def cached_missing_role(user_id: str):
+        return {
+            "roles": ["other-role"],
+            "user": {"id": user_id, "username": "reader"},
+            "roles_verified_at": time.time(),
+        }
+
+    async def record_invalidation(user_id: str, reason: str):
+        invalidations.append((user_id, reason))
+
+    async def record_cache_write(user_id: str, member: dict):
+        cache_writes.append(member)
+
+    monkeypatch.setattr(auth, "verify_jwt", verify_jwt)
+    monkeypatch.setattr(auth, "_get_cached_member", cached_missing_role)
+    monkeypatch.setattr(auth, "_delete_cached_member", record_invalidation)
+    monkeypatch.setattr(auth, "_cache_member", record_cache_write)
+    monkeypatch.setattr(auth, "_MEMBER_VERIFIER", verifier)
+
+    response = await auth.check_auth(_request_with_cookie())
+
+    assert response.status_code == 200
+    assert json.loads(response.body)["loggedIn"] is True
+    assert verifier.call_count == 1
+    assert invalidations == [("123", "cached_missing_required_role")]
+    assert len(cache_writes) == 1
+    assert cache_writes[0]["roles"] == ["allowed-role"]
 
 
 @pytest.mark.asyncio
@@ -435,8 +603,14 @@ async def test_checkauth_logs_out_only_for_definitive_not_member(monkeypatch):
     async def no_cached_member(user_id: str):
         return None
 
+    invalidations: list[tuple[str, str]] = []
+
+    async def record_invalidation(user_id: str, reason: str):
+        invalidations.append((user_id, reason))
+
     monkeypatch.setattr(auth, "verify_jwt", verify_jwt)
     monkeypatch.setattr(auth, "_get_cached_member", no_cached_member)
+    monkeypatch.setattr(auth, "_delete_cached_member", record_invalidation)
     monkeypatch.setattr(
         auth,
         "_MEMBER_VERIFIER",
@@ -451,6 +625,7 @@ async def test_checkauth_logs_out_only_for_definitive_not_member(monkeypatch):
     assert json.loads(response.body)["loggedIn"] is False
     assert "session=" in response.headers["set-cookie"]
     assert "Max-Age=0" in response.headers["set-cookie"]
+    assert invalidations == [("123", "checkauth_not_member")]
 
 
 @pytest.mark.asyncio
@@ -470,12 +645,19 @@ async def test_checkauth_logs_out_for_missing_required_role(monkeypatch):
     async def no_cached_member(user_id: str):
         return None
 
-    async def no_cache_write(user_id: str, member: dict):
-        return None
+    cache_writes: list[dict] = []
+    invalidations: list[tuple[str, str]] = []
+
+    async def record_cache_write(user_id: str, member: dict):
+        cache_writes.append(member)
+
+    async def record_invalidation(user_id: str, reason: str):
+        invalidations.append((user_id, reason))
 
     monkeypatch.setattr(auth, "verify_jwt", verify_jwt)
     monkeypatch.setattr(auth, "_get_cached_member", no_cached_member)
-    monkeypatch.setattr(auth, "_cache_member", no_cache_write)
+    monkeypatch.setattr(auth, "_cache_member", record_cache_write)
+    monkeypatch.setattr(auth, "_delete_cached_member", record_invalidation)
     monkeypatch.setattr(
         auth,
         "_MEMBER_VERIFIER",
@@ -494,3 +676,5 @@ async def test_checkauth_logs_out_for_missing_required_role(monkeypatch):
     assert response.status_code == 200
     assert json.loads(response.body)["loggedIn"] is False
     assert "Max-Age=0" in response.headers["set-cookie"]
+    assert cache_writes == []
+    assert invalidations == [("123", "checkauth_missing_required_role")]

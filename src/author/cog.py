@@ -5,13 +5,11 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 import discord
-import orjson
 from discord.ext import commands, tasks
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.author_repository import AuthorRepository
 from shared.discord_utils import DiscordUtils
-from shared.enum.constant_enum import ConstantEnum
 from shared.redis_client import RedisManager
 
 if TYPE_CHECKING:
@@ -53,29 +51,14 @@ class AuthorCog(commands.Cog, name="Author"):
 
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
-        """角色变更时，仅对已缓存用户更新 Redis"""
+        """角色变更时删除认证缓存，让下一次请求实时复验。"""
         if before.roles == after.roles:
             return
-        key = f"user:discord:{after.id}"
+
         try:
-            if not await RedisManager.get_client().exists(key):
-                return
-            data = {
-                "roles": [role.id for role in after.roles],
-                "user": {
-                    "id": str(after.id),
-                    "username": after.name,
-                    "global_name": after.global_name,
-                    "avatar": after.avatar.key if after.avatar else None,
-                },
-            }
-            await RedisManager.get_client().setex(
-                key,
-                int(ConstantEnum.AUTH_CACHE_TTL),
-                orjson.dumps(data).decode(),
-            )
+            await RedisManager.get_client().delete(f"user:discord:{after.id}")
         except Exception:
-            logger.warning("更新成员缓存失败", exc_info=True)
+            logger.warning("身份组变化后删除成员缓存失败", exc_info=True)
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):

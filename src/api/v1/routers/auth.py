@@ -115,7 +115,16 @@ async def _get_cached_member(user_id: str) -> Optional[dict]:
 
 
 async def _cache_member(user_id: str, member: dict) -> None:
-    """将 Discord 成员信息写入 Redis 缓存，TTL 1 天"""
+    """只缓存已通过论坛身份组校验的 Discord 成员信息。"""
+    roles = [str(role_id) for role_id in member.get("roles", [])]
+    if not _has_required_role(roles):
+        await _delete_cached_member(user_id, "missing_required_role")
+        logger.warning(
+            "拒绝写入未授权成员缓存 user_id=%s reason=missing_required_role",
+            user_id,
+        )
+        return
+
     try:
         client = RedisManager.get_client()
         await client.setex(
@@ -125,6 +134,21 @@ async def _cache_member(user_id: str, member: dict) -> None:
         )
     except Exception:
         logger.warning("写入用户缓存失败", exc_info=True)
+
+
+async def _delete_cached_member(user_id: str, reason: str) -> None:
+    """按用户删除可能阻碍后续实时验证的 Discord 成员缓存。"""
+    try:
+        deleted = await RedisManager.get_client().delete(f"user:discord:{user_id}")
+        if deleted:
+            logger.info("成员缓存已失效 user_id=%s reason=%s", user_id, reason)
+    except Exception:
+        logger.warning(
+            "删除成员缓存失败 user_id=%s reason=%s",
+            user_id,
+            reason,
+            exc_info=True,
+        )
 
 
 def _get_role_ids() -> list[str]:
@@ -158,6 +182,38 @@ def _is_role_verification_fresh(verified_at: float) -> bool:
     """判断身份组验证结果是否仍在允许的降级时间内。"""
     age_seconds = max(0.0, time.time() - verified_at)
     return verified_at > 0 and age_seconds <= ROLE_VERIFICATION_TTL_SECONDS
+
+
+async def _get_authorized_cached_member(user_id: str) -> Optional[dict]:
+    """只返回新鲜且仍具有论坛访问身份组的成员缓存。"""
+    cached = await _get_cached_member(user_id)
+    if not cached:
+        return None
+
+    # 格式异常的历史值同样不能阻断登录，清理后改走实时查询
+    if not isinstance(cached, dict):
+        await _delete_cached_member(user_id, "invalid_format")
+        return None
+
+    try:
+        roles = [str(role_id) for role_id in cached.get("roles", [])]
+        verified_at = float(cached.get("roles_verified_at", 0))
+    except (TypeError, ValueError):
+        await _delete_cached_member(user_id, "invalid_format")
+        return None
+
+    # 过期快照不参与认证，本次请求立即转入 Discord 实时验证
+    if not _is_role_verification_fresh(verified_at):
+        await _delete_cached_member(user_id, "expired")
+        return None
+
+    # 历史失败快照不能继续拒绝用户，删除后在本次请求重新验证
+    if not _has_required_role(roles):
+        await _delete_cached_member(user_id, "cached_missing_required_role")
+        return None
+
+    cached["roles"] = roles
+    return cached
 
 
 def _safe_discord_error(response: httpx.Response) -> tuple[Optional[str], Optional[str]]:
@@ -285,14 +341,6 @@ async def callback(code: Optional[str] = None):
         else None
     )
     if state and state.get("stage") == "authenticated":
-        logger.info(
-            "OAuth登录成功 attempt_id=%s code_fingerprint=%s user_id=%s "
-            "source=idempotent_cache duration_ms=%s",
-            attempt_id,
-            code_fingerprint,
-            state["user"]["id"],
-            int((time.monotonic() - started_at) * 1000),
-        )
         return await _create_login_response(state)
 
     # 首个回调持有短锁，重复回调等待或复用已写入的安全中间状态
@@ -315,14 +363,6 @@ async def callback(code: Optional[str] = None):
                     "同一次授权仍在处理中，请稍后返回登录页面重试。", 503
                 )
             if state.get("stage") == "authenticated":
-                logger.info(
-                    "OAuth登录成功 attempt_id=%s code_fingerprint=%s user_id=%s "
-                    "source=idempotent_wait duration_ms=%s",
-                    attempt_id,
-                    code_fingerprint,
-                    state["user"]["id"],
-                    int((time.monotonic() - started_at) * 1000),
-                )
                 return await _create_login_response(state)
 
     try:
@@ -331,14 +371,6 @@ async def callback(code: Optional[str] = None):
             if latest_state:
                 state = latest_state
             if state and state.get("stage") == "authenticated":
-                logger.info(
-                    "OAuth登录成功 attempt_id=%s code_fingerprint=%s user_id=%s "
-                    "source=idempotent_race duration_ms=%s",
-                    attempt_id,
-                    code_fingerprint,
-                    state["user"]["id"],
-                    int((time.monotonic() - started_at) * 1000),
-                )
                 return await _create_login_response(state)
 
         # 同一个 HTTP 客户端承载 OAuth 用户查询和成员查询，统一超时边界
@@ -457,14 +489,13 @@ async def callback(code: Optional[str] = None):
                 if _OAUTH_CALLBACK_CACHE:
                     await _OAUTH_CALLBACK_CACHE.store_state(code_fingerprint, state)
 
-            # 优先使用仍在 24 小时有效期内的成员缓存
-            cached = await _get_cached_member(user["id"])
-            cached_verified_at = float(cached.get("roles_verified_at", 0)) if cached else 0
-            if cached and _is_role_verification_fresh(cached_verified_at):
+            # 只有仍具备访问身份组的缓存才能跳过 Discord 实时验证
+            cached = await _get_authorized_cached_member(user["id"])
+            member_to_cache = None
+            if cached:
                 roles = [str(role_id) for role_id in cached.get("roles", [])]
                 member_user = cached.get("user", {})
-                roles_verified_at = cached_verified_at
-                member_source = "member_cache"
+                roles_verified_at = float(cached["roles_verified_at"])
             else:
                 if not _MEMBER_VERIFIER:
                     raise RuntimeError("Discord 成员验证器未初始化")
@@ -481,6 +512,7 @@ async def callback(code: Optional[str] = None):
                         user_id=user["id"],
                         token_alias=verification.token_alias,
                     )
+                    await _delete_cached_member(user["id"], "oauth_not_member")
                     return _oauth_error_redirect("你的账号目前不在论坛 Discord 服务器中。", 403)
                 if verification.outcome == "unavailable":
                     _log_oauth_failure(
@@ -501,15 +533,11 @@ async def callback(code: Optional[str] = None):
                 roles = [str(role_id) for role_id in member.get("roles", [])]
                 member_user = member.get("user", {})
                 roles_verified_at = time.time()
-                member_source = verification.token_alias or "unknown"
-                await _cache_member(
-                    user["id"],
-                    {
-                        "roles": roles,
-                        "user": member_user,
-                        "roles_verified_at": roles_verified_at,
-                    },
-                )
+                member_to_cache = {
+                    "roles": roles,
+                    "user": member_user,
+                    "roles_verified_at": roles_verified_at,
+                }
 
             if not _has_required_role(roles):
                 _log_oauth_failure(
@@ -520,7 +548,12 @@ async def callback(code: Optional[str] = None):
                     status_code=403,
                     user_id=user["id"],
                 )
+                await _delete_cached_member(user["id"], "oauth_missing_required_role")
                 return _oauth_error_redirect("你的账号缺少访问论坛所需的身份组。", 403)
+
+            # 实时验证完整通过后才写入一天成员缓存
+            if member_to_cache:
+                await _cache_member(user["id"], member_to_cache)
 
             # 最终缓存只包含本站签发 JWT 所需信息，不保存 Discord access token
             authenticated_state = {
@@ -535,15 +568,6 @@ async def callback(code: Optional[str] = None):
                     code_fingerprint, authenticated_state
                 )
 
-            logger.info(
-                "OAuth登录成功 attempt_id=%s code_fingerprint=%s user_id=%s "
-                "source=%s duration_ms=%s",
-                attempt_id,
-                code_fingerprint,
-                user["id"],
-                member_source,
-                int((time.monotonic() - started_at) * 1000),
-            )
             return await _create_login_response(authenticated_state)
     except Exception as exc:
         logger.exception(
@@ -658,6 +682,7 @@ async def callback_dev(code: Optional[str] = None):
                 str(user["id"]), attempt_id, client
             )
             if verification.outcome == "not_member":
+                await _delete_cached_member(str(user["id"]), "oauth_dev_not_member")
                 return JSONResponse(
                     content={"error": "你不在社区内"},
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -671,6 +696,9 @@ async def callback_dev(code: Optional[str] = None):
             member = verification.member or {}
 
             if not _has_required_role(member.get("roles", [])):
+                await _delete_cached_member(
+                    str(user["id"]), "oauth_dev_missing_required_role"
+                )
                 return JSONResponse(
                     content={"error": "缺少指定身份组"},
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -820,29 +848,19 @@ async def check_auth(request: Request):
         logger.warning("登录状态验证失败 step=jwt source=%s", token_source)
         return JSONResponse(content={"loggedIn": False}, status_code=200)
 
-    # 成员缓存命中时不访问 Discord，并保留原始身份组验证时间
+    # 只有仍具备访问身份组的缓存才能跳过 Discord 实时验证
     user_id = str(payload["id"])
     attempt_id = secrets.token_hex(6)
-    cached = await _get_cached_member(user_id)
+    cached = await _get_authorized_cached_member(user_id)
     user_roles = [str(role_id) for role_id in payload.get("roles", [])]
     roles_verified_at = _roles_verified_at_from_payload(payload)
+    member_to_cache = None
     user_info = {
         "id": user_id,
         "username": payload.get("username", ""),
         "global_name": None,
         "avatar": None,
     }
-
-    # 缓存意外超过 24 小时时强制实时复验，确保旧角色不会被继续信任
-    if cached and not _is_role_verification_fresh(
-        float(cached.get("roles_verified_at", 0))
-    ):
-        logger.warning(
-            "成员缓存已过期 attempt_id=%s user_id=%s action=live_verify",
-            attempt_id,
-            user_id,
-        )
-        cached = None
 
     if cached:
         user_roles = [str(role_id) for role_id in cached.get("roles", [])]
@@ -878,6 +896,7 @@ async def check_auth(request: Request):
                 user_id,
                 verification.status_code,
             )
+            await _delete_cached_member(user_id, "checkauth_not_member")
             response = JSONResponse(content={"loggedIn": False}, status_code=200)
             response.delete_cookie(
                 key="session", path="/", secure=True, samesite="none"
@@ -922,7 +941,7 @@ async def check_auth(request: Request):
                     )
                 return response
         else:
-            # 实时验证成功才推进 roles_verified_at 并回填成员缓存
+            # 实时查询完成后先保留结果，身份组校验通过后才允许写缓存
             member = verification.member or {}
             user_roles = [str(role_id) for role_id in member.get("roles", [])]
             roles_verified_at = time.time()
@@ -933,14 +952,11 @@ async def check_auth(request: Request):
                 "global_name": user_data.get("global_name"),
                 "avatar": user_data.get("avatar"),
             }
-            await _cache_member(
-                user_id,
-                {
-                    "roles": user_roles,
-                    "user": member.get("user", user_info),
-                    "roles_verified_at": roles_verified_at,
-                },
-            )
+            member_to_cache = {
+                "roles": user_roles,
+                "user": member.get("user", user_info),
+                "roles_verified_at": roles_verified_at,
+            }
 
     # 校验角色（缓存路径下也需要校验）
     if not _has_required_role(user_roles):
@@ -949,9 +965,14 @@ async def check_auth(request: Request):
             attempt_id,
             user_id,
         )
+        await _delete_cached_member(user_id, "checkauth_missing_required_role")
         response = JSONResponse(content={"loggedIn": False}, status_code=200)
         response.delete_cookie(key="session", path="/", secure=True, samesite="none")
         return response
+
+    # 只有本次实时验证成功且身份组合格时才推进成员缓存
+    if member_to_cache:
+        await _cache_member(user_id, member_to_cache)
 
     # 获取未读更新数量
     unread_count = 0
