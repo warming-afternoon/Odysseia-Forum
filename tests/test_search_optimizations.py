@@ -1,17 +1,15 @@
 """
-对搜索性能优化改动的测试覆盖（方案 A + 方案 B）。
+对搜索性能优化改动的测试覆盖。
 
 覆盖范围：
 - FTS tsquery 缓存（Redis 命中/未命中/回写）
-- Banner/未读数并发执行（独立 session、降级处理）
 - redis_client 参数透传链路
 """
 
 import json
-import asyncio
 from datetime import datetime
 from typing import AsyncGenerator
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 import pytest_asyncio
@@ -330,70 +328,6 @@ class TestFTSQueryCaching:
         )
         assert result.has_include is True
         assert len(result.include_conditions) > 0
-
-
-# ══════════════════════════════════════════════
-# 方案 A：Banner/未读数并发执行测试
-# ══════════════════════════════════════════════
-
-
-class TestBannerUnreadConcurrent:
-    """测试 _get_banner_and_unread_async() 的并发执行行为。"""
-
-    @pytest.mark.asyncio
-    async def test_creates_independent_session(self, db_session_factory):
-        """验证函数使用独立的 session，不依赖外部 session。"""
-        from api.v1.routers.search import _get_banner_and_unread_async
-
-        # 使用一个未绑定任何事务的 session factory
-        banners, unread = await _get_banner_and_unread_async(
-            session_factory=db_session_factory,
-            request_channel_ids=None,
-            user_id=None,
-        )
-
-        # 无频道、无用户 ID 时应返回空列表和 0
-        assert banners == []
-        assert unread == 0
-
-    @pytest.mark.asyncio
-    async def test_graceful_degradation_on_db_failure(self):
-        """数据库不可用时降级返回空列表和 0，不抛异常。"""
-        from api.v1.routers.search import _get_banner_and_unread_async
-
-        # 使用一个必定失败的 session factory
-        broken_factory = MagicMock()
-        broken_factory.side_effect = Exception("DB connection failed")
-
-        banners, unread = await _get_banner_and_unread_async(
-            session_factory=broken_factory,
-            request_channel_ids=[1, 2],
-            user_id=123,
-        )
-
-        assert banners == []
-        assert unread == 0
-
-    @pytest.mark.asyncio
-    async def test_runs_concurrently_with_main_search(self):
-        """验证函数可以通过 asyncio.create_task() 并发执行。"""
-        from api.v1.routers.search import _get_banner_and_unread_async
-
-        # 模拟 session factory 调用时直接抛异常的场景
-        broken_factory = MagicMock(side_effect=Exception("Simulated DB error"))
-
-        task = asyncio.create_task(
-            _get_banner_and_unread_async(
-                session_factory=broken_factory,
-                request_channel_ids=None,
-                user_id=None,
-            )
-        )
-
-        # 验证 task 在超时前完成
-        banners, unread = await asyncio.wait_for(task, timeout=2.0)
-        assert banners == []
-        assert unread == 0
 
 
 # ══════════════════════════════════════════════

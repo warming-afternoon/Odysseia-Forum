@@ -5,7 +5,7 @@ BannerService 自动检测 target_type。"""
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -505,345 +505,431 @@ class TestBannerWaitlistWithTargetType:
             assert item.target_type == TargetType.CHANNEL.value
 
 
-class TestFilterThreadBannersByPrefs:
-    """_filter_thread_banners_by_prefs 偏好筛选单元测试。"""
+class TestActiveBannerChannelFilters:
+    """活跃 Banner 接口的新旧频道参数兼容测试。"""
 
-    @pytest.fixture
-    def sample_banners(self):
-        """构造 3 个 thread 类型的 BannerCarousel 对象。"""
-        from datetime import datetime, timedelta
-        from models import BannerCarousel
+    def test_normalize_merges_and_stably_deduplicates_ids(self):
+        """字符串、整数及旧参数按首次出现顺序合并。"""
+        from api.v1.routers.banner import _normalize_banner_channel_ids
 
+        result = _normalize_banner_channel_ids(["20", 10, "20"], "30")
+
+        assert result == [20, 10, 30]
+
+    def test_normalize_rejects_invalid_id(self):
+        """非法频道 ID 返回 HTTP 400。"""
+        from api.v1.routers.banner import _normalize_banner_channel_ids
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            _normalize_banner_channel_ids(["invalid"], None)
+
+        assert exc_info.value.status_code == 400
+        assert "invalid" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_service_batches_channels_in_request_order(
+        self, db_session_factory
+    ):
+        """多频道每频道最多五个，并在末尾追加一次全局 Banner。"""
         now = datetime.now()
-        later = now + timedelta(days=1)
-        return [
+        channel_10_banners = [
             BannerCarousel(
-                id=1,
+                thread_id=1000 + position,
+                channel_id=10,
+                cover_image_url=f"https://example.com/10-{position}.png",
+                title=f"频道10-{position}",
+                start_time=now,
+                end_time=now + timedelta(days=1),
+                position=position,
+            )
+            for position in range(6)
+        ]
+        channel_20_banners = [
+            BannerCarousel(
+                thread_id=2000 + position,
+                channel_id=20,
+                cover_image_url=f"https://example.com/20-{position}.png",
+                title=f"频道20-{position}",
+                start_time=now,
+                end_time=now + timedelta(days=1),
+                position=position,
+            )
+            for position in range(2)
+        ]
+        global_banners = [
+            BannerCarousel(
+                thread_id=3000 + position,
+                channel_id=None,
+                cover_image_url=f"https://example.com/global-{position}.png",
+                title=f"全局-{position}",
+                start_time=now,
+                end_time=now + timedelta(days=1),
+                position=position,
+            )
+            for position in range(4)
+        ]
+
+        async with db_session_factory() as session:
+            session.add_all(
+                channel_10_banners + channel_20_banners + global_banners
+            )
+            await session.commit()
+
+            service = BannerService(session)
+            result = await service.get_active_banners(
+                channel_id=10,
+                channel_ids=[20, 10, 20],
+            )
+            legacy_result = await service.get_active_banners(channel_id=20)
+            global_only_result = await service.get_active_banners()
+
+        assert [banner.thread_id for banner in result] == [
+            2000,
+            2001,
+            1000,
+            1001,
+            1002,
+            1003,
+            1004,
+            3000,
+            3001,
+            3002,
+        ]
+        assert [banner.thread_id for banner in legacy_result] == [
+            2000,
+            2001,
+            3000,
+            3001,
+            3002,
+        ]
+        assert [banner.thread_id for banner in global_only_result] == [
+            3000,
+            3001,
+            3002,
+        ]
+
+
+class TestBannerPreferenceFiltering:
+    """Banner 帖子复用搜索反选规则。"""
+
+    @pytest.mark.asyncio
+    async def test_batch_filter_uses_all_search_exclusions(
+        self, db_session_factory
+    ):
+        """作者、真实标签、关键词、豁免和可见性在一次查询中生效。"""
+        from core.tag_cache_service import TagCacheService
+        from dto.preferences import UserSearchPreferencesDTO
+        from models import Tag, Thread, ThreadTagLink
+        from search.search_service import SearchService
+
+        blocked_tag = Tag(id=9001, name="屏蔽标签")
+        threads = [
+            Thread(
                 thread_id=100,
-                channel_id=None,
-                cover_image_url="https://example.com/1.png",
-                title="Banner A",
-                target_type=TargetType.THREAD.value,
-                start_time=now,
-                end_time=later,
+                guild_id=1,
+                channel_id=10,
+                title="普通帖子",
+                author_id=1,
             ),
-            BannerCarousel(
-                id=2,
-                thread_id=200,
-                channel_id=None,
-                cover_image_url="https://example.com/2.png",
-                title="Banner B",
-                target_type=TargetType.THREAD.value,
-                start_time=now,
-                end_time=later,
+            Thread(
+                thread_id=101,
+                guild_id=1,
+                channel_id=10,
+                title="排除作者帖子",
+                author_id=2,
             ),
-            BannerCarousel(
-                id=3,
-                thread_id=300,
-                channel_id=None,
-                cover_image_url="https://example.com/3.png",
-                title="Banner C",
-                target_type=TargetType.THREAD.value,
-                start_time=now,
-                end_time=later,
+            Thread(
+                thread_id=102,
+                guild_id=1,
+                channel_id=10,
+                title="排除标签帖子",
+                author_id=1,
+            ),
+            Thread(
+                thread_id=103,
+                guild_id=1,
+                channel_id=10,
+                title="关于百合破坏的讨论",
+                author_id=1,
+            ),
+            Thread(
+                thread_id=104,
+                guild_id=1,
+                channel_id=10,
+                title="🈲百合破坏",
+                author_id=1,
+            ),
+            Thread(
+                thread_id=105,
+                guild_id=1,
+                channel_id=10,
+                title="隐藏帖子",
+                author_id=1,
+                show_flag=False,
+            ),
+            Thread(
+                thread_id=106,
+                guild_id=1,
+                channel_id=10,
+                title="失效帖子",
+                author_id=1,
+                not_found_count=1,
             ),
         ]
 
-    @pytest.fixture
-    def sample_threads(self):
-        """构造 3 个 Thread 对象，含不同 author_id 和 tags。"""
-        from models import Thread as ThreadModel
-        from models import Tag
+        async with db_session_factory() as session:
+            session.add(blocked_tag)
+            session.add_all(threads)
+            await session.flush()
+            tagged_thread = next(thread for thread in threads if thread.thread_id == 102)
+            session.add(
+                ThreadTagLink(thread_id=tagged_thread.id, tag_id=blocked_tag.id)
+            )
+            await session.commit()
 
-        tag_a = Tag(id=1, name="赛事")
-        tag_b = Tag(id=2, name="攻略")
-        tag_c = Tag(id=3, name="同人")
+            tag_cache = TagCacheService(db_session_factory)
+            await tag_cache.build_cache()
+            service = SearchService(session, tag_cache)
+            prefs = UserSearchPreferencesDTO(
+                user_id=42,
+                exclude_authors=[2],
+                exclude_tags=["屏蔽标签"],
+                exclude_keywords="百合破坏",
+                exclude_keyword_exemption_markers=["禁", "🈲"],
+            )
 
-        thread_a = ThreadModel(
-            id=1,
+            result = await service.get_preference_filtered_thread_guilds(
+                [thread.thread_id for thread in threads] + [999],
+                prefs=prefs,
+                channel_mappings_config={},
+            )
+
+        assert set(result) == {100, 104}
+
+    @pytest.mark.asyncio
+    async def test_virtual_exclude_tag_filters_source_channel(
+        self, db_session_factory
+    ):
+        """虚拟反选标签转换为源频道过滤，真实标签列表不被误用。"""
+        from core.tag_cache_service import TagCacheService
+        from dto.preferences import UserSearchPreferencesDTO
+        from models import Thread
+        from search.search_service import SearchService
+
+        threads = [
+            Thread(
+                thread_id=200,
+                guild_id=1,
+                channel_id=20,
+                title="虚拟标签源频道帖子",
+                author_id=1,
+            ),
+            Thread(
+                thread_id=300,
+                guild_id=1,
+                channel_id=30,
+                title="其他频道帖子",
+                author_id=1,
+            ),
+        ]
+        mappings = {
+            999: [
+                {
+                    "tag_name": "虚拟屏蔽",
+                    "source_channel_ids": [20],
+                }
+            ]
+        }
+
+        async with db_session_factory() as session:
+            session.add_all(threads)
+            await session.commit()
+
+            tag_cache = TagCacheService(db_session_factory)
+            await tag_cache.build_cache()
+            service = SearchService(session, tag_cache)
+            prefs = UserSearchPreferencesDTO(
+                user_id=42,
+                exclude_tags=["虚拟屏蔽"],
+            )
+
+            result = await service.get_preference_filtered_thread_guilds(
+                [200, 300],
+                prefs=prefs,
+                channel_mappings_config=mappings,
+            )
+
+        assert set(result) == {300}
+
+    @pytest.mark.asyncio
+    async def test_active_endpoint_preserves_order_and_channel_banner(
+        self, db_session_factory, monkeypatch
+    ):
+        """频道 Banner 保留，帖子过滤后维持数据库返回的轮播顺序。"""
+        from api.v1.routers import banner as banner_router
+        from core.tag_cache_service import TagCacheService
+        from dto.preferences import UserSearchPreferencesDTO
+        from models import Thread
+
+        now = datetime.now()
+        channel = ChannelModel(channel_id=900, guild_id=1, name="频道 Banner")
+        allowed_thread = Thread(
             thread_id=100,
             guild_id=1,
             channel_id=10,
-            title="赛事讨论帖",
-            author_id=111,
-            first_message_excerpt="今天的赛事非常精彩",
+            title="保留帖子",
+            author_id=1,
         )
-        thread_a.tags = [tag_a, tag_b]
-
-        thread_b = ThreadModel(
-            id=2,
-            thread_id=200,
+        blocked_thread = Thread(
+            thread_id=101,
             guild_id=1,
             channel_id=10,
-            title="攻略合集",
-            author_id=222,
-            first_message_excerpt="新手入门攻略",
+            title="屏蔽作者帖子",
+            author_id=2,
         )
-        thread_b.tags = [tag_b]
+        banners = [
+            BannerCarousel(
+                thread_id=900,
+                channel_id=10,
+                cover_image_url="https://example.com/channel.png",
+                title="频道 Banner",
+                target_type=TargetType.CHANNEL.value,
+                start_time=now,
+                end_time=now + timedelta(days=1),
+                position=0,
+            ),
+            BannerCarousel(
+                thread_id=100,
+                channel_id=10,
+                cover_image_url="https://example.com/allowed.png",
+                title="保留帖子",
+                target_type=TargetType.THREAD.value,
+                start_time=now,
+                end_time=now + timedelta(days=1),
+                position=1,
+            ),
+            BannerCarousel(
+                thread_id=101,
+                channel_id=10,
+                cover_image_url="https://example.com/blocked.png",
+                title="屏蔽作者帖子",
+                target_type=TargetType.THREAD.value,
+                start_time=now,
+                end_time=now + timedelta(days=1),
+                position=2,
+            ),
+        ]
 
-        thread_c = ThreadModel(
-            id=3,
-            thread_id=300,
+        async with db_session_factory() as session:
+            session.add(channel)
+            session.add_all([allowed_thread, blocked_thread])
+            session.add_all(banners)
+            await session.commit()
+
+        tag_cache = TagCacheService(db_session_factory)
+        await tag_cache.build_cache()
+        monkeypatch.setattr(banner_router, "async_session_factory", db_session_factory)
+        monkeypatch.setattr(banner_router, "tag_cache_service_instance", tag_cache)
+        monkeypatch.setattr(banner_router, "channel_mappings_config", {})
+        monkeypatch.setattr(banner_router, "main_guild_id", 1)
+        monkeypatch.setattr(
+            banner_router,
+            "get_user_preferences_cached",
+            AsyncMock(
+                return_value=UserSearchPreferencesDTO(
+                    user_id=42,
+                    exclude_authors=[2],
+                )
+            ),
+        )
+
+        result = await banner_router.get_active_banners(
+            channel_ids=["10"],
+            channel_id="10",
+            current_user={"id": "42"},
+        )
+
+        assert [item.thread_id for item in result] == [900, 100]
+        assert result[0].target_type == TargetType.CHANNEL.value
+
+    @pytest.mark.asyncio
+    async def test_preference_failure_degrades_to_visible_threads(
+        self, db_session_factory, monkeypatch
+    ):
+        """偏好读取失败时不应用反选，但仍移除不可搜索帖子。"""
+        from api.v1.routers import banner as banner_router
+        from core.tag_cache_service import TagCacheService
+        from models import Thread
+
+        now = datetime.now()
+        visible_thread = Thread(
+            thread_id=400,
             guild_id=1,
             channel_id=10,
-            title="同人创作",
-            author_id=333,
-            first_message_excerpt=None,
+            title="可见帖子",
+            author_id=1,
         )
-        thread_c.tags = [tag_c]
+        hidden_thread = Thread(
+            thread_id=401,
+            guild_id=1,
+            channel_id=10,
+            title="隐藏帖子",
+            author_id=1,
+            show_flag=False,
+        )
+        banners = [
+            BannerCarousel(
+                thread_id=400,
+                channel_id=None,
+                cover_image_url="https://example.com/visible.png",
+                title="可见帖子",
+                target_type=TargetType.THREAD.value,
+                start_time=now,
+                end_time=now + timedelta(days=1),
+                position=0,
+            ),
+            BannerCarousel(
+                thread_id=401,
+                channel_id=None,
+                cover_image_url="https://example.com/hidden.png",
+                title="隐藏帖子",
+                target_type=TargetType.THREAD.value,
+                start_time=now,
+                end_time=now + timedelta(days=1),
+                position=1,
+            ),
+        ]
 
-        return {100: thread_a, 200: thread_b, 300: thread_c}
+        async with db_session_factory() as session:
+            session.add_all([visible_thread, hidden_thread])
+            session.add_all(banners)
+            await session.commit()
 
-    @pytest.fixture
-    def empty_prefs(self):
-        """空偏好（无任何排除条件）。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        return UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=None,
-            exclude_tags=None,
-            exclude_keywords="",
+        tag_cache = TagCacheService(db_session_factory)
+        await tag_cache.build_cache()
+        monkeypatch.setattr(banner_router, "async_session_factory", db_session_factory)
+        monkeypatch.setattr(banner_router, "tag_cache_service_instance", tag_cache)
+        monkeypatch.setattr(banner_router, "channel_mappings_config", {})
+        monkeypatch.setattr(
+            banner_router,
+            "get_user_preferences_cached",
+            AsyncMock(side_effect=RuntimeError("cache unavailable")),
         )
 
-    def _filter(self, banners, thread_map, prefs):
-        from api.v1.routers.banner import _filter_thread_banners_by_prefs
-
-        return _filter_thread_banners_by_prefs(banners, thread_map, prefs)
-
-    # ── exclude_authors ──
-
-    def test_exclude_author_filters_banner(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """exclude_authors 偏好 → 对应作者的 banner 被过滤。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=[111],
-            exclude_tags=None,
-            exclude_keywords="",
+        result = await banner_router.get_active_banners(
+            channel_ids=None,
+            channel_id=None,
+            current_user={"id": "42"},
         )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        assert 100 not in thread_ids  # author_id=111 被排除
-        assert 200 in thread_ids
-        assert 300 in thread_ids
 
-    def test_exclude_multiple_authors(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """排除多个作者。"""
-        from dto.preferences import UserSearchPreferencesDTO
+        assert [item.thread_id for item in result] == [400]
 
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=[111, 333],
-            exclude_tags=None,
-            exclude_keywords="",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        assert 100 not in thread_ids
-        assert 200 in thread_ids  # author_id=222 未被排除
-        assert 300 not in thread_ids
+    def test_search_router_has_no_banner_return_helper(self):
+        """搜索路由不再保留旧 Banner 返回路径。"""
+        from api.v1.routers import search as search_router
 
-    # ── exclude_tags ──
-
-    def test_exclude_tag_filters_banner(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """exclude_tags 偏好 → 含对应标签的 banner 被过滤。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=None,
-            exclude_tags=["攻略"],
-            exclude_keywords="",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        # Banner A (100): tags=["赛事","攻略"] → 有"攻略" → 排除
-        assert 100 not in thread_ids
-        # Banner B (200): tags=["攻略"] → 排除
-        assert 200 not in thread_ids
-        # Banner C (300): tags=["同人"] → 保留
-        assert 300 in thread_ids
-
-    def test_exclude_tags_case_insensitive(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """exclude_tags 不区分大小写。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=None,
-            exclude_tags=["攻略"],  # 小写
-            exclude_keywords="",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        assert 200 not in thread_ids  # tag "攻略" 匹配
-
-    # ── exclude_keywords ──
-
-    def test_exclude_keyword_in_title_filters_banner(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """exclude_keywords 命中标题 → 过滤。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=None,
-            exclude_tags=None,
-            exclude_keywords="赛事",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        # Banner A: title="赛事讨论帖" → 命中"赛事" → 排除
-        assert 100 not in thread_ids
-        assert 200 in thread_ids
-        assert 300 in thread_ids
-
-    def test_exclude_keyword_in_excerpt_filters_banner(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """exclude_keywords 命中 first_message_excerpt → 过滤。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=None,
-            exclude_tags=None,
-            exclude_keywords="新手",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        # Banner B: excerpt="新手入门攻略" → 命中"新手" → 排除
-        assert 100 in thread_ids
-        assert 200 not in thread_ids
-        assert 300 in thread_ids
-
-    def test_exclude_keywords_multi_word_split(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """exclude_keywords 按空格/逗号分词，分别匹配。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=None,
-            exclude_tags=None,
-            exclude_keywords="赛事,同人",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        # Banner A: 命中"赛事" → 排除
-        assert 100 not in thread_ids
-        # Banner C: 命中"同人" → 排除
-        assert 300 not in thread_ids
-        assert 200 in thread_ids
-
-    def test_exclude_keyword_case_insensitive(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """exclude_keywords 不区分大小写。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=None,
-            exclude_tags=None,
-            exclude_keywords="赛事",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        assert 100 not in thread_ids
-
-    def test_exclude_keyword_no_excerpt(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """首楼摘要为 None 时仅检查标题，不报错。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=None,
-            exclude_tags=None,
-            exclude_keywords="同人",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        thread_ids = {b.thread_id for b in result}
-        # Banner C: title="同人创作", excerpt=None → 命中标题 → 排除
-        assert 300 not in thread_ids
-
-    # ── 组合过滤 ──
-
-    def test_combined_filters(self, sample_banners, sample_threads, empty_prefs):
-        """同时应用多种排除条件。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=[111],
-            exclude_tags=["同人"],
-            exclude_keywords="新手",
-        )
-        result = self._filter(sample_banners, sample_threads, prefs)
-        # Banner A: author 排除
-        # Banner B: keyword "新手" 命中 excerpt 排除
-        # Banner C: tag "同人" 排除
-        assert len(result) == 0
-
-    # ── 空偏好 / 边界情况 ──
-
-    def test_no_prefs_returns_all(self, sample_banners, sample_threads, empty_prefs):
-        """空偏好 → 全部保留。"""
-        result = self._filter(sample_banners, sample_threads, empty_prefs)
-        assert len(result) == 3
-
-    def test_thread_not_in_map_preserved(
-        self, sample_banners, sample_threads, empty_prefs
-    ):
-        """thread_map 中不存在的 banner 保留（线程可能已被删除）。"""
-        from dto.preferences import UserSearchPreferencesDTO
-
-        banners = sample_banners[:1]  # 只取 Banner A
-        # thread_map 不含 thread_id=100
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=[111],
-            exclude_tags=None,
-            exclude_keywords="",
-        )
-        result = self._filter(banners, {}, prefs)
-        # 线程不在 map 中，保留 banner
-        assert len(result) == 1
-        assert result[0].thread_id == 100
-
-    def test_empty_list_returns_empty(self, sample_threads, empty_prefs):
-        """空 banner 列表 → 返回空列表。"""
-        result = self._filter([], sample_threads, empty_prefs)
-        assert result == []
-
-    def test_channel_banners_not_affected_by_design(self):
-        """channel 类型 banner 不进入此函数 — 由调用方保证。"""
-        # 此测试仅确认函数签名可接受空列表
-        from api.v1.routers.banner import _filter_thread_banners_by_prefs
-        from dto.preferences import UserSearchPreferencesDTO
-
-        prefs = UserSearchPreferencesDTO(
-            user_id=1,
-            exclude_authors=[111],
-            exclude_tags=["test"],
-            exclude_keywords="test",
-        )
-        result = _filter_thread_banners_by_prefs([], {}, prefs)
-        assert result == []
+        assert not hasattr(search_router, "_get_banner_and_unread_async")
 
 
 class TestApplicationResult:

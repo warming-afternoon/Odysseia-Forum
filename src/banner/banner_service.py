@@ -365,10 +365,18 @@ class BannerService:
         )
 
     async def get_active_banners(
-        self, channel_id: Optional[int] = None
+        self,
+        channel_id: Optional[int] = None,
+        channel_ids: Optional[List[int]] = None,
     ) -> List[BannerCarousel]:
-        """获取活跃的banner列表。"""
-        return await self.carousel_repo.get_active(channel_id=channel_id)
+        """兼容单频道调用并获取有序的多频道活跃 Banner。"""
+        effective_channel_ids = list(channel_ids or [])
+        if channel_id is not None:
+            effective_channel_ids.append(channel_id)
+        effective_channel_ids = list(dict.fromkeys(effective_channel_ids))
+        return await self.carousel_repo.get_active(
+            channel_ids=effective_channel_ids
+        )
 
     async def update_review_message_info(
         self, application_id: int, review_message_id: int, review_thread_id: int

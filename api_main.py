@@ -83,6 +83,7 @@ def _inject_api_dependencies(
     banner_api.async_session_factory = AsyncSessionFactory
     banner_api.banner_config = config.get("banner", {})
     banner_api.main_guild_id = main_guild_id
+    banner_api.tag_cache_service_instance = tag_cache_service
     bot_token = os.environ.get("BOT_TOKEN", "").strip()
     banner_api.bot_token = bot_token
 
@@ -93,6 +94,7 @@ def _inject_api_dependencies(
     discovery_api.channel_mappings_config = channel_mappings_config
     booklists_api.channel_mappings_config = channel_mappings_config
     follows_api.channel_mappings_config = channel_mappings_config
+    banner_api.channel_mappings_config = channel_mappings_config
 
     # 注入书单发布配置
     publish_cfg = config.get("integration", {}).get("booklist_publish", {})

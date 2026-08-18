@@ -2,8 +2,7 @@
 
 import json
 import logging
-import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
@@ -18,11 +17,9 @@ from api.v1.schemas.banner import (
 from api.v1.utils.preferences_utils import get_user_preferences_cached
 from banner.banner_service import BannerService
 from banner.channel_sync import ChannelSyncService
-from core.thread_repository import ThreadRepository
-from dto.preferences import UserSearchPreferencesDTO
-from models import BannerCarousel
-from models.thread import Thread
+from core.tag_cache_service import TagCacheService
 from models.channel import Channel
+from search.search_service import SearchService
 from shared.enum import TargetType
 from shared.redis_client import RedisManager
 from shared.thread_link_parser import ThreadLinkParser
@@ -34,70 +31,35 @@ async_session_factory: async_sessionmaker | None = None
 banner_config: dict | None = None
 main_guild_id: int = 0
 bot_token: str = ""
+tag_cache_service_instance: TagCacheService | None = None
+channel_mappings_config: Dict[int, List[Dict]] = {}
 
 
-_EXCLUDE_KEYWORD_SPLIT_RE = re.compile(r"[,，/\\\s]+")
+def _normalize_banner_channel_ids(
+    channel_ids: list[int | str] | None,
+    channel_id: int | str | None,
+) -> list[int]:
+    """合并新旧频道参数并稳定去重为整数 ID 列表。"""
+    raw_channel_ids = list(channel_ids or [])
+    if channel_id is not None:
+        raw_channel_ids.append(channel_id)
 
-
-def _filter_thread_banners_by_prefs(
-    thread_banners: List[BannerCarousel],
-    thread_map: dict[int, Thread],
-    prefs: UserSearchPreferencesDTO,
-) -> List[BannerCarousel]:
-    """根据用户搜索偏好筛选 thread 类型 banner。
-
-    对应 search 接口的 exclude_authors / exclude_tags / exclude_keywords 过滤。
-    仅排除明确命中的 banner，prefs 为空时不做过滤。
-    """
-    # 准备排除数据
-    exclude_authors: set[int] = set(prefs.exclude_authors or [])
-    exclude_tags: set[str] = (
-        {t.lower() for t in prefs.exclude_tags} if prefs.exclude_tags else set()
-    )
-    exclude_keywords_raw: str = (prefs.exclude_keywords or "").strip()
-
-    exclude_keywords: list[str] = []
-    if exclude_keywords_raw:
-        exclude_keywords = [
-            kw.strip().lower()
-            for kw in _EXCLUDE_KEYWORD_SPLIT_RE.split(exclude_keywords_raw)
-            if kw.strip()
-        ]
-
-    # 无任何排除条件，直接返回
-    if not exclude_authors and not exclude_tags and not exclude_keywords:
-        return thread_banners
-
-    filtered: List[BannerCarousel] = []
-    for banner in thread_banners:
-        thread = thread_map.get(banner.thread_id)
-        if thread is None:
-            # 线程不存在（可能已被删除），仍然保留 banner
-            filtered.append(banner)
+    normalized_channel_ids: list[int] = []
+    seen_channel_ids: set[int] = set()
+    for raw_channel_id in raw_channel_ids:
+        try:
+            normalized_channel_id = int(raw_channel_id)
+        except (TypeError, ValueError):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无效的频道ID格式: {raw_channel_id}",
+            )
+        if normalized_channel_id in seen_channel_ids:
             continue
+        seen_channel_ids.add(normalized_channel_id)
+        normalized_channel_ids.append(normalized_channel_id)
 
-        # 检查 exclude_authors
-        if exclude_authors and thread.author_id in exclude_authors:
-            continue
-
-        # 检查 exclude_tags
-        if exclude_tags:
-            thread_tag_names = {t.name.lower() for t in (thread.tags or [])}
-            if thread_tag_names & exclude_tags:
-                continue
-
-        # 检查 exclude_keywords（匹配 title + first_message_excerpt）
-        if exclude_keywords:
-            search_text = thread.title or ""
-            if thread.first_message_excerpt:
-                search_text += " " + thread.first_message_excerpt
-            search_text_lower = search_text.lower()
-            if any(kw in search_text_lower for kw in exclude_keywords):
-                continue
-
-        filtered.append(banner)
-
-    return filtered
+    return normalized_channel_ids
 
 
 router = APIRouter(
@@ -190,8 +152,13 @@ async def apply_banner(
     summary="获取当前活跃的Banner列表",
 )
 async def get_active_banners(
-    channel_id: Optional[int] = Query(
-        default=None, description="频道ID，不传则获取全频道Banner"
+    channel_ids: list[int | str] | None = Query(
+        default=None,
+        description="频道ID列表，可重复传入；不传则仅获取全局Banner",
+    ),
+    channel_id: int | str | None = Query(
+        default=None,
+        description="兼容旧调用的单个频道ID；传入后合并到channel_ids",
     ),
     current_user: Dict[str, Any] = Depends(get_current_user),
 ):
@@ -202,14 +169,19 @@ async def get_active_banners(
             detail="服务尚未初始化",
         )
 
+    effective_channel_ids = _normalize_banner_channel_ids(channel_ids, channel_id)
+
     try:
         async with async_session_factory() as session:
             service = BannerService(session)
-            banners = await service.get_active_banners(channel_id=channel_id)
+            banners = await service.get_active_banners(
+                channel_ids=effective_channel_ids
+            )
 
-            # ── 加载用户搜索偏好 ──
+            # 加载用户搜索偏好，失败时仅跳过偏好项。
             user_id = int(current_user.get("id", 0)) if current_user else 0
             prefs = None
+            redis_client = None
             if user_id:
                 try:
                     redis_client = RedisManager.get_client()
@@ -219,29 +191,35 @@ async def get_active_banners(
                 except Exception:
                     logger.warning("读取用户偏好失败，跳过偏好筛选", exc_info=True)
 
-            # 按 target_type 分离
-            thread_banners = [
-                b for b in banners if b.target_type == TargetType.THREAD.value
+            # 批量筛选帖子 Banner，并同时取得其服务器 ID。
+            thread_tids = [
+                banner.thread_id
+                for banner in banners
+                if banner.target_type == TargetType.THREAD.value
             ]
-            channel_banners = [
-                b for b in banners if b.target_type == TargetType.CHANNEL.value
-            ]
-
-            thread_tids = [b.thread_id for b in thread_banners]
-            channel_cids = [b.thread_id for b in channel_banners]
-
             guild_map: dict[int, int] = {}
-            thread_map: dict[int, Thread] = {}
-
-            # 查询 thread 类型对应的 Thread 对象（含 tags 和 guild_id）
+            allowed_thread_guilds: dict[int, int] = {}
             if thread_tids:
-                thread_repo = ThreadRepository(session)
-                threads = await thread_repo.get_threads_by_ids_with_tags(thread_tids)
-                for t in threads:
-                    guild_map[t.thread_id] = t.guild_id
-                    thread_map[t.thread_id] = t
+                if tag_cache_service_instance is None:
+                    raise RuntimeError("Banner TAG 缓存服务尚未初始化")
 
-            # 查询 channel 类型对应的 guild_id
+                search_service = SearchService(session, tag_cache_service_instance)
+                allowed_thread_guilds = (
+                    await search_service.get_preference_filtered_thread_guilds(
+                        thread_tids,
+                        prefs=prefs,
+                        channel_mappings_config=channel_mappings_config,
+                        redis_client=redis_client,
+                    )
+                )
+                guild_map.update(allowed_thread_guilds)
+
+            # 批量查询频道 Banner 对应的服务器 ID。
+            channel_cids = [
+                banner.thread_id
+                for banner in banners
+                if banner.target_type == TargetType.CHANNEL.value
+            ]
             if channel_cids:
                 channel_rows = await session.execute(
                     select(Channel.channel_id, Channel.guild_id).where(  # type: ignore[arg-type]
@@ -250,15 +228,7 @@ async def get_active_banners(
                 )
                 guild_map.update({cid: gid for cid, gid in channel_rows.all()})
 
-            # ── 应用用户偏好筛选（仅 thread 类型） ──
-            if prefs and thread_banners:
-                thread_banners = _filter_thread_banners_by_prefs(
-                    thread_banners, thread_map, prefs
-                )
-
-            # 合并筛选后的 banners（channel 类型始终保留）
-            filtered_banners = thread_banners + channel_banners
-
+            # 按原轮播顺序返回，频道 Banner 不参与用户偏好过滤。
             return [
                 BannerItem(
                     thread_id=banner.thread_id,
@@ -270,7 +240,9 @@ async def get_active_banners(
                     start_time=banner.start_time,
                     end_time=banner.end_time,
                 )
-                for banner in filtered_banners
+                for banner in banners
+                if banner.target_type != TargetType.THREAD.value
+                or banner.thread_id in allowed_thread_guilds
             ]
     except Exception as e:
         logger.error(f"获取Banner列表时出错: {e}", exc_info=True)

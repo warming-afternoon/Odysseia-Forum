@@ -15,36 +15,54 @@ class BannerCarouselRepository:
         self.session = session
 
     async def get_active(
-        self, channel_id: Optional[int] = None
+        self, channel_ids: Optional[List[int]] = None
     ) -> List[BannerCarousel]:
-        """获取当前有效的轮播项（end_time > now）。"""
+        """批量获取指定频道及全局的有效轮播项。"""
         now = datetime.now().replace(microsecond=0)
         channel_id_col = cast(ColumnElement, BannerCarousel.channel_id)
         end_time_col = cast(ColumnElement, BannerCarousel.end_time)
         position_col = cast(ColumnElement, BannerCarousel.position)
+        ordered_channel_ids = list(dict.fromkeys(channel_ids or []))
 
-        if channel_id is None:
+        if not ordered_channel_ids:
             result = await self.session.execute(
                 select(BannerCarousel)
                 .where(and_(channel_id_col.is_(None), end_time_col > now))
-                .order_by(position_col)
+                .order_by(position_col, BannerCarousel.id)
+                .limit(3)
             )
             return list(result.scalars().all())
 
-        # 频道专属
+        # 一次查询全部频道专属 Banner，再按请求频道顺序分组限量。
         channel_result = await self.session.execute(
             select(BannerCarousel)
-            .where(and_(channel_id_col == channel_id, end_time_col > now))
-            .order_by(position_col)
-            .limit(5)
+            .where(
+                and_(
+                    channel_id_col.in_(ordered_channel_ids),
+                    end_time_col > now,
+                )
+            )
+            .order_by(position_col, BannerCarousel.id)
         )
-        channel_banners = list(channel_result.scalars().all())
+        grouped_banners: dict[int, list[BannerCarousel]] = {
+            channel_id: [] for channel_id in ordered_channel_ids
+        }
+        for banner in channel_result.scalars().all():
+            banner_channel_id = banner.channel_id
+            if banner_channel_id is not None and banner_channel_id in grouped_banners:
+                grouped_banners[banner_channel_id].append(banner)
 
-        # 全频道
+        channel_banners = [
+            banner
+            for channel_id in ordered_channel_ids
+            for banner in grouped_banners[channel_id][:5]
+        ]
+
+        # 全局 Banner 只查询和追加一次。
         global_result = await self.session.execute(
             select(BannerCarousel)
             .where(and_(channel_id_col.is_(None), end_time_col > now))
-            .order_by(position_col)
+            .order_by(position_col, BannerCarousel.id)
             .limit(3)
         )
         global_banners = list(global_result.scalars().all())

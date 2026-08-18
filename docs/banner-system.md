@@ -119,11 +119,16 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 
 ### `GET /v1/banner/active` — 获取活跃 Banner
 
-**查询参数：** `channel_id`（可选）
+**查询参数：**
 
-当指定 `channel_id` 时，返回：
-- 该频道的专属 Banner（最多 **5 个**）
-- + 全局 Banner（最多 **3 个**）
+- `channel_ids`（可选，可重复传入）：频道 ID 列表，例如 `?channel_ids=123&channel_ids=456`
+- `channel_id`（可选）：兼容旧调用的单个频道 ID；与 `channel_ids` 同时传入时会合并去重
+
+指定频道时，按请求频道顺序返回每个频道的专属 Banner（每频道最多 **5 个**），
+最后追加全局 Banner（最多 **3 个**）。未传频道参数时仅返回全局 Banner。
+
+帖子型 Banner 会自动应用当前用户的反选偏好：排除作者、真实/虚拟 TAG、
+排除关键词及关键词豁免标记。频道型 Banner 不参与偏好过滤，过滤后仍保持原轮播顺序。
 
 **响应示例：**
 ```json
@@ -138,11 +143,7 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 ]
 ```
 
-> **注意：** 所有 Discord ID（thread_id、channel_id、guild_id）序列化为**字符串**，避免 JavaScript 大整数精度丢失。
-
-### 搜索接口集成
-
-搜索接口 [src/api/v1/routers/search.py](../src/api/v1/routers/search.py)（第 747-803 行）会**并发**调用 `BannerService.get_active_banners()`，将 Banner 数据注入 `SearchResponse.banner_carousel` 字段，失败时优雅降级返回空列表。
+> **注意：** 所有 Discord ID（thread_id、channel_id、guild_id）序列化为**字符串**，避免 JavaScript 大整数精度丢失。`GET /v1/banner/active` 是唯一的 Banner 数据返回入口。
 
 ---
 
@@ -219,7 +220,7 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 | `create_application()` | 插入 `banner_application` 行 |
 | `approve_application()` | 批准申请：轮播未满加入 `banner_carousel`，已满加入 `banner_waitlist` |
 | `reject_application()` | 拒绝申请，记录审核人和理由 |
-| `get_active_banners()` | 查询 `end_time > now` 的轮播 Banner，支持按频道筛选 + 全局合并 |
+| `get_active_banners()` | 查询 `end_time > now` 的轮播 Banner，支持新旧频道参数、多频道筛选及全局合并 |
 | `cleanup_expired_banners()` | 删除过期轮播项，从等待队列按 FIFO 晋升 |
 | `update_review_message_info()` | 更新申请记录的审核消息 ID（用于按钮回调关联） |
 | `get_application_by_review_message()` | 通过审核消息 ID 查找申请 |
@@ -277,9 +278,8 @@ class ApplicationResult:
 ├──────────────────────────────────────────────────────────────┤
 │  GET /v1/banner/active → BannerService.get_active_banners()  │
 │     → 查询 banner_carousel WHERE end_time > now               │
-│     → 按频道聚合（专属最多 5 + 全局最多 3）                    │
-│                                                              │
-│  搜索接口并发获取 → 注入 SearchResponse.banner_carousel        │
+│     → 按请求顺序聚合（每频道最多 5 + 全局最多 3）              │
+│     → 帖子型 Banner 应用当前用户反选偏好                       │
 └──────────────────────────────────────────────────────────────┘
                               ↓
 ┌──────────────────────────────────────────────────────────────┐

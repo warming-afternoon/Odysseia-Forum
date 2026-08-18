@@ -6,11 +6,9 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from sqlmodel import select
 
 from api.v1.dependencies.security import get_current_user, require_auth
 from api.v1.dependencies.rate_limit import search_rate_limit, similar_rate_limit
-from api.v1.schemas.banner import BannerItem
 from api.v1.schemas.search import (
     AuthorSuggestion,
     BooklistSuggestion,
@@ -24,10 +22,8 @@ from api.v1.schemas.search import (
 from api.v1.schemas.search.tournament_info import TournamentInfo
 from api.v1.utils import ThreadDetailBuilder
 from api.v1.utils.preferences_utils import get_user_preferences_cached
-from banner.banner_service import BannerService
 from core.cache_service import CacheService
 from core.collection_repository import CollectionRepository
-from core.follow_repository import ThreadFollowRepository
 from core.impression_cache_service import ImpressionCacheService
 from core.preferences_repository import PreferencesRepository
 from core.tag_cache_service import TagCacheService
@@ -35,12 +31,11 @@ from core.thread_repository import ThreadRepository
 from dto.preferences import UserSearchPreferencesDTO
 from dto.search import SearchConfigDTO
 from search.qo.thread_search import ThreadSearchQuery
-from models import Thread
 from search.search_service import SearchService
 from search.similar_threads_busy_error import SimilarThreadsBusyError
 from search.similar_threads_cache_service import SimilarThreadsCacheService
 from search.suggestion_service import SuggestionService
-from shared.enum import AbyssDefaults, CollectionType, SearchTimeout, TargetType
+from shared.enum import AbyssDefaults, CollectionType, SearchTimeout
 from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.keyword_parser import parse_search_keywords
 
@@ -765,90 +760,3 @@ def _build_available_tags(
 
     available_tags = virtual_tags + real_tag_names
     return available_tags, virtual_tags
-
-
-async def _get_banner_and_unread_async(
-    session_factory,
-    request_channel_ids: List[int | str] | None,
-    user_id: int | None,
-) -> tuple[List[BannerItem], int]:
-    """
-    在独立 session 中获取 Banner 轮播列表和用户未读更新数量。
-
-    设计为通过 asyncio.create_task() 与主搜索并发执行，
-    失败时降级返回空列表和 0，不影响主搜索流程。
-
-    Returns:
-        tuple: (Banner列表, 未读数量)
-    """
-    try:
-        async with session_factory() as session:
-            target_channel_id: int | None = (
-                request_channel_ids[0] if request_channel_ids else None
-            )  # type: ignore[assignment]
-
-            # 获取Banner轮播列表
-            banner_service = BannerService(session)
-            banners = await banner_service.get_active_banners(
-                channel_id=target_channel_id
-            )
-            guild_map: dict[int, int] = {}
-            if banners:
-                thread_tids = [
-                    b.thread_id
-                    for b in banners
-                    if b.target_type == TargetType.THREAD.value
-                ]
-                channel_ids = [
-                    b.thread_id
-                    for b in banners
-                    if b.target_type == TargetType.CHANNEL.value
-                ]
-
-                if thread_tids:
-                    guild_rows = await session.execute(
-                        select(Thread.thread_id, Thread.guild_id).where(  # type: ignore[arg-type]
-                            Thread.thread_id.in_(thread_tids)  # type: ignore[arg-type]
-                        )
-                    )
-                    guild_map.update({tid: gid for tid, gid in guild_rows.all()})
-
-                if channel_ids:
-                    from models.channel import Channel as ChannelModel
-
-                    channel_rows = await session.execute(
-                        select(ChannelModel.channel_id, ChannelModel.guild_id).where(  # type: ignore[arg-type]
-                            ChannelModel.channel_id.in_(channel_ids)  # type: ignore[arg-type]
-                        )
-                    )
-                    guild_map.update({cid: gid for cid, gid in channel_rows.all()})
-
-            banner_carousel = [
-                BannerItem(
-                    thread_id=banner.thread_id,
-                    title=banner.title,
-                    cover_image_url=banner.cover_image_url,
-                    channel_id=banner.channel_id if banner.channel_id else 0,
-                    guild_id=guild_map.get(banner.thread_id, 0),
-                    target_type=banner.target_type,
-                    start_time=banner.start_time,
-                    end_time=banner.end_time,
-                )
-                for banner in banners
-            ]
-
-            # 读取未读更新数量（失败时返回0不影响主流程）
-            unread_count = 0
-            if user_id is not None:
-                try:
-                    follow_service = ThreadFollowRepository(session)
-                    unread_count = await follow_service.get_unread_count(
-                        user_id=user_id
-                    )
-                except Exception:
-                    unread_count = 0
-
-            return banner_carousel, unread_count
-    except Exception:
-        logger.warning("并发获取 Banner/未读数失败，降级返回空值", exc_info=True)
-        return [], 0

@@ -19,6 +19,7 @@ from dto.search import (
 from models import Author, Tag, Thread, ThreadTagLink, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
+from shared.channel_mapping_utils import ChannelMappingUtils
 from shared.enum import DefaultPreferences, SearchConfigDefaults
 from shared.range_parser import parse_range_string
 from shared.time_parser import parse_time_string
@@ -810,29 +811,9 @@ class SearchService:
             filters.append(
                 Thread.channel_id.notin_(exclude_channel_ids)  # type: ignore[arg-type]
             )
-        if prefs and prefs.exclude_authors:
-            filters.append(
-                Thread.author_id.notin_(prefs.exclude_authors)  # type: ignore[arg-type]
-            )
-        if prefs and prefs.exclude_tags:
-            excluded_tag_ids = [
-                tag_id
-                for tag_name in prefs.exclude_tags
-                for tag_id in self.tag_cache_service.get_ids_by_tag_name(tag_name)
-            ]
-            if excluded_tag_ids:
-                filters.append(~Thread.tags.any(Tag.id.in_(excluded_tag_ids)))  # type: ignore
-
-        if prefs and prefs.exclude_keywords:
-            thread_repo = ThreadRepository(self.session)
-            fts_result = await thread_repo.get_fts_matched_thread_ids(
-                keywords=None,
-                exclude_keywords=prefs.exclude_keywords,
-                exemption_markers=prefs.exclude_keyword_exemption_markers,
-                redis_client=redis_client,
-            )
-            if fts_result.has_exclude:
-                filters.append(~fts_result.exclude_condition)
+        filters.extend(
+            await self._build_preference_exclusion_filters(prefs, redis_client)
+        )
 
         statement = select(Thread).where(and_(*filters))
         statement = statement.options(
@@ -858,6 +839,98 @@ class SearchService:
         threads = list(result.scalars().unique().all())
         selected_levels = [matched_levels[thread.thread_id] for thread in threads]
         return threads, min(selected_levels, default=0)
+
+    async def get_preference_filtered_thread_guilds(
+        self,
+        thread_ids: list[int],
+        *,
+        prefs: UserSearchPreferencesDTO | None,
+        channel_mappings_config: dict[int, list[dict]] | None = None,
+        redis_client=None,
+    ) -> dict[int, int]:
+        """批量返回符合可见性和用户反选偏好的帖子及服务器 ID。"""
+        if not thread_ids:
+            return {}
+
+        # 将虚拟反选标签解析为频道范围，只保留真实标签进入标签过滤。
+        effective_prefs = prefs
+        channel_ids = None
+        if prefs and prefs.exclude_tags:
+            thread_repo = ThreadRepository(self.session)
+            all_channel_ids = list(await thread_repo.get_all_indexed_channel_ids())
+            channel_result = ChannelMappingUtils(
+                channel_mappings_config or {}
+            ).resolve(
+                channel_ids=None,
+                include_tags=[],
+                exclude_tags=prefs.exclude_tags,
+                tag_logic="or",
+                all_indexed_channels=all_channel_ids,
+            )
+            if channel_result.effective_channel_ids == []:
+                return {}
+            channel_ids = channel_result.effective_channel_ids
+            effective_prefs = prefs.model_copy(
+                update={"exclude_tags": channel_result.effective_exclude_tags}
+            )
+
+        # 限定候选帖子及其可见性。
+        filters = [
+            Thread.thread_id.in_(thread_ids),  # type: ignore[arg-type]
+            Thread.not_found_count == 0,
+            Thread.show_flag,
+        ]
+        if channel_ids is not None:
+            filters.append(
+                Thread.channel_id.in_(channel_ids)  # type: ignore[arg-type]
+            )
+
+        # 复用搜索使用的作者、真实标签和全文关键词反选规则。
+        filters.extend(
+            await self._build_preference_exclusion_filters(
+                effective_prefs, redis_client
+            )
+        )
+        statement = select(Thread.thread_id, Thread.guild_id).where(and_(*filters))
+        rows = (await self.session.execute(statement)).all()
+        return {thread_id: guild_id for thread_id, guild_id in rows}
+
+    async def _build_preference_exclusion_filters(
+        self,
+        prefs: UserSearchPreferencesDTO | None,
+        redis_client=None,
+    ) -> list:
+        """构建搜索场景共用的用户反选过滤条件。"""
+        if prefs is None:
+            return []
+
+        filters = []
+        if prefs.exclude_authors:
+            filters.append(
+                Thread.author_id.notin_(prefs.exclude_authors)  # type: ignore[arg-type]
+            )
+
+        if prefs.exclude_tags:
+            excluded_tag_ids = [
+                tag_id
+                for tag_name in prefs.exclude_tags
+                for tag_id in self.tag_cache_service.get_ids_by_tag_name(tag_name)
+            ]
+            if excluded_tag_ids:
+                filters.append(~Thread.tags.any(Tag.id.in_(excluded_tag_ids)))  # type: ignore
+
+        if prefs.exclude_keywords:
+            thread_repo = ThreadRepository(self.session)
+            fts_result = await thread_repo.get_fts_matched_thread_ids(
+                keywords=None,
+                exclude_keywords=prefs.exclude_keywords,
+                exemption_markers=prefs.exclude_keyword_exemption_markers,
+                redis_client=redis_client,
+            )
+            if fts_result.has_exclude:
+                filters.append(~fts_result.exclude_condition)
+
+        return filters
 
     async def _find_similar_candidate_ids(
         self,
