@@ -20,7 +20,13 @@ class CacheKeys(StrEnum):
     """允许包含深渊区的相似帖子候选池"""
 
     RATE_LIMIT_WATCH = "rate_limit:watch:{user_id}"
-    """限流触发后的 watch 标记，TTL 10 分钟"""
+    """限流触发后的 watch 标记"""
+
+    RATE_LIMIT_GLOBAL_MINUTE = "rate_limit:global:{user_id}"
+    """全局分钟固定窗口计数"""
+
+    RATE_LIMIT_GLOBAL_DAILY = "rate_limit:global:daily:{date}:{user_id}"
+    """服务器本地自然日全局请求计数"""
 
     def format(self, **kwargs) -> str:
         """填充 Key 中的占位符。"""

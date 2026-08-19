@@ -10,6 +10,8 @@ from api.v1.utils.jwt_utils import verify_jwt
 
 logger = logging.getLogger(__name__)
 
+VERIFIED_JWT_PAYLOAD_STATE_KEY = "verified_jwt_payload"
+
 # 全局变量，在应用启动时初始化
 _JWT_SECRET = None
 _API_KEY = None
@@ -59,10 +61,15 @@ async def get_current_user(
             detail="JWT 认证服务未初始化",
         )
 
-    # 1) 优先从 Authorization Bearer 中读取
+    # 复用全局限频中间件已经验证过的 JWT 结果
+    request_state = request.scope.get("state", {})
+    if VERIFIED_JWT_PAYLOAD_STATE_KEY in request_state:
+        return request_state[VERIFIED_JWT_PAYLOAD_STATE_KEY]
+
+    # 优先从 Authorization Bearer 中读取
     token = credentials.credentials if credentials else None
 
-    # 2) 回退到 Cookie 会话
+    # 回退到 Cookie 会话
     if not token:
         token = request.cookies.get("session")
 

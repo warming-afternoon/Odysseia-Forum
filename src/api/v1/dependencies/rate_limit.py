@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional
 from fastapi import Depends, HTTPException, Request, Response, status
 
 from api.v1.dependencies.security import get_current_user
-from shared.enum.rate_limit_defaults import RateLimitDefaults
 from dto.rate_limit import RateLimitConfig
-from shared.rate_limit import check_rate_limit, set_rate_limit_watch
+from shared.enum.rate_limit_defaults import RateLimitDefaults
+from shared.rate_limit import add_watch_reason, check_rate_limit, set_rate_limit_watch
 from shared.redis_client import RedisManager
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ async def _apply_user_rate_limit(
     current_user: Optional[Dict[str, Any]],
     config: RateLimitConfig | None,
     key_suffix: str,
-    log_name: str,
+    include_body: bool = False,
 ) -> None:
     """执行按用户固定窗口限流。"""
     if config is None:
@@ -78,17 +78,22 @@ async def _apply_user_rate_limit(
     if result.allowed:
         return
 
-    logger.warning(
-        "%s触发频率限制: user_id=%s, count=%s/%s, reset=%ss | method=%s path=%s",
-        log_name,
-        user_id,
-        result.current_count,
-        config.max_requests,
-        result.reset_after,
-        request.method,
-        request.url.path,
-    )
-    await set_rate_limit_watch(redis, user_id)
+    body = None
+    if include_body:
+        try:
+            raw_body = await request.body()
+            body = (
+                raw_body.decode("utf-8", errors="replace")[
+                    : int(RateLimitDefaults.LOG_BODY_MAX_CHARS)
+                ]
+                if raw_body
+                else "-"
+            )
+        except Exception:
+            body = "-"
+
+    add_watch_reason(request.scope, f"{key_suffix}_rate_limit", body)
+    await set_rate_limit_watch(redis, str(user_id))
     raise HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         detail="请求过于频繁，请稍后重试",
@@ -108,7 +113,6 @@ async def similar_rate_limit(
         current_user=current_user,
         config=_similar_config,
         key_suffix="similar",
-        log_name="相似推荐接口",
     )
 
 
@@ -125,53 +129,11 @@ async def search_rate_limit(
     Raises:
         HTTPException(429): 超出频率限制时，附带 Retry-After 头。
     """
-    config = _search_config
-    if config is None:
-        return  # 未初始化（极端情况），静默放行
-
-    user_id = current_user.get("id") if current_user else None
-    if not user_id:
-        return  # 防御：require_auth 已先行拒绝未认证用户
-
-    redis = RedisManager.get_client()
-    key = f"{config.key_prefix}:search:{user_id}"
-
-    result = await check_rate_limit(
-        redis=redis,
-        key=key,
-        max_requests=config.max_requests,
-        window_seconds=config.window_seconds,
+    await _apply_user_rate_limit(
+        request=request,
+        response=response,
+        current_user=current_user,
+        config=_search_config,
+        key_suffix="search",
+        include_body=True,
     )
-
-    # 无论是否超限都返回当前状态头
-    response.headers["X-RateLimit-Remaining"] = str(result.remaining)
-    response.headers["X-RateLimit-Reset"] = str(result.reset_after)
-
-    if not result.allowed:
-        # 仅在触发限流时读取请求体（不计入正常请求性能开销）
-        body = "-"
-        try:
-            raw = await request.body()
-            if raw:
-                body = raw.decode("utf-8", errors="replace")[:512]
-        except Exception:
-            pass
-
-        logger.warning(
-            "搜索接口触发频率限制: user_id=%s, count=%s/%s, reset=%ss | "
-            "method=%s path=%s ua=%s body=%s",
-            user_id,
-            result.current_count,
-            config.max_requests,
-            result.reset_after,
-            request.method,
-            request.url.path,
-            request.headers.get("user-agent", "-"),
-            body,
-        )
-        await set_rate_limit_watch(redis, user_id)
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="请求过于频繁，请稍后重试",
-            headers={"Retry-After": str(result.reset_after)},
-        )

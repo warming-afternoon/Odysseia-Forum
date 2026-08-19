@@ -53,6 +53,12 @@
       "similar": {
         "max_requests": 60,
         "_comment_max_requests": "相似推荐每个窗口（60秒）内允许的最大请求数"
+      },
+      "global": {
+        "max_requests": 800,
+        "_comment_max_requests": "所有已登录业务接口每个窗口（60秒）内允许的最大请求数",
+        "daily_watch_threshold": 1500,
+        "_comment_daily_watch_threshold": "服务器本地自然日请求数超过该值后持续续期 Watch"
       }
     }
   },

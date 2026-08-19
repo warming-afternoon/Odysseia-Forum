@@ -109,10 +109,13 @@ class TestReadAndReplayBody:
         assert RateLimitMiddleware._truncate_body(b"hello") == "hello"
 
         # 超长 body 截断
-        long_body = b"x" * 600
-        result = RateLimitMiddleware._truncate_body(long_body, max_len=512)
-        assert len(result.encode("utf-8")) <= 512
+        long_body = b"x" * 1200
+        result = RateLimitMiddleware._truncate_body(long_body)
+        assert len(result) == 1024
 
         # 中文 body
         cn_body = "你好世界".encode("utf-8")
         assert RateLimitMiddleware._truncate_body(cn_body) == "你好世界"
+
+        long_cn_body = ("界" * 1100).encode("utf-8")
+        assert len(RateLimitMiddleware._truncate_body(long_cn_body)) == 1024

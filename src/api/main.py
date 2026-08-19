@@ -31,6 +31,9 @@ from shared.redis_client import RedisManager
 logger = logging.getLogger(__name__)
 
 # 读取配置
+config = {}
+api_config = {}
+auth_config = {}
 try:
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
@@ -101,7 +104,11 @@ app.add_middleware(
 )
 
 # 全局限流中间件（CORS 之后、路由之前）
-app.add_middleware(RateLimitMiddleware)
+app.add_middleware(
+    RateLimitMiddleware,
+    config=api_config.get("rate_limit", {}).get("global", {}),
+    jwt_secret=auth_config.get("jwt_secret"),
+)
 
 # 包含路由
 app.include_router(auth.router, prefix="/v1")

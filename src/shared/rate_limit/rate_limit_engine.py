@@ -4,14 +4,53 @@
 """
 
 import logging
+import math
+import time
+from datetime import datetime, time as datetime_time, timedelta
 
 from redis.asyncio import Redis
 
-from dto.rate_limit import RateLimitResult
+from dto.rate_limit import (
+    GlobalRateLimitConfig,
+    GlobalRateLimitResult,
+    RateLimitResult,
+)
 from shared.enum.cache_keys import CacheKeys
 from shared.enum.rate_limit_defaults import RateLimitDefaults
 
 logger = logging.getLogger(__name__)
+
+_GLOBAL_RATE_LIMIT_SCRIPT = """
+local minute_count = redis.call('INCR', KEYS[1])
+local minute_ttl = redis.call('TTL', KEYS[1])
+if minute_count == 1 or minute_ttl < 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+    minute_ttl = tonumber(ARGV[1])
+end
+
+local daily_count = redis.call('INCR', KEYS[2])
+local daily_ttl = redis.call('TTL', KEYS[2])
+if daily_count == 1 or daily_ttl < 1 then
+    redis.call('EXPIRE', KEYS[2], ARGV[2])
+end
+
+local minute_limited = minute_count > tonumber(ARGV[3])
+local daily_watch_active = daily_count > tonumber(ARGV[4])
+local watched = redis.call('EXISTS', KEYS[3]) == 1
+
+if minute_limited or daily_watch_active then
+    redis.call('SET', KEYS[3], '1', 'EX', ARGV[5])
+    watched = true
+end
+
+return {
+    minute_count,
+    minute_ttl,
+    daily_count,
+    watched and 1 or 0,
+    daily_watch_active and 1 or 0
+}
+"""
 
 
 async def check_rate_limit(
@@ -65,8 +104,62 @@ async def check_rate_limit(
         return RateLimitResult.fail_open()
 
 
+async def check_global_rate_limit(
+    redis: Redis,
+    user_id: str,
+    config: GlobalRateLimitConfig,
+    now_timestamp: float | None = None,
+) -> GlobalRateLimitResult:
+    """原子检查全局分钟限制、每日计数和 Watch 状态。"""
+    date_key, daily_ttl = _get_local_day_window(now_timestamp)
+    minute_key = CacheKeys.RATE_LIMIT_GLOBAL_MINUTE.format(user_id=user_id)
+    daily_key = CacheKeys.RATE_LIMIT_GLOBAL_DAILY.format(date=date_key, user_id=user_id)
+    watch_key = CacheKeys.RATE_LIMIT_WATCH.format(user_id=user_id)
+
+    try:
+        # 单次 Redis 调用同时维护所有全局频率状态
+        raw_result = await redis.eval(
+            _GLOBAL_RATE_LIMIT_SCRIPT,
+            3,
+            minute_key,
+            daily_key,
+            watch_key,
+            config.window_seconds,
+            daily_ttl,
+            config.max_requests,
+            config.daily_watch_threshold,
+            int(RateLimitDefaults.WATCH_TTL_SECONDS),
+        )
+        minute_count = int(raw_result[0])
+        reset_after = int(raw_result[1])
+        daily_count = int(raw_result[2])
+        return GlobalRateLimitResult(
+            allowed=minute_count <= config.max_requests,
+            minute_count=minute_count,
+            minute_remaining=max(0, config.max_requests - minute_count),
+            reset_after=reset_after,
+            daily_count=daily_count,
+            watched=bool(raw_result[3]),
+            daily_watch_active=bool(raw_result[4]),
+        )
+    except Exception:
+        logger.warning("Redis 全局频率限制检查失败，降级放行", exc_info=True)
+        return GlobalRateLimitResult.fail_open(config.max_requests)
+
+
+def _get_local_day_window(now_timestamp: float | None = None) -> tuple[str, int]:
+    """返回服务器本地日期键及距次日零点的秒数。"""
+    current_timestamp = time.time() if now_timestamp is None else now_timestamp
+    local_now = datetime.fromtimestamp(current_timestamp)
+    next_date = local_now.date() + timedelta(days=1)
+    next_midnight = datetime.combine(next_date, datetime_time.min)
+    next_midnight_timestamp = time.mktime(next_midnight.timetuple())
+    ttl_seconds = max(1, math.ceil(next_midnight_timestamp - current_timestamp))
+    return local_now.strftime("%Y%m%d"), ttl_seconds
+
+
 async def set_rate_limit_watch(redis: Redis, user_id: str) -> None:
-    """为指定用户设置 watch 标记，此后 10 分钟内所有请求将被详细日志记录。
+    """为指定用户设置 watch 标记，TTL 内所有请求将被详细记录。
 
     Args:
         redis: Redis 客户端。
