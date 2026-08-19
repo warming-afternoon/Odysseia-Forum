@@ -109,11 +109,41 @@ cp .env.example .env
 
 | 配置项 | 类型 | 默认值 | 说明 |
 |--------|------|--------|------|
-| `update_detector.enabled` | boolean | true | 是否启用 AI 更新检测 |
-| `update_detector.gemini_api_key` | string | — | Google Gemini API Key |
-| `update_detector.gemini_model` | string | `"gemini-2.0-flash"` | 模型名称 |
-| `update_detector.auto_delete_seconds` | number | 600 | 提醒消息自动删除时间（秒） |
+| `update_detector.mode` | string | `"disabled"` | `disabled` 关闭、`observe` 本地估算、`active` 正式检测 |
+| `update_detector.deepseek_base_url` | string | `"https://api.deepseek.com"` | DeepSeek 官方或兼容代理基础地址 |
+| `update_detector.deepseek_model` | string | `"deepseek-v4-flash"` | 正式检测使用的模型 |
+| `update_detector.thinking_enabled` | boolean | true | 是否开启 thinking 模式 |
+| `update_detector.max_output_tokens` | number | 2048 | 单次最大生成 Token |
+| `update_detector.request_timeout_seconds` | number | 60 | 请求超时时间（秒） |
 | `update_detector.min_text_length` | number | 100 | 触发检测的最小文字长度 |
+| `update_detector.min_text_length_with_attachment` | number | 30 | 带 PNG/JSON 附件时的最小文字长度 |
+
+`observe` 模式不会请求 DeepSeek、发送提醒或同步数据库，只将本地 Token
+估算按 UTC 日期写入 Redis。`active` 模式需要在 `.env` 中设置
+`DEEPSEEK_API_KEY`。提醒消息仅帖子作者可操作，且不会自动删除。
+修改 `mode` 后需要重启 Bot 容器，使更新检测模块重新加载配置。
+
+查看最近七天的试监听统计：
+
+```bash
+docker compose exec odysseia-forum-bot \
+  uv run python scripts/show_update_detector_stats.py --kind estimate --days 7
+```
+
+正式启用后将 `--kind` 改为 `actual` 即可查看真实 Token usage。也可使用
+`--from YYYY-MM-DD --to YYYY-MM-DD` 指定日期范围，或用
+`--format json` 输出 JSON。
+
+统计按 UTC 日期存入 Redis Hash，代码固定保留 90 天：
+
+```text
+update_detector:token_stats:estimate:deepseek-v4-flash:YYYYMMDD
+update_detector:token_stats:actual:deepseek-v4-flash:YYYYMMDD
+```
+
+`estimate` 保存潜在请求数、字符数、估算输入 Token 及 2048 Token 输出上界；
+`actual` 保存请求成功/失败、YES/NO/无效判断数量及接口返回的真实输入、输出、
+总 Token。统计中不保存消息正文、Discord ID、reasoning 或密钥。
 
 #### 备份 (`backup`)
 
@@ -161,6 +191,7 @@ cp .env.example .env
 | `DB_MAX_OVERFLOW` | 否 | 连接池临时溢出连接数，默认 `8` |
 | `DB_POOL_TIMEOUT` | 否 | 获取连接的最长等待秒数，默认 `30` |
 | `REDIS_URL` | 否 | 完整 Redis 连接 URL（非 Docker 部署使用） |
+| `DEEPSEEK_API_KEY` | active 模式是 | DeepSeek API Key，仅供更新检测使用 |
 | `BACKUP_ENCRYPTION_KEY` | 否 | 备份加密密钥（Base64 编码的 32 字节密钥） |
 
 ---

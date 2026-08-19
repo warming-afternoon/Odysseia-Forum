@@ -21,7 +21,7 @@ dependencies = [
     "uvicorn[standard]",
     "uvloop; platform_system != 'Windows'",
     "httpx",
-    "google-genai",
+    "cryptography>=45.0.0",
     "redis>=5.0.0",
     "orjson>=3.11.2",
     "aioboto3>=13.0.0",

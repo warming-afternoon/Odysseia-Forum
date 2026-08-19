@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class UpdateDetectorView(discord.ui.View):
-    """更新检测提醒的按钮视图，带自动删除功能"""
+    """仅允许帖子作者操作的更新检测提醒按钮视图。"""
 
     def __init__(
         self,
@@ -18,21 +18,16 @@ class UpdateDetectorView(discord.ui.View):
         thread_id: int,
         author_id: int,
         message_link: str,
-        auto_delete_seconds: int = 600,
     ):
-        super().__init__(timeout=auto_delete_seconds)
+        super().__init__(timeout=None)
         self.cog = cog
         self.thread_id = thread_id
         self.author_id = author_id
         self.message_link = message_link
-        self.auto_delete_seconds = auto_delete_seconds
         self._message: discord.Message | None = None
 
     def set_message(self, message: discord.Message):
         self._message = message
-
-    async def on_timeout(self):
-        await self._delete_message()
 
     async def _delete_message(self):
         if self._message:
@@ -131,7 +126,6 @@ class UpdateDetectorView(discord.ui.View):
 def build_update_embed(
     prompt_message: str,
     thread_name: str,
-    auto_delete_seconds: int,
 ) -> discord.Embed:
     """构建更新检测提醒 Embed"""
     embed = discord.Embed(
@@ -140,6 +134,4 @@ def build_update_embed(
         color=discord.Color.blue(),
     )
     embed.add_field(name="帖子", value=thread_name, inline=False)
-    minutes = auto_delete_seconds // 60
-    embed.set_footer(text=f"本消息 {minutes} 分钟后自动删除")
     return embed

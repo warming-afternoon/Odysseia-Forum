@@ -121,23 +121,26 @@
   },
 
   "update_detector": {
-    "enabled": true,
-    "_comment_enabled": "是否启用更新检测功能",
+    "mode": "observe",
+    "_comment_mode": "更新检测模式：disabled 关闭、observe 仅本地估算、active 正式调用 DeepSeek",
 
-    "gemini_api_key": "your_gemini_api_key_here",
-    "_comment_gemini_api_key": "Google Gemini API Key，用于AI判断消息是否为发布更新",
+    "deepseek_base_url": "https://api.deepseek.com",
+    "_comment_deepseek_base_url": "DeepSeek 官方或 OpenAI Chat Completions 兼容代理的基础地址",
 
-    "gemini_base_url": "",
-    "_comment_gemini_base_url": "Gemini API 地址，留空使用官方默认地址。可填写代理地址，例如 https://your-proxy.com/v1beta",
+    "deepseek_model": "deepseek-v4-flash",
+    "_comment_deepseek_model": "更新检测使用的 DeepSeek 模型",
 
-    "gemini_model": "gemini-2.0-flash",
-    "_comment_gemini_model": "Gemini 模型名称，可自行修改为代理支持的模型名",
+    "thinking_enabled": true,
+    "_comment_thinking_enabled": "是否开启 DeepSeek thinking 模式",
+
+    "max_output_tokens": 2048,
+    "_comment_max_output_tokens": "单次 DeepSeek 请求的最大生成 Token",
+
+    "request_timeout_seconds": 60,
+    "_comment_request_timeout_seconds": "DeepSeek 请求超时时间（秒）",
 
     "prompt_message": "检测到您可能发布了作品的新版本，是否将其同步到索引页？",
     "_comment_prompt_message": "发送给用户的提醒消息内容，可自定义",
-
-    "auto_delete_seconds": 600,
-    "_comment_auto_delete_seconds": "提醒消息自动删除时间（秒），默认600秒（10分钟）",
 
     "min_text_length": 100,
     "_comment_min_text_length": "触发检测的最小文字长度（纯文字消息），默认100字符",

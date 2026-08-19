@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import TYPE_CHECKING
 
 import discord
@@ -7,8 +8,12 @@ from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.thread_repository import ThreadRepository
+from shared.redis_client import RedisManager
 from shared.safe_defer import safe_defer
-from update_detector.gemini_service import GeminiService
+from update_detector.deepseek_service import DeepSeekService
+from update_detector.prompt_builder import build_update_detection_prompt
+from update_detector.token_estimator import TokenEstimator
+from update_detector.token_stats_service import TokenStatsService
 from update_detector.update_preference_service import UpdatePreferenceService
 from update_detector.views import UpdateDetectorView, build_update_embed
 
@@ -20,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 class UpdateDetector(commands.Cog):
     """监听已索引帖子中的消息，检测发布更新并提醒用户同步"""
+
+    VALID_MODES = {"disabled", "observe", "active"}
 
     def __init__(
         self,
@@ -33,32 +40,51 @@ class UpdateDetector(commands.Cog):
         self.cache_service = bot.cache_service
 
         ud_config = config.get("update_detector", {})
-        self.enabled = ud_config.get("enabled", False)
+        configured_mode = ud_config.get("mode", "disabled")
+        if (
+            not isinstance(configured_mode, str)
+            or configured_mode not in self.VALID_MODES
+        ):
+            logger.warning(
+                "更新检测 mode 非法，已按 disabled 处理: mode=%r",
+                configured_mode,
+            )
+            configured_mode = "disabled"
+        self.mode = configured_mode
         self.prompt_message = ud_config.get(
             "prompt_message", "检测到您可能发布了作品的新版本，是否将其同步到索引页？"
         )
-        self.auto_delete_seconds = ud_config.get("auto_delete_seconds", 600)
         self.min_text_length = ud_config.get("min_text_length", 100)
         self.min_text_length_with_attachment = ud_config.get(
             "min_text_length_with_attachment", 30
         )
+        self.deepseek_model = ud_config.get("deepseek_model", "deepseek-v4-flash")
+        self.thinking_enabled = ud_config.get("thinking_enabled", True)
+        self.max_output_tokens = ud_config.get("max_output_tokens", 2048)
+        self.token_estimator = TokenEstimator()
+        self.token_stats_service: TokenStatsService | None = None
+        if self.mode != "disabled":
+            self.token_stats_service = TokenStatsService(RedisManager.get_client())
 
-        self.gemini_service: GeminiService | None = None
-        gemini_api_key = ud_config.get("gemini_api_key", "")
-        if self.enabled and gemini_api_key:
-            gemini_model = ud_config.get("gemini_model", "gemini-2.0-flash")
-            gemini_base_url = ud_config.get("gemini_base_url", "")
-            self.gemini_service = GeminiService(
-                api_key=gemini_api_key,
-                model=gemini_model,
-                base_url=gemini_base_url,
+        self.deepseek_service: DeepSeekService | None = None
+        deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY", "").strip()
+        if self.mode == "active" and deepseek_api_key:
+            self.deepseek_service = DeepSeekService(
+                api_key=deepseek_api_key,
+                base_url=ud_config.get("deepseek_base_url", "https://api.deepseek.com"),
+                model=self.deepseek_model,
+                thinking_enabled=self.thinking_enabled,
+                max_output_tokens=self.max_output_tokens,
+                timeout_seconds=ud_config.get("request_timeout_seconds", 60),
             )
+        elif self.mode == "active":
+            logger.error("更新检测 active 模式缺少 DEEPSEEK_API_KEY，AI 调用已停用")
 
-        logger.info(f"UpdateDetector 已加载 (enabled={self.enabled})")
+        logger.info("UpdateDetector 已加载 (mode=%s)", self.mode)
 
     async def cog_unload(self):
-        if self.gemini_service:
-            await self.gemini_service.close()
+        if self.deepseek_service:
+            await self.deepseek_service.close()
 
     def _is_channel_indexed(self, channel_id: int) -> bool:
         return self.cache_service.is_channel_indexed(channel_id)
@@ -86,7 +112,9 @@ class UpdateDetector(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        if not self.enabled or not self.gemini_service:
+        if self.mode == "disabled":
+            return
+        if self.mode == "active" and not self.deepseek_service:
             return
 
         if (
@@ -119,7 +147,7 @@ class UpdateDetector(commands.Cog):
         if pref and pref.no_remind:
             return
 
-        # 构造 Gemini 判断内容
+        # 构造本地估算和正式调用共用的判断内容
         attachment_filenames = None
         json_filenames = [
             att.filename
@@ -129,10 +157,37 @@ class UpdateDetector(commands.Cog):
         if json_filenames:
             attachment_filenames = json_filenames
 
-        is_update = await self.gemini_service.is_update_message(
-            message.content, attachment_filenames
+        system_content, user_content = build_update_detection_prompt(
+            message.content,
+            attachment_filenames,
         )
-        if not is_update:
+        if self.mode == "observe":
+            estimate = self.token_estimator.estimate(
+                system_content=system_content,
+                user_content=user_content,
+                max_output_tokens=self.max_output_tokens,
+            )
+            if self.token_stats_service:
+                await self.token_stats_service.record_estimate(
+                    model=self.deepseek_model,
+                    thinking_enabled=self.thinking_enabled,
+                    max_output_tokens=self.max_output_tokens,
+                    estimate=estimate,
+                )
+            return
+
+        result = await self.deepseek_service.detect_update(
+            system_content=system_content,
+            user_content=user_content,
+        )
+        if self.token_stats_service:
+            await self.token_stats_service.record_actual(
+                model=self.deepseek_model,
+                thinking_enabled=self.thinking_enabled,
+                max_output_tokens=self.max_output_tokens,
+                result=result,
+            )
+        if not result.is_update:
             return
 
         message_link = message.jump_url
@@ -145,15 +200,12 @@ class UpdateDetector(commands.Cog):
             return
 
         # 发送提醒 embed
-        embed = build_update_embed(
-            self.prompt_message, thread.name, self.auto_delete_seconds
-        )
+        embed = build_update_embed(self.prompt_message, thread.name)
         view = UpdateDetectorView(
             cog=self,
             thread_id=thread.id,
             author_id=message.author.id,
             message_link=message_link,
-            auto_delete_seconds=self.auto_delete_seconds,
         )
 
         try:

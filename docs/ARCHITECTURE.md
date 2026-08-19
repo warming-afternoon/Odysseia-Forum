@@ -34,5 +34,5 @@ src/
 ├── tag/                         # 标签服务
 ├── ThreadManager/               # 帖子生命周期管理、事件监听、互斥标签规则
 ├── tournament/                  # 赛事书单管理
-└── update_detector/             # AI 更新检测（Gemini）
+└── update_detector/             # AI 更新检测（DeepSeek）与 Token 试算
 ```
