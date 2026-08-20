@@ -11,11 +11,13 @@ from api.v1.dependencies.security import VERIFIED_JWT_PAYLOAD_STATE_KEY
 from api.v1.utils.jwt_utils import verify_jwt
 from dto.rate_limit import GlobalRateLimitConfig, GlobalRateLimitResult
 from shared.enum.rate_limit_defaults import RateLimitDefaults
+from shared.enum.rate_limit_reason import RateLimitReason
 from shared.rate_limit import (
     add_watch_reason,
     check_global_rate_limit,
     get_watch_body,
     get_watch_reasons,
+    get_watch_trigger_details,
 )
 from shared.redis_client import RedisManager
 
@@ -72,9 +74,9 @@ class RateLimitMiddleware:
 
         # 先登记全局触发原因，供所有限频规则统一输出
         if result.daily_watch_active:
-            add_watch_reason(scope, "daily_watch")
+            add_watch_reason(scope, RateLimitReason.DAILY_WATCH)
         if not result.allowed:
-            add_watch_reason(scope, "global_rate_limit")
+            add_watch_reason(scope, RateLimitReason.GLOBAL_RATE_LIMIT)
 
         body = None
         downstream_receive = receive
@@ -195,8 +197,13 @@ class RateLimitMiddleware:
     ) -> None:
         """为当前请求输出至多一条 Watch 轨迹。"""
         reasons = get_watch_reasons(scope)
-        reason_text = ",".join(reasons) if reasons else "active_watch"
+        effective_reasons = reasons or [RateLimitReason.ACTIVE_WATCH]
+        reason_text = ",".join(effective_reasons)
+        reason_cn = ",".join(
+            RateLimitReason.chinese_label_for(reason) for reason in effective_reasons
+        )
         tracked_body = get_watch_body(scope) or body or "-"
+        trigger_metrics = self._format_trigger_metrics(scope)
         log_method = (
             logger.warning
             if any(reason.endswith("rate_limit") for reason in reasons)
@@ -204,17 +211,39 @@ class RateLimitMiddleware:
         )
         log_method(
             "WATCH: user_id=%s method=%s path=%s ua=%s body=%s reason=%s "
-            "minute_count=%s/%s daily_count=%s",
+            "reason_cn=%s%s minute_count=%s/%s daily_count=%s",
             user_id,
             scope.get("method", "-"),
             scope.get("path", "-"),
             self._get_header(scope, "user-agent"),
             tracked_body[: int(RateLimitDefaults.LOG_BODY_MAX_CHARS)],
             reason_text,
+            reason_cn,
+            f" {trigger_metrics}" if trigger_metrics else "",
             result.minute_count,
             self._config.max_requests,
             result.daily_count,
         )
+
+    @staticmethod
+    def _format_trigger_metrics(scope) -> str:
+        """格式化搜索和相似推荐限流的独立窗口计数。"""
+        prefixes = {
+            RateLimitReason.SEARCH_RATE_LIMIT: "search",
+            RateLimitReason.SIMILAR_RATE_LIMIT: "similar",
+        }
+        metrics = []
+        for reason, detail in get_watch_trigger_details(scope).items():
+            prefix = prefixes.get(reason)
+            if not prefix:
+                continue
+            metrics.extend(
+                [
+                    f"{prefix}_count={detail.current_count}/{detail.max_requests}",
+                    f"{prefix}_reset={detail.reset_after}s",
+                ]
+            )
+        return " ".join(metrics)
 
     async def _send_429(self, send, reset_after: int) -> None:
         body = '{"detail":"请求过于频繁，请稍后重试"}'.encode("utf-8")

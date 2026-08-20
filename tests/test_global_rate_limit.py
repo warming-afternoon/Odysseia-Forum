@@ -19,7 +19,11 @@ from dto.rate_limit import (
     RateLimitConfig,
     RateLimitResult,
 )
-from shared.rate_limit import get_watch_body, get_watch_reasons
+from shared.rate_limit import (
+    get_watch_body,
+    get_watch_reasons,
+    get_watch_trigger_details,
+)
 from shared.rate_limit.rate_limit_engine import (
     _get_local_day_window,
     check_global_rate_limit,
@@ -176,6 +180,10 @@ class TestRateLimitRequestCoordination:
 
         assert get_watch_reasons(scope) == ["search_rate_limit"]
         assert get_watch_body(scope) == "界" * 1024
+        detail = get_watch_trigger_details(scope)["search_rate_limit"]
+        assert detail.current_count == 61
+        assert detail.max_requests == 60
+        assert detail.reset_after == 30
         set_watch.assert_awaited_once_with(redis, "123")
         assert not caplog.records
 
@@ -194,6 +202,9 @@ class TestRateLimitMiddlewareCoordination:
                 scope,
                 "search_rate_limit",
                 message["body"].decode(),
+                current_count=61,
+                max_requests=60,
+                reset_after=28,
             )
             await send({"type": "http.response.start", "status": 429, "headers": []})
             await send({"type": "http.response.body", "body": b"limited"})
@@ -256,6 +267,8 @@ class TestRateLimitMiddlewareCoordination:
         ]
         assert len(watch_logs) == 1
         assert "reason=daily_watch,search_rate_limit" in watch_logs[0]
+        assert "reason_cn=每日调用量监控,搜索接口限流" in watch_logs[0]
+        assert "search_count=61/60 search_reset=28s" in watch_logs[0]
         assert f"body={'x' * 1024} " in watch_logs[0]
         assert sent[0]["status"] == 429
 
@@ -316,6 +329,7 @@ class TestRateLimitMiddlewareCoordination:
         ]
         assert len(watch_logs) == 1
         assert "reason=global_rate_limit" in watch_logs[0].getMessage()
+        assert "reason_cn=全局分钟限流" in watch_logs[0].getMessage()
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(

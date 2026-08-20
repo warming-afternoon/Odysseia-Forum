@@ -11,6 +11,7 @@ from fastapi import Depends, HTTPException, Request, Response, status
 from api.v1.dependencies.security import get_current_user
 from dto.rate_limit import RateLimitConfig
 from shared.enum.rate_limit_defaults import RateLimitDefaults
+from shared.enum.rate_limit_reason import RateLimitReason
 from shared.rate_limit import add_watch_reason, check_rate_limit, set_rate_limit_watch
 from shared.redis_client import RedisManager
 
@@ -92,7 +93,19 @@ async def _apply_user_rate_limit(
         except Exception:
             body = "-"
 
-    add_watch_reason(request.scope, f"{key_suffix}_rate_limit", body)
+    reason = (
+        RateLimitReason.SEARCH_RATE_LIMIT
+        if key_suffix == "search"
+        else RateLimitReason.SIMILAR_RATE_LIMIT
+    )
+    add_watch_reason(
+        request.scope,
+        reason,
+        body,
+        current_count=result.current_count,
+        max_requests=config.max_requests,
+        reset_after=result.reset_after,
+    )
     await set_rate_limit_watch(redis, str(user_id))
     raise HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
