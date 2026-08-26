@@ -347,9 +347,10 @@ async def test_get_booklist_items_sort_hot(seeded_sort_data: AsyncSession):
     service = BooklistRepository(seeded_sort_data)
     booklist = await service.create_booklist(owner_id=445, title="Hot Sort")
     assert booklist.id is not None
+    booklist_id = booklist.id
 
     await service.add_threads_to_booklist(
-        booklist.id,
+        booklist_id,
         items=[
             BooklistItemAddData(thread_id=tid) for tid in (3001, 3002, 3003, 3004, 3005)
         ],
@@ -357,7 +358,7 @@ async def test_get_booklist_items_sort_hot(seeded_sort_data: AsyncSession):
 
     item_service = BooklistItemRepository(seeded_sort_data)
     items, total = await item_service.get_booklist_items_with_details(
-        booklist.id,
+        booklist_id,
         default_sort_method="hot",
         default_sort_order="desc",
         limit=10,
@@ -403,9 +404,10 @@ async def test_get_booklist_items_sort_order(
         owner_id=446, title=f"Sort {method} {order}"
     )
     assert booklist.id is not None
+    booklist_id = booklist.id
 
     await service.add_threads_to_booklist(
-        booklist.id,
+        booklist_id,
         items=[
             BooklistItemAddData(thread_id=tid) for tid in (3001, 3002, 3003, 3004, 3005)
         ],
@@ -413,7 +415,7 @@ async def test_get_booklist_items_sort_order(
 
     item_service = BooklistItemRepository(seeded_sort_data)
     items, total = await item_service.get_booklist_items_with_details(
-        booklist.id,
+        booklist_id,
         default_sort_method=method,
         default_sort_order=order,
         limit=10,
@@ -429,10 +431,11 @@ async def test_get_booklist_items_sort_display_order(seeded_sort_data: AsyncSess
     service = BooklistRepository(seeded_sort_data)
     booklist = await service.create_booklist(owner_id=447, title="DispOrder")
     assert booklist.id is not None
+    booklist_id = booklist.id
 
     orders = [30, 20, 50, 10, 40]
     await service.add_threads_to_booklist(
-        booklist.id,
+        booklist_id,
         items=[
             BooklistItemAddData(thread_id=3001 + i, display_order=orders[i])
             for i in range(5)
@@ -441,7 +444,7 @@ async def test_get_booklist_items_sort_display_order(seeded_sort_data: AsyncSess
 
     item_service = BooklistItemRepository(seeded_sort_data)
     items, _ = await item_service.get_booklist_items_with_details(
-        booklist.id,
+        booklist_id,
         default_sort_method="display_order",
         default_sort_order="asc",
         limit=10,
@@ -502,11 +505,14 @@ async def test_add_thread_to_booklists(seeded_db_session: AsyncSession):
     """测试将一个帖子批量添加到多个书单"""
     service = BooklistRepository(seeded_db_session)
     booklist1 = await service.create_booklist(owner_id=100, title="BL1")
+    assert booklist1.id is not None
+    bid1 = booklist1.id
     booklist2 = await service.create_booklist(owner_id=100, title="BL2")
+    assert booklist2.id is not None
+    bid2 = booklist2.id
     booklist3 = await service.create_booklist(owner_id=100, title="BL3")
-    assert booklist1.id and booklist2.id and booklist3.id
-
-    bid1, bid2, bid3 = booklist1.id, booklist2.id, booklist3.id
+    assert booklist3.id is not None
+    bid3 = booklist3.id
     # booklist2 先已包含 thread_id=1001
     await service.add_threads_to_booklist(
         bid2, items=[BooklistItemAddData(thread_id=1001)]
@@ -555,11 +561,14 @@ async def test_remove_thread_from_booklists(seeded_db_session: AsyncSession):
     """测试将一个帖子从多个书单中批量移除"""
     service = BooklistRepository(seeded_db_session)
     booklist1 = await service.create_booklist(owner_id=200, title="BL1")
+    assert booklist1.id is not None
+    bid1 = booklist1.id
     booklist2 = await service.create_booklist(owner_id=200, title="BL2")
+    assert booklist2.id is not None
+    bid2 = booklist2.id
     booklist3 = await service.create_booklist(owner_id=200, title="BL3")
-    assert booklist1.id and booklist2.id and booklist3.id
-
-    bid1, bid2, bid3 = booklist1.id, booklist2.id, booklist3.id
+    assert booklist3.id is not None
+    bid3 = booklist3.id
     # 三个书单都添加 thread_id=1001
     for bid in [bid1, bid2, bid3]:
         await service.add_threads_to_booklist(
@@ -602,11 +611,11 @@ async def test_sync_thread_in_booklists_mixed(seeded_db_session: AsyncSession):
     """完全同步：混合添加、移除、不变"""
     service = BooklistRepository(seeded_db_session)
     # 创建 4 个书单
-    bls = []
+    ids = []
     for i in range(4):
         bl = await service.create_booklist(owner_id=300, title=f"BL{i}")
-        bls.append(bl)
-    ids = [bl.id for bl in bls]
+        assert bl.id is not None
+        ids.append(bl.id)
 
     # 书单 0 和 2 已有帖子 1001
     await service.add_threads_to_booklist(
@@ -641,11 +650,11 @@ async def test_sync_thread_in_booklists_mixed(seeded_db_session: AsyncSession):
 async def test_sync_thread_in_booklists_pure_add(seeded_db_session: AsyncSession):
     """纯添加：target 中书单都不含该帖"""
     service = BooklistRepository(seeded_db_session)
-    bls = []
+    ids = []
     for i in range(3):
         bl = await service.create_booklist(owner_id=400, title=f"BL{i}")
-        bls.append(bl)
-    ids = [bl.id for bl in bls]
+        assert bl.id is not None
+        ids.append(bl.id)
 
     # 无书单包含帖子 1001
 
@@ -669,11 +678,13 @@ async def test_sync_thread_in_booklists_updates_comment(
     """同步推荐语应同时覆盖新增项和已有项。"""
     repository = BooklistRepository(seeded_db_session)
     existing_booklist = await repository.create_booklist(owner_id=450, title="已有")
-    new_booklist = await repository.create_booklist(owner_id=450, title="新增")
     assert existing_booklist.id is not None
+    existing_booklist_id = existing_booklist.id
+    new_booklist = await repository.create_booklist(owner_id=450, title="新增")
     assert new_booklist.id is not None
+    new_booklist_id = new_booklist.id
     await repository.add_threads_to_booklist(
-        existing_booklist.id,
+        existing_booklist_id,
         items=[BooklistItemAddData(thread_id=1001, comment="旧推荐语")],
     )
 
@@ -681,12 +692,12 @@ async def test_sync_thread_in_booklists_updates_comment(
     await service.sync_thread_in_booklists(
         user_id=450,
         thread_id=1001,
-        scope_booklist_ids=[existing_booklist.id, new_booklist.id],
-        target_booklist_ids=[existing_booklist.id, new_booklist.id],
+        scope_booklist_ids=[existing_booklist_id, new_booklist_id],
+        target_booklist_ids=[existing_booklist_id, new_booklist_id],
         comment="新推荐语",
     )
 
-    for booklist_id in [existing_booklist.id, new_booklist.id]:
+    for booklist_id in [existing_booklist_id, new_booklist_id]:
         statement = select(BooklistItem).where(
             BooklistItem.booklist_id == booklist_id,
             BooklistItem.thread_id == 1001,
@@ -699,11 +710,11 @@ async def test_sync_thread_in_booklists_updates_comment(
 async def test_sync_thread_in_booklists_pure_remove(seeded_db_session: AsyncSession):
     """纯删除：target 为空，移除 scope 中所有含该帖的书单"""
     service = BooklistRepository(seeded_db_session)
-    bls = []
+    ids = []
     for i in range(3):
         bl = await service.create_booklist(owner_id=500, title=f"BL{i}")
-        bls.append(bl)
-    ids = [bl.id for bl in bls]
+        assert bl.id is not None
+        ids.append(bl.id)
 
     # 三个书单都包含帖子 1001
     for bid in ids:
@@ -728,11 +739,11 @@ async def test_sync_thread_in_booklists_pure_remove(seeded_db_session: AsyncSess
 async def test_sync_thread_in_booklists_idempotent(seeded_db_session: AsyncSession):
     """幂等：同样参数调用两次，第二次无变更"""
     service = BooklistRepository(seeded_db_session)
-    bls = []
+    ids = []
     for i in range(2):
         bl = await service.create_booklist(owner_id=600, title=f"BL{i}")
-        bls.append(bl)
-    ids = [bl.id for bl in bls]
+        assert bl.id is not None
+        ids.append(bl.id)
 
     # BL0 已有帖子，BL1 无
     await service.add_threads_to_booklist(

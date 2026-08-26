@@ -28,6 +28,7 @@ from core.impression_cache_service import ImpressionCacheService
 from core.preferences_repository import PreferencesRepository
 from core.tag_cache_service import TagCacheService
 from core.thread_repository import ThreadRepository
+from core.thread_presentation_service import ThreadPresentationService
 from dto.preferences import UserSearchPreferencesDTO
 from dto.search import SearchConfigDTO
 from search.qo.thread_search import ThreadSearchQuery
@@ -248,6 +249,9 @@ async def execute_search(
 
             # 使用 ThreadDetailBuilder 转换搜索结果为响应格式
             builder = ThreadDetailBuilder(channel_mappings_config)
+            presentation_context = await ThreadPresentationService(session).load(
+                user_id, list(threads)
+            )
             channel_to_virtual = None
 
             # 仅当是在单一频道搜索时，为该上下文计算局部虚拟标签
@@ -267,6 +271,7 @@ async def execute_search(
                 collected_thread_ids,
                 channel_to_virtual=channel_to_virtual,
                 tournament_thread_map=tournament_thread_map,
+                presentation_context=presentation_context,
             )
 
             # 构建可用的标签列表：虚拟标签置顶 + 实际被搜索频道的真实标签
@@ -352,7 +357,14 @@ async def get_thread_detail(
                 )
 
             builder = ThreadDetailBuilder(channel_mappings_config)
-            return builder.build(thread, collected_thread_ids)
+            presentation_context = await ThreadPresentationService(session).load(
+                user_id, [thread]
+            )
+            return builder.build(
+                thread,
+                collected_thread_ids,
+                presentation_context=presentation_context,
+            )
     except asyncio.TimeoutError:
         logger.warning(f"获取帖子详情超时: thread_id={thread_id}")
         raise HTTPException(
@@ -498,7 +510,14 @@ async def get_similar_threads(
                 )
 
             builder = ThreadDetailBuilder(channel_mappings_config)
-            results = builder.build_list(threads, collected_thread_ids)
+            presentation_context = await ThreadPresentationService(session).load(
+                user_id, list(threads)
+            )
+            results = builder.build_list(
+                threads,
+                collected_thread_ids,
+                presentation_context=presentation_context,
+            )
 
             return SimilarThreadsResponse(
                 source_thread_id=thread_id_int,

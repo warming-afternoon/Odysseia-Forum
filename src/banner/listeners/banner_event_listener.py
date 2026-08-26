@@ -89,6 +89,16 @@ class BannerEventListener(commands.Cog):
                 else:
                     repo = ThreadRepository(session)
                     guild_id = await repo.get_thread_guild_id(application.thread_id)
+                resolved_cover_url = application.cover_image_url
+                if (
+                    resolved_cover_url is None
+                    and application.target_type == TargetType.THREAD.value
+                ):
+                    thread = await ThreadRepository(session).get_thread_with_tags(
+                        application.thread_id
+                    )
+                    if thread and thread.thumbnail_urls:
+                        resolved_cover_url = thread.thumbnail_urls[0]
                 # 查询历史申请记录
                 app_repo = BannerApplicationRepository(session)
                 history = await app_repo.get_history_by_thread_id(application.thread_id)
@@ -98,6 +108,7 @@ class BannerEventListener(commands.Cog):
                     config=banner_conf,
                     guild_id=guild_id,
                     history=history if history else None,
+                    resolved_cover_image_url=resolved_cover_url,
                 )
                 review_thread_id = banner_conf.get("review_thread_id")
                 if review_thread_id:
@@ -131,7 +142,7 @@ class BannerEventListener(commands.Cog):
         self,
         interaction: discord.Interaction,
         target_id: int,
-        cover_image_url: str,
+        cover_image_url: str | None,
         guild_id: int,
     ):
         """处理 banner_form_submit 事件：预验证目标 → 展示 ChannelSelectionView。"""
@@ -197,7 +208,7 @@ class BannerEventListener(commands.Cog):
         self,
         interaction: discord.Interaction,
         thread_id: int,
-        cover_image_url: str,
+        cover_image_url: str | None,
         target_scope: str,
         applicant_id: int,
         channel_id: int,
@@ -241,6 +252,16 @@ class BannerEventListener(commands.Cog):
                 else:
                     repo = ThreadRepository(session)
                     thread_guild_id = await repo.get_thread_guild_id(thread_id)
+                resolved_cover_url = application.cover_image_url
+                if (
+                    resolved_cover_url is None
+                    and application.target_type == TargetType.THREAD.value
+                ):
+                    thread = await ThreadRepository(session).get_thread_with_tags(
+                        application.thread_id
+                    )
+                    if thread and thread.thumbnail_urls:
+                        resolved_cover_url = thread.thumbnail_urls[0]
 
                 # 查询历史申请记录
                 app_repo = BannerApplicationRepository(session)
@@ -252,6 +273,7 @@ class BannerEventListener(commands.Cog):
                     config=self.config,
                     guild_id=thread_guild_id,
                     history=history if history else None,
+                    resolved_cover_image_url=resolved_cover_url,
                 )
 
                 # 发送到审核频道

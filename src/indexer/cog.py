@@ -1,17 +1,17 @@
 import asyncio
 import logging
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from core.thread_repository import ThreadRepository
+from core.thread_deletion_service import ThreadDeletionService
 from indexer.views import IndexerDashboard
 from shared.permissions import is_admin_or_bot_admin
 from shared.safe_defer import safe_defer
-from ThreadManager.cog import ThreadManager
+from dto.events import IndexUpdatedEvent
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -91,8 +91,8 @@ class Indexer(commands.Cog):
 
         try:
             async with self.session_factory() as session:
-                repo = ThreadRepository(session)
-                await repo.delete_channel_index(channel.id)
+                await ThreadDeletionService(session).delete_channel(channel.id)
+                await session.commit()
 
             await self.bot.api_scheduler.submit(
                 coro_factory=lambda: interaction.followup.send(
@@ -103,7 +103,7 @@ class Indexer(commands.Cog):
             )
 
             # 分发全局事件以刷新缓存
-            self.bot.dispatch("index_updated")
+            await self.bot.event_mediator.publish(IndexUpdatedEvent())
 
         except Exception as e:
             error_msg = str(e)
@@ -121,13 +121,7 @@ class Indexer(commands.Cog):
 
         # 步骤 1: 预同步该频道的所有可用标签，避免后续的并发冲突
         try:
-            thread_manager_cog = cast(ThreadManager, self.bot.get_cog("ThreadManager"))
-            if thread_manager_cog:
-                await thread_manager_cog.logic.pre_sync_forum_tags(dashboard.channel)
-            else:
-                logging.warning(
-                    f"[{dashboard.channel.id}] 无法获取 ThreadManager Cog，跳过标签预同步。"
-                )
+            await self.sync_service.pre_sync_forum_tags(dashboard.channel)
         except Exception as e:
             # 如果预同步失败，记录一个致命错误并停止索引
             logging.error(
@@ -204,7 +198,7 @@ class Indexer(commands.Cog):
                 logging.info(
                     f"[{dashboard.channel.id}] 索引完成，分发 'index_updated' 事件。"
                 )
-                self.bot.dispatch("index_updated")
+                await self.bot.event_mediator.publish(IndexUpdatedEvent())
 
     async def producer(self, dashboard: IndexerDashboard):
         """生产者：发现帖子并放入队列"""

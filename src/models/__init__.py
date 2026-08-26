@@ -17,6 +17,9 @@ from models.thread_follow import ThreadFollow
 from models.user_collection import UserCollection
 from models.user_search_preferences import UserSearchPreferences
 from models.user_update_preference import UserUpdatePreference
+from models.author_follow import AuthorFollow
+from models.notification import Notification
+from models.thread_update import ThreadUpdate
 
 __all__ = [
     "ThreadTagLink",
@@ -38,4 +41,7 @@ __all__ = [
     "BooklistItem",
     "BooklistPublish",
     "Channel",
+    "AuthorFollow",
+    "Notification",
+    "ThreadUpdate",
 ]

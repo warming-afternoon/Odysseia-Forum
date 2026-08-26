@@ -20,6 +20,7 @@ class ReviewEmbedBuilder:
         config: dict,
         guild_id: int | None,
         history: Optional[List["BannerApplication"]] = None,
+        resolved_cover_image_url: str | None = None,
     ) -> discord.Embed:
         """构建审核频道中展示的 Banner 申请 Embed。"""
         # 展示范围文本
@@ -53,7 +54,9 @@ class ReviewEmbedBuilder:
                 name=f"{target_label}ID", value=str(application.thread_id), inline=False
             )
 
-        embed.set_image(url=application.cover_image_url)
+        cover_image_url = application.cover_image_url or resolved_cover_image_url
+        if cover_image_url:
+            embed.set_image(url=cover_image_url)
 
         # 历史记录
         if history:
@@ -208,7 +211,8 @@ class ReviewEmbedBuilder:
                 value=application.reject_reason,
                 inline=False,
             )
-        embed.set_image(url=application.cover_image_url)
+        if application.cover_image_url:
+            embed.set_image(url=application.cover_image_url)
 
         try:
             await archive_channel.send(embed=embed)

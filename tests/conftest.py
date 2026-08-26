@@ -61,7 +61,7 @@ async def db_session_factory(
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
-    factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    factory = async_sessionmaker(engine, expire_on_commit=True, class_=AsyncSession)
     yield factory
 
     # 清空所有表，确保每个测试独立

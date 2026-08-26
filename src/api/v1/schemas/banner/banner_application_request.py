@@ -14,7 +14,10 @@ class BannerApplicationRequest(BaseModel):
         max_length=150,
         description="Discord 跳转链接（https://discord.com/channels/{guild_id}/{id}）或纯数字 ID",
     )
-    cover_image_url: str = Field(..., description="封面图链接")
+    cover_image_url: str | None = Field(
+        default=None,
+        description="可选封面图链接；帖子留空时动态使用当前首图，频道不可留空",
+    )
     target_scope: str = Field(
         ..., description="目标范围：'global'表示全频道，或具体频道ID"
     )

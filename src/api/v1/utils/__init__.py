@@ -8,6 +8,7 @@ from api.v1.utils.jwt_utils import (
 )
 from api.v1.utils.preferences_utils import get_user_preferences_cached
 from api.v1.utils.thread_detail_builder import ThreadDetailBuilder
+from api.v1.utils.booklist_item_enricher import BooklistItemEnricher
 
 __all__ = [
     "base64url_encode",
@@ -16,4 +17,5 @@ __all__ = [
     "sign_jwt",
     "verify_jwt",
     "ThreadDetailBuilder",
+    "BooklistItemEnricher",
 ]

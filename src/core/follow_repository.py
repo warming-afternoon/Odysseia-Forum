@@ -6,8 +6,9 @@ from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from api.v1.schemas.follows import FollowedThreadResponse
-from api.v1.schemas.search.author_detail import AuthorDetail
+from dto.author_dto import AuthorDTO
+from dto.followed_thread_record_dto import FollowedThreadRecordDTO
+from dto.thread_dto import ThreadDTO
 from models import Thread, ThreadFollow
 
 logger = logging.getLogger(__name__)
@@ -286,7 +287,7 @@ class ThreadFollowRepository:
         offset: int = 0,
         active_flag: Optional[bool] = None,
         channel_ids: Optional[List[int]] = None,
-    ) -> tuple[List[FollowedThreadResponse], int]:
+    ) -> tuple[List[FollowedThreadRecordDTO], int]:
         """
         获取用户关注的帖子列表
 
@@ -344,42 +345,16 @@ class ThreadFollowRepository:
             count_result = await self.session.execute(count_statement)
             total = count_result.scalar() or 0
 
-            # 通过 FollowedThreadResponse 构建响应（继承 ThreadDetail + 关注字段）
-            results: list[FollowedThreadResponse] = []
+            results: list[FollowedThreadRecordDTO] = []
             for thread, follow in rows:
-                author = None
-                if thread.author:
-                    author = AuthorDetail.model_validate(
-                        thread.author, from_attributes=True
-                    )
-
                 results.append(
-                    FollowedThreadResponse(
-                        thread_id=thread.thread_id,
-                        guild_id=thread.guild_id,
-                        channel_id=thread.channel_id,
-                        title=thread.title,
-                        author=author,
-                        created_at=thread.created_at,
-                        last_active_at=thread.last_active_at,
-                        latest_update_at=thread.latest_update_at,
-                        latest_update_link=thread.latest_update_link,
-                        reaction_count=thread.reaction_count,
-                        reply_count=thread.reply_count,
-                        collection_count=thread.collection_count,
-                        display_count=thread.display_count,
-                        first_message_excerpt=thread.first_message_excerpt,
-                        thumbnail_urls=thread.thumbnail_urls or [],
-                        tags=[tag.name for tag in thread.tags],
+                    FollowedThreadRecordDTO(
+                        thread=ThreadDTO.from_orm(thread),
+                        author=AuthorDTO.from_orm(thread.author)
+                        if thread.author
+                        else None,
                         followed_at=follow.followed_at,
                         last_viewed_at=follow.last_viewed_at,
-                        has_update=bool(
-                            thread.latest_update_at is not None
-                            and (
-                                follow.last_viewed_at is None
-                                or thread.latest_update_at > follow.last_viewed_at
-                            )
-                        ),
                         active_flag=follow.active_flag,
                     )
                 )

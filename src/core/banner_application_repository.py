@@ -19,7 +19,7 @@ class BannerApplicationRepository:
         thread_id: int,
         channel_id: int,
         applicant_id: int,
-        cover_image_url: str,
+        cover_image_url: str | None,
         target_scope: str,
         target_type: int = 1,
     ) -> BannerApplication:

@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
@@ -6,6 +6,9 @@ from shared.utc_datetime import UTCDateTime
 
 from api.v1.schemas.search.author_detail import AuthorDetail
 from api.v1.schemas.search.tournament_info import TournamentInfo
+from api.v1.schemas.search.latest_update import LatestUpdate
+
+ViewerFlag = Literal["collected", "followed", "followed_author", "unread"]
 
 
 class ThreadDetail(BaseModel):
@@ -66,6 +69,18 @@ class ThreadDetail(BaseModel):
 
     collected_flag: bool = Field(default=False, description="当前用户是否收藏了该帖子")
     """当前用户是否收藏了该帖子"""
+
+    viewer_flags: List[ViewerFlag] = Field(
+        default_factory=list,
+        description="当前查看者与作品的关系标记",
+    )
+    """当前查看者与作品的关系标记"""
+
+    latest_update: Optional[LatestUpdate] = Field(
+        default=None,
+        description="作品最新一次正式发布的更新",
+    )
+    """作品最新一次正式发布的更新"""
 
     is_tournament: bool = Field(default=False, description="该帖子是否为参赛帖子")
     """该帖子是否为参赛帖子"""

@@ -21,9 +21,9 @@ class ApplicationFormModal(discord.ui.Modal, title="Banner申请"):
 
     cover_image_url = discord.ui.TextInput(
         label="封面图链接（推荐16:9）",
-        placeholder="https://...",
+        placeholder="帖子可留空并使用当前首图；频道必须填写",
         style=discord.TextStyle.short,
-        required=True,
+        required=False,
     )
 
     async def on_submit(self, interaction: discord.Interaction):

@@ -8,6 +8,7 @@ import discord
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.author_repository import AuthorRepository
+from core.notification_fanout_service import NotificationFanoutService
 from core.tag_repository import TagRepository
 from core.thread_repository import ThreadRepository
 from dto.open_graph import ThreadSyncResult
@@ -34,6 +35,15 @@ class SyncService:
     ):
         self.bot = bot
         self.session_factory = session_factory
+
+    async def pre_sync_forum_tags(self, channel: discord.ForumChannel) -> None:
+        """预同步论坛频道的全部可用标签。"""
+        if not channel.available_tags:
+            return
+        tags_data = {tag.id: tag.name for tag in channel.available_tags}
+        async with self.session_factory() as session:
+            await TagRepository(session).get_or_create_tags(tags_data)
+            await session.commit()
 
     async def _invalidate_similarity_cache(self, thread_id: int) -> None:
         """尽力失效源帖候选池，Redis 故障不影响同步主流程。"""
@@ -377,14 +387,24 @@ class SyncService:
                 tags = await tag_repo.get_or_create_tags(tags_data)
 
                 repo = ThreadRepository(session=session)
-                tags_changed = await repo.add_or_update_thread_with_tags(
+                mutation = await repo.add_or_update_thread_with_tags(
                     thread_data=thread_data, tags=tags
                 )
+                if mutation.created:
+                    # 在当前事务中直接从作者关注关系生成通知
+                    await NotificationFanoutService(
+                        session
+                    ).fanout_author_new_thread(
+                        author_id=thread_data["author_id"],
+                        event_source_id=thread.id,
+                        thread_id=thread.id,
+                    )
+                await session.commit()
         except Exception:
             logger.exception(f"帖子 {thread.id} 数据库提交失败")
             return ThreadSyncResult(success=False, error_code="database_failed")
 
-        if tags_changed:
+        if mutation.tags_changed:
             await self._invalidate_similarity_cache(thread.id)
 
         try:

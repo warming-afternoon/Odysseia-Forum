@@ -5,11 +5,15 @@ from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from api.v1.dependencies.security import get_current_user
-from api.v1.schemas.follows import FollowsListResponse
+from api.v1.schemas.follows import FollowedThreadResponse, FollowsListResponse
+from api.v1.schemas.search import AuthorDetail
+from api.v1.utils import ThreadDetailBuilder
 from shared.database import AsyncSessionFactory
 from shared.channel_mapping_utils import ChannelMappingUtils
 from core.cache_service import CacheService
 from core.follow_repository import ThreadFollowRepository
+from core.notification_repository import NotificationRepository
+from core.thread_presentation_service import ThreadPresentationService
 
 logger = logging.getLogger(__name__)
 
@@ -83,13 +87,45 @@ async def get_follows(
 
         async with AsyncSessionFactory() as session:
             follow_service = ThreadFollowRepository(session)
-            threads, total = await follow_service.get_user_follows(
+            records, total = await follow_service.get_user_follows(
                 user_id=user_id,
                 limit=limit,
                 offset=offset,
                 active_flag=active_flag,
                 channel_ids=effective_channel_ids,
             )
+            thread_dtos = [record.thread for record in records]
+            presentation_context = await ThreadPresentationService(session).load(
+                user_id, thread_dtos
+            )
+            builder = ThreadDetailBuilder(channel_mappings_config)
+            threads: list[FollowedThreadResponse] = []
+            for record in records:
+                detail = builder.build(
+                    record.thread,
+                    set(),
+                    presentation_context=presentation_context,
+                )
+                response_data = detail.model_dump()
+                response_data["author"] = (
+                    AuthorDetail.model_validate(record.author)
+                    if record.author
+                    else None
+                )
+                threads.append(
+                    FollowedThreadResponse(
+                        **response_data,
+                        latest_update_at=record.thread.latest_update_at,
+                        latest_update_link=record.thread.latest_update_link,
+                        followed_at=record.followed_at,
+                        last_viewed_at=record.last_viewed_at,
+                        has_update="unread"
+                        in presentation_context.viewer_flags.for_thread(
+                            record.thread.thread_id
+                        ),
+                        active_flag=record.active_flag,
+                    )
+                )
 
         return {"total": total, "threads": threads, "limit": limit, "offset": offset}
 
@@ -113,18 +149,10 @@ async def mark_all_viewed(current_user: Dict[str, Any] = Depends(get_current_use
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            follow_service = ThreadFollowRepository(session)
-            success = await follow_service.update_last_viewed(
-                user_id=user_id,
-                thread_id=None,  # None表示更新所有关注
-            )
+            marked_read = await NotificationRepository(session).mark_all_read(user_id)
+            await session.commit()
 
-        if success:
-            return {"message": "已标记所有关注为已查看"}
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="标记失败"
-            )
+        return {"message": "已标记所有动态为已查看", "marked_read": marked_read}
 
     except HTTPException:
         raise
@@ -147,8 +175,7 @@ async def get_unread_count(current_user: Dict[str, Any] = Depends(get_current_us
         user_id = int(current_user["id"])
 
         async with AsyncSessionFactory() as session:
-            follow_service = ThreadFollowRepository(session)
-            count = await follow_service.get_unread_count(user_id=user_id)
+            count = await NotificationRepository(session).unread_count(user_id=user_id)
 
         return {"unread_count": count}
 

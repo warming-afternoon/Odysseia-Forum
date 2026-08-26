@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger
+from sqlalchemy import BigInteger, Index, UniqueConstraint
 from sqlmodel import Column, Field, SQLModel
 
 from shared.time_utils import utc_now
@@ -11,6 +11,15 @@ class ThreadFollow(SQLModel, table=True):
     """用户关注帖子的关联表"""
 
     __tablename__ = "thread_follow"  # type: ignore
+    __table_args__ = (
+        UniqueConstraint("user_id", "thread_id", name="uk_thread_follow_user_thread"),
+        Index(
+            "ix_thread_follow_thread_active_user",
+            "thread_id",
+            "active_flag",
+            "user_id",
+        ),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(

@@ -32,6 +32,8 @@ class UserUpdatePreferenceRepository:
         preference = await self.get_preference(user_id, thread_id)
         if preference:
             preference.auto_sync = enabled
+            if enabled:
+                preference.no_remind = False
         else:
             preference = UserUpdatePreference(
                 user_id=user_id, thread_id=thread_id, auto_sync=enabled
@@ -45,6 +47,8 @@ class UserUpdatePreferenceRepository:
         preference = await self.get_preference(user_id, thread_id)
         if preference:
             preference.no_remind = enabled
+            if enabled:
+                preference.auto_sync = False
         else:
             preference = UserUpdatePreference(
                 user_id=user_id, thread_id=thread_id, no_remind=enabled

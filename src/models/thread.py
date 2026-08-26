@@ -85,6 +85,13 @@ class Thread(SQLModel, table=True):
     )
     """最新版消息链接"""
 
+    latest_update_id: Optional[int] = Field(
+        default=None,
+        index=True,
+        description="最新 ThreadUpdate 的逻辑 ID",
+    )
+    """最新 ThreadUpdate 的逻辑 ID"""
+
     collection_count: int = Field(default=0, description="被收藏次数")
     """帖子被收藏的总次数"""
 

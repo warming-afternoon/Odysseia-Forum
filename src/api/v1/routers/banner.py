@@ -18,8 +18,9 @@ from api.v1.utils.preferences_utils import get_user_preferences_cached
 from banner.banner_service import BannerService
 from banner.channel_sync import ChannelSyncService
 from core.tag_cache_service import TagCacheService
+from core.banner_thread_visibility_service import BannerThreadVisibilityService
+from core.thread_repository import ThreadRepository
 from models.channel import Channel
-from search.search_service import SearchService
 from shared.enum import TargetType
 from shared.redis_client import RedisManager
 from shared.thread_link_parser import ThreadLinkParser
@@ -198,21 +199,33 @@ async def get_active_banners(
                 if banner.target_type == TargetType.THREAD.value
             ]
             guild_map: dict[int, int] = {}
+            thumbnail_map: dict[int, str | None] = {}
             allowed_thread_guilds: dict[int, int] = {}
             if thread_tids:
                 if tag_cache_service_instance is None:
                     raise RuntimeError("Banner TAG 缓存服务尚未初始化")
 
-                search_service = SearchService(session, tag_cache_service_instance)
                 allowed_thread_guilds = (
-                    await search_service.get_preference_filtered_thread_guilds(
-                        thread_tids,
+                    await BannerThreadVisibilityService(
+                        session=session,
+                        tag_cache_service=tag_cache_service_instance,
+                    ).get_visible_thread_guilds(
+                        thread_ids=thread_tids,
                         prefs=prefs,
                         channel_mappings_config=channel_mappings_config,
                         redis_client=redis_client,
                     )
                 )
                 guild_map.update(allowed_thread_guilds)
+                indexed_threads = await ThreadRepository(
+                    session
+                ).get_threads_by_ids_with_tags(thread_tids)
+                thumbnail_map = {
+                    thread.thread_id: (
+                        thread.thumbnail_urls[0] if thread.thumbnail_urls else None
+                    )
+                    for thread in indexed_threads
+                }
 
             # 批量查询频道 Banner 对应的服务器 ID。
             channel_cids = [
@@ -233,7 +246,11 @@ async def get_active_banners(
                 BannerItem(
                     thread_id=banner.thread_id,
                     title=banner.title,
-                    cover_image_url=banner.cover_image_url,
+                    cover_image_url=(
+                        banner.cover_image_url
+                        if banner.cover_image_url
+                        else thumbnail_map.get(banner.thread_id)
+                    ),
                     channel_id=banner.channel_id if banner.channel_id else 0,
                     guild_id=guild_map.get(banner.thread_id, 0),
                     target_type=banner.target_type,

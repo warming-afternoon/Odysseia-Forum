@@ -138,11 +138,13 @@ class TestSingleAddCollection:
         r = await seeded_collection_session.execute(stmt)
         booklist = r.scalar_one_or_none()
         assert booklist is not None
+        assert booklist.id is not None
+        booklist_id = booklist.id
 
         result = await repo.add_collection(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_id=booklist.id,
+            target_id=booklist_id,
         )
         assert result is True
 
@@ -154,7 +156,7 @@ class TestSingleAddCollection:
         r2 = await seeded_collection_session.execute(stmt2)
         coll = r2.scalar_one_or_none()
         assert coll is not None
-        assert coll.target_id == booklist.id
+        assert coll.target_id == booklist_id
 
     async def test_add_booklist_collection_duplicate(
         self, seeded_collection_session: AsyncSession
@@ -167,16 +169,18 @@ class TestSingleAddCollection:
         r = await seeded_collection_session.execute(stmt)
         booklist = r.scalar_one_or_none()
         assert booklist is not None
+        assert booklist.id is not None
+        booklist_id = booklist.id
 
         await repo.add_collection(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_id=booklist.id,
+            target_id=booklist_id,
         )
         result = await repo.add_collection(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_id=booklist.id,
+            target_id=booklist_id,
         )
         assert result is False
 
@@ -233,16 +237,18 @@ class TestSingleRemoveCollection:
         r = await seeded_collection_session.execute(stmt)
         booklist = r.scalar_one_or_none()
         assert booklist is not None
+        assert booklist.id is not None
+        booklist_id = booklist.id
 
         await repo.add_collection(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_id=booklist.id,
+            target_id=booklist_id,
         )
         result = await repo.remove_collection(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_id=booklist.id,
+            target_id=booklist_id,
         )
         assert result is True
 
@@ -328,16 +334,18 @@ class TestBatchRemoveCollections:
         r = await seeded_collection_session.execute(stmt)
         booklist = r.scalar_one_or_none()
         assert booklist is not None
+        assert booklist.id is not None
+        booklist_id = booklist.id
 
         await repo.add_collection(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_id=booklist.id,
+            target_id=booklist_id,
         )
         result = await repo.remove_collections(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_ids=[booklist.id],
+            target_ids=[booklist_id],
         )
         assert result.removed_count == 1
 
@@ -376,18 +384,20 @@ class TestGetCollectedTargetIds:
         r = await seeded_collection_session.execute(stmt)
         booklist = r.scalar_one_or_none()
         assert booklist is not None
+        assert booklist.id is not None
+        booklist_id = booklist.id
 
         await repo.add_collection(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_id=booklist.id,
+            target_id=booklist_id,
         )
         collected = await repo.get_collected_target_ids(
             user_id=1,
             target_type=CollectionType.BOOKLIST,
-            target_ids=[booklist.id, 99999],
+            target_ids=[booklist_id, 99999],
         )
-        assert collected == {booklist.id}
+        assert collected == {booklist_id}
 
     async def test_no_collected_targets(self, seeded_collection_session: AsyncSession):
         """无收藏的用户 → 空集合"""
@@ -515,11 +525,13 @@ class TestGetCollectedTargets:
         r = await seeded_collection_session.execute(stmt)
         booklist = r.scalar_one_or_none()
         assert booklist is not None
+        assert booklist.id is not None
+        booklist_id = booklist.id
 
         await repo.add_collection(
             user_id=1,
             target_type=CollectionType.BOOKLIST.value,
-            target_id=booklist.id,
+            target_id=booklist_id,
         )
         targets, total = await repo.get_collected_targets(
             user_id=1,
@@ -529,7 +541,7 @@ class TestGetCollectedTargets:
             model_class=Booklist,
         )
         assert total == 1
-        assert targets[0].id == booklist.id
+        assert targets[0].id == booklist_id
 
     async def test_get_collected_pagination(
         self, seeded_collection_session: AsyncSession

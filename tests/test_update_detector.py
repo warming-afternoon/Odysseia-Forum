@@ -1,26 +1,30 @@
 """更新检测试监听、DeepSeek 调用与 Redis 统计测试。"""
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+import discord
 
 from dto.update_detector import TokenEstimate, UpdateDetectionResult
+from models import Thread as ThreadModel
 from update_detector.cog import UpdateDetector
 from update_detector.deepseek_service import DeepSeekService
 from update_detector.prompt_builder import build_update_detection_prompt
 from update_detector.token_estimator import TokenEstimator
 from update_detector.token_stats_service import TokenStatsService
-from update_detector.views import UpdateDetectorView, build_update_embed
+from update_detector.update_detector_views import UpdateDetectorView, build_update_embed
 
 
 def test_token_estimator_counts_complete_prompt_and_attachment_names():
     """估算同时覆盖系统提示词、正文和附件名，并按请求向上取整。"""
     system_content, user_content = build_update_detection_prompt(
-        "版本 v2 已更新",
-        ["settings.json"],
+        thread_title="测试作品",
+        first_message_content="作品简介",
+        message_content="版本 v2 已更新",
+        attachment_filenames=["settings.json"],
     )
 
     estimate = TokenEstimator().estimate(system_content, user_content, 2048)
@@ -36,6 +40,23 @@ def test_token_estimator_counts_complete_prompt_and_attachment_names():
     assert estimate.estimated_total_tokens_upper_bound == (
         estimate.estimated_prompt_tokens + 2048
     )
+
+
+def test_update_detection_prompt_includes_thread_context():
+    """标题和首楼作为背景传入，并明确只判断待检测消息。"""
+    system_content, user_content = build_update_detection_prompt(
+        thread_title="测试作品",
+        first_message_content="这是作品首楼介绍",
+        message_content="v2.0 已发布，修复若干问题",
+        attachment_filenames=["settings.json"],
+    )
+
+    assert "标题和首楼内容仅用于帮助你理解作品背景" in system_content
+    assert "必须只判断待检测消息" in system_content
+    assert "帖子标题：\n测试作品" in user_content
+    assert "帖子首楼内容：\n这是作品首楼介绍" in user_content
+    assert "待检测消息：\nv2.0 已发布，修复若干问题" in user_content
+    assert "附件文件名：settings.json" in user_content
 
 
 def test_update_detector_ignores_legacy_enabled_config():
@@ -70,6 +91,16 @@ def test_update_detector_treats_invalid_mode_as_disabled(invalid_mode):
     assert detector.deepseek_service is None
 
 
+def test_update_detector_skips_threads_younger_than_one_day():
+    """帖子发布不满 24 小时时直接跳过更新检测。"""
+    thread = MagicMock()
+    thread.created_at = discord.utils.utcnow() - timedelta(hours=23)
+    assert UpdateDetector._is_thread_too_new(thread) is True
+
+    thread.created_at = discord.utils.utcnow() - timedelta(hours=25)
+    assert UpdateDetector._is_thread_too_new(thread) is False
+
+
 def test_update_detector_observe_mode_does_not_create_ai_client(monkeypatch):
     """observe 模式只初始化 Redis 统计，不创建 DeepSeek 客户端。"""
     redis = MagicMock()
@@ -92,8 +123,31 @@ def test_update_detector_observe_mode_does_not_create_ai_client(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_observe_message_only_records_estimate(monkeypatch):
-    """observe 候选消息只写估算，不请求 AI、发提醒或同步数据库。"""
+@pytest.mark.parametrize(
+    ("thread_record", "expected_title", "expected_first_message_content"),
+    [
+        (
+            ThreadModel(
+                guild_id=1,
+                channel_id=10,
+                thread_id=30,
+                title="数据库帖子标题",
+                author_id=20,
+                first_message_excerpt="数据库首楼内容",
+            ),
+            "数据库帖子标题",
+            "数据库首楼内容",
+        ),
+        (None, "Discord 帖子标题", ""),
+    ],
+)
+async def test_observe_message_only_records_estimate(
+    monkeypatch,
+    thread_record,
+    expected_title,
+    expected_first_message_content,
+):
+    """observe 候选消息使用帖子上下文估算，缺记录时按规则降级。"""
     redis = MagicMock()
     monkeypatch.setattr(
         "update_detector.cog.RedisManager.get_client",
@@ -102,6 +156,10 @@ async def test_observe_message_only_records_estimate(monkeypatch):
     monkeypatch.setattr(
         "update_detector.cog.UserUpdatePreferenceRepository.get_preference",
         AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        "update_detector.cog.ThreadRepository.get_thread_with_tags",
+        AsyncMock(return_value=thread_record),
     )
     bot = MagicMock()
     bot.cache_service.is_channel_indexed.return_value = True
@@ -124,6 +182,7 @@ async def test_observe_message_only_records_estimate(monkeypatch):
     thread.parent_id = 10
     thread.owner_id = 20
     thread.id = 30
+    thread.name = "Discord 帖子标题"
     message = MagicMock()
     message.guild = object()
     message.channel = thread
@@ -136,6 +195,20 @@ async def test_observe_message_only_records_estimate(monkeypatch):
     await detector.on_message(message)
 
     detector.token_stats_service.record_estimate.assert_awaited_once()
+    estimate_call = detector.token_stats_service.record_estimate.await_args.kwargs[
+        "estimate"
+    ]
+    expected_system, expected_user = build_update_detection_prompt(
+        thread_title=expected_title,
+        first_message_content=expected_first_message_content,
+        message_content=message.content,
+    )
+    expected_estimate = detector.token_estimator.estimate(
+        system_content=expected_system,
+        user_content=expected_user,
+        max_output_tokens=detector.max_output_tokens,
+    )
+    assert estimate_call == expected_estimate
     detector.do_sync_update.assert_not_awaited()
     bot.api_scheduler.submit.assert_not_called()
     assert detector.deepseek_service is None
@@ -367,7 +440,6 @@ async def test_update_detector_view_has_no_timeout_or_auto_delete_footer():
 
     assert view.timeout is None
     assert embed.footer.text is None
-
 
 @pytest.mark.asyncio
 async def test_update_detector_view_rejects_non_author_interaction():

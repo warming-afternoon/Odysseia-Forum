@@ -15,7 +15,7 @@ class ChannelSelectionView(discord.ui.View):
         available_channels: dict,
         thread_id: int,
         channel_id: int,
-        cover_image_url: str,
+        cover_image_url: str | None,
         applicant_id: int,
         thread_title: str,
         thread_link: str,
@@ -59,7 +59,11 @@ class ChannelSelectionView(discord.ui.View):
             value=f"[{thread_title[:50]}]({thread_link})",
             inline=False,
         )
-        embed.add_field(name="封面图", value=cover_image_url, inline=False)
+        embed.add_field(
+            name="封面图",
+            value=cover_image_url or "将动态使用帖子当前首图",
+            inline=False,
+        )
         self._preview_embed = embed
 
     async def send_to(self, interaction: discord.Interaction):

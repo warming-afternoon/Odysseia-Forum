@@ -6,8 +6,8 @@ from typing import TYPE_CHECKING, Any, Dict, List
 import discord
 
 from core.config_repository import ConfigRepository
-from core.tag_repository import TagRepository
 from core.thread_repository import ThreadRepository
+from core.thread_deletion_service import ThreadDeletionService
 from shared.enum import SearchConfigType
 from shared.redis_client import RedisManager
 from shared.similar_threads_cache import invalidate_similar_candidate_pools
@@ -33,8 +33,8 @@ class ThreadLogic:
     async def delete_thread_permanently(self, thread_id: int):
         """处理整个帖子被从 Discord 删除的逻辑：物理删除数据库记录"""
         async with self.session_factory() as session:
-            repo = ThreadRepository(session)
-            await repo.delete_thread_index(thread_id=thread_id)
+            await ThreadDeletionService(session).delete_thread(thread_id)
+            await session.commit()
             logger.info(f"帖子 {thread_id} 已从 Discord 删除，已同步清理数据库索引记录")
         await self._invalidate_similarity_cache(thread_id)
 
@@ -342,12 +342,7 @@ class ThreadLogic:
     # ---------------------------------------------------------
     async def pre_sync_forum_tags(self, channel: discord.ForumChannel):
         """预同步一个论坛频道的所有可用标签"""
-        if not channel.available_tags:
-            return
-        tags_data = {tag.id: tag.name for tag in channel.available_tags}
-        async with self.session_factory() as session:
-            tag_service = TagRepository(session)
-            await tag_service.get_or_create_tags(tags_data)
+        await self.sync_service.pre_sync_forum_tags(channel)
 
     async def process_publish_update(
         self,

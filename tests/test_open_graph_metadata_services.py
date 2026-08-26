@@ -305,6 +305,7 @@ async def test_booklist_service_counts_visible_items_and_deduplicates_cover(
         session.add(booklist)
         await session.flush()
         assert booklist.id is not None
+        booklist_id = booklist.id
         threads = [
             Thread(
                 channel_id=10,
@@ -346,12 +347,11 @@ async def test_booklist_service_counts_visible_items_and_deduplicates_cover(
         session.add_all(threads)
         session.add_all(
             [
-                BooklistItem(booklist_id=booklist.id, thread_id=item.thread_id)
+                BooklistItem(booklist_id=booklist_id, thread_id=item.thread_id)
                 for item in threads
             ]
         )
         await session.commit()
-        booklist_id = booklist.id
 
     service = BooklistOpenGraphService(
         db_session_factory, _image_resolver(), _cache_miss(), {99}

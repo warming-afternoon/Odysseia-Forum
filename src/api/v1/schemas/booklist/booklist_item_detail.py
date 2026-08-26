@@ -3,6 +3,8 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from api.v1.schemas.search.author_detail import AuthorDetail
+from api.v1.schemas.search.latest_update import LatestUpdate
+from api.v1.schemas.search.thread_detail import ViewerFlag
 from shared.utc_datetime import UTCDateTime
 
 
@@ -89,6 +91,18 @@ class BooklistItemDetail(BaseModel):
 
     collected_flag: bool = Field(False, description="当前用户是否收藏了该帖子")
     """当前用户是否收藏了该帖子"""
+
+    viewer_flags: List[ViewerFlag] = Field(
+        default_factory=list,
+        description="当前查看者与作品的关系标记",
+    )
+    """当前查看者与作品的关系标记"""
+
+    latest_update: Optional[LatestUpdate] = Field(
+        default=None,
+        description="作品最新一次正式发布的更新",
+    )
+    """作品最新一次正式发布的更新"""
 
     @field_serializer("thread_id", "channel_id", "guild_id")
     def serialize_ids(self, value: int) -> str:

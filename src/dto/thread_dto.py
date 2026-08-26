@@ -28,6 +28,7 @@ class ThreadDTO(BaseModel):
     reaction_count: int = Field(default=0, description="帖子获得的总反应数")
     reply_count: int = Field(default=0, description="帖子的回复数量")
     collection_count: int = Field(default=0, description="被收藏次数")
+    display_count: int = Field(default=0, description="搜索结果展示次数")
     first_message_excerpt: Optional[str] = Field(
         default=None, description="帖子首条消息的文本摘要"
     )
@@ -35,6 +36,15 @@ class ThreadDTO(BaseModel):
         default_factory=list, description="首楼图片链接列表"
     )
     tags: list[TagDTO] = Field(default_factory=list, description="关联的标签列表")
+    latest_update_at: Optional[datetime] = Field(
+        default=None, description="最新更新时间"
+    )
+    latest_update_link: Optional[str] = Field(
+        default=None, description="最新更新消息链接"
+    )
+    latest_update_id: Optional[int] = Field(
+        default=None, description="最新作品更新逻辑 ID"
+    )
 
     @staticmethod
     def from_orm(thread) -> "ThreadDTO":
@@ -51,7 +61,11 @@ class ThreadDTO(BaseModel):
             reaction_count=thread.reaction_count,
             reply_count=thread.reply_count,
             collection_count=thread.collection_count,
+            display_count=thread.display_count,
             first_message_excerpt=thread.first_message_excerpt,
             thumbnail_urls=thread.thumbnail_urls or [],
             tags=[TagDTO.from_orm(tag) for tag in (thread.tags or [])],
+            latest_update_at=thread.latest_update_at,
+            latest_update_link=thread.latest_update_link,
+            latest_update_id=thread.latest_update_id,
         )

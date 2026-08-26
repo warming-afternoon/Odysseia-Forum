@@ -79,7 +79,7 @@ async def test_candidate_pool_and_live_preference_ranking(
 
     async with db_session_factory() as session:
         session.add_all([common, niche, excluded, *threads])
-        await session.commit()
+        await session.flush()
         internal_ids = {thread.thread_id: thread.id for thread in threads}
         links = {
             9100: [8101, 8102],

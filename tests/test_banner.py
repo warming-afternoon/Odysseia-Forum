@@ -343,6 +343,81 @@ class TestBannerServiceTargetDetection:
             assert "只能为自己的帖子" in result.message
 
     @pytest.mark.asyncio
+    async def test_thread_without_custom_cover_persists_null(self, db_session_factory):
+        """帖子有当前首图时允许空封面，并保持数据库字段为空。"""
+        from models.thread import Thread
+
+        async with db_session_factory() as session:
+            session.add(
+                Thread(
+                    thread_id=1234567890123456701,
+                    guild_id=1,
+                    channel_id=2,
+                    title="动态封面帖子",
+                    author_id=999,
+                    thumbnail_urls=["https://example.com/current.png"],
+                )
+            )
+            await session.commit()
+            result = await BannerService(session).validate_and_create_application(
+                target_id=1234567890123456701,
+                guild_id=1,
+                applicant_id=999,
+                cover_image_url=None,
+                target_scope="global",
+            )
+            assert result.success is True
+            assert result.application is not None
+            assert result.application.cover_image_url is None
+
+    @pytest.mark.asyncio
+    async def test_thread_without_any_cover_is_rejected(self, db_session_factory):
+        """帖子既无自定义封面也无当前首图时拒绝申请。"""
+        from models.thread import Thread
+
+        async with db_session_factory() as session:
+            session.add(
+                Thread(
+                    thread_id=1234567890123456702,
+                    guild_id=1,
+                    channel_id=2,
+                    title="无图帖子",
+                    author_id=999,
+                    thumbnail_urls=[],
+                )
+            )
+            await session.commit()
+            result = await BannerService(session).validate_application_request(
+                target_id=1234567890123456702,
+                guild_id=1,
+                applicant_id=999,
+                cover_image_url=None,
+            )
+            assert result.success is False
+            assert "没有可用首图" in result.message
+
+    @pytest.mark.asyncio
+    async def test_channel_without_custom_cover_is_rejected(self, db_session_factory):
+        """频道 Banner 不允许省略自定义封面。"""
+        async with db_session_factory() as session:
+            session.add(
+                ChannelModel(
+                    channel_id=1234567890123456703,
+                    guild_id=1,
+                    name="频道",
+                )
+            )
+            await session.commit()
+            result = await BannerService(session).validate_application_request(
+                target_id=1234567890123456703,
+                guild_id=1,
+                applicant_id=999,
+                cover_image_url=None,
+            )
+            assert result.success is False
+            assert "频道Banner必须" in result.message
+
+    @pytest.mark.asyncio
     async def test_detect_channel(self, db_session_factory):
         """Thread 表未找到但 Channel 表中有 → target_type=CHANNEL。"""
         async with db_session_factory() as session:
@@ -569,7 +644,6 @@ class TestActiveBannerChannelFilters:
             )
             for position in range(4)
         ]
-
         async with db_session_factory() as session:
             session.add_all(
                 channel_10_banners + channel_20_banners + global_banners
@@ -677,6 +751,7 @@ class TestBannerPreferenceFiltering:
                 not_found_count=1,
             ),
         ]
+        thread_ids = [thread.thread_id for thread in threads]
 
         async with db_session_factory() as session:
             session.add(blocked_tag)
@@ -700,7 +775,7 @@ class TestBannerPreferenceFiltering:
             )
 
             result = await service.get_preference_filtered_thread_guilds(
-                [thread.thread_id for thread in threads] + [999],
+                thread_ids + [999],
                 prefs=prefs,
                 channel_mappings_config={},
             )

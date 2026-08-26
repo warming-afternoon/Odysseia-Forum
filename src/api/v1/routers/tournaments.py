@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from api.v1.dependencies.security import require_api_key
 from api.v1.schemas.base import PaginatedResponse
+from api.v1.utils import BooklistItemEnricher
 from api.v1.schemas.booklist import BooklistDetail, BooklistItemDetail
 from api.v1.schemas.booklist.booklist_items_delete_request import (
     BooklistItemsDeleteRequest,
@@ -252,6 +253,7 @@ async def get_tournament_items(
                 limit=limit,
                 offset=offset,
             )
+            await BooklistItemEnricher.enrich(session, None, items)
 
         return PaginatedResponse(total=total, limit=limit, offset=offset, results=items)
 

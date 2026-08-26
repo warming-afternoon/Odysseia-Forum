@@ -91,6 +91,7 @@ async def booklist(seeded_session: AsyncSession) -> Booklist:
     await repo.add_threads_to_booklist(
         bl.id, items=[BooklistItemAddData(thread_id=1001, comment="Nice thread")]
     )
+    await seeded_session.refresh(bl)
     return bl
 
 
@@ -122,11 +123,12 @@ async def test_upsert_idempotent(seeded_session: AsyncSession):
         booklist_id=1, guild_id=100, thread_id=200, discord_user_id=999
     )
     first_updated_at = r1.updated_at
+    first_record_id = r1.id
     # 再次调用：同一目标更新 discord_user_id
     r2 = await repo.upsert(
         booklist_id=1, guild_id=100, thread_id=200, discord_user_id=777
     )
-    assert r2.id == r1.id  # 同一条记录
+    assert r2.id == first_record_id  # 同一条记录
     assert r2.guild_id == 100
     assert r2.discord_user_id == 777  # 已更新
     assert r2.updated_at > first_updated_at
@@ -141,8 +143,8 @@ async def test_upsert_different_threads(seeded_session: AsyncSession):
     )
     r1.message_id = 301
     r1.message_url = "https://discord.com/channels/100/201/301"
-    await seeded_session.commit()
     old_record_id = r1.id
+    await seeded_session.commit()
 
     r2 = await repo.upsert(
         booklist_id=1, guild_id=100, thread_id=202, discord_user_id=999
@@ -165,11 +167,12 @@ async def test_upsert_same_target_preserves_message(seeded_session: AsyncSession
     await seeded_session.commit()
     await seeded_session.refresh(r1)
     first_updated_at = r1.updated_at
+    first_record_id = r1.id
 
     r2 = await repo.upsert(
         booklist_id=1, guild_id=100, thread_id=201, discord_user_id=777
     )
-    assert r2.id == r1.id
+    assert r2.id == first_record_id
     assert r2.discord_user_id == 777
     assert r2.message_id == 301
     assert r2.message_url == "https://discord.com/channels/100/201/301"
@@ -263,15 +266,16 @@ async def test_delete_booklist_cascades_publish_records(seeded_session: AsyncSes
 
     bl = await booklist_repo.create_booklist(owner_id=123, title="Cascade Test")
     assert bl.id is not None
+    booklist_id = bl.id
 
     await publish_repo.upsert(
-        booklist_id=bl.id, guild_id=100, thread_id=200, discord_user_id=999
+        booklist_id=booklist_id, guild_id=100, thread_id=200, discord_user_id=999
     )
-    assert await publish_repo.is_published(bl.id) is True
+    assert await publish_repo.is_published(booklist_id) is True
 
-    await booklist_repo.delete_booklist(bl.id)
+    await booklist_repo.delete_booklist(booklist_id)
 
-    assert await publish_repo.is_published(bl.id) is False
+    assert await publish_repo.is_published(booklist_id) is False
 
 
 @pytest.mark.asyncio
@@ -284,7 +288,8 @@ async def test_delete_published_booklist_schedules_global_unpublish(
     publish_repo = BooklistPublishRepository(seeded_session)
     booklist = await booklist_repo.create_booklist(owner_id=123, title="Published")
     assert booklist.id is not None
-    await publish_repo.upsert(booklist.id, 100, 200, 999)
+    booklist_id = booklist.id
+    await publish_repo.upsert(booklist_id, 100, 200, 999)
 
     @asynccontextmanager
     async def session_factory():
@@ -297,11 +302,11 @@ async def test_delete_published_booklist_schedules_global_unpublish(
     )
 
     result = await booklists_router.delete_booklist(
-        booklist.id, current_user={"id": "123"}
+        booklist_id, current_user={"id": "123"}
     )
 
     assert result == {"message": "书单删除成功"}
-    schedule_unpublish.assert_called_once_with(booklist.id)
+    schedule_unpublish.assert_called_once_with(booklist_id)
 
 
 @pytest.mark.asyncio
@@ -313,6 +318,7 @@ async def test_delete_unpublished_booklist_skips_external_call(
     booklist_repo = BooklistRepository(seeded_session)
     booklist = await booklist_repo.create_booklist(owner_id=123, title="Unpublished")
     assert booklist.id is not None
+    booklist_id = booklist.id
 
     @asynccontextmanager
     async def session_factory():
@@ -325,7 +331,7 @@ async def test_delete_unpublished_booklist_skips_external_call(
     )
 
     result = await booklists_router.delete_booklist(
-        booklist.id, current_user={"id": "123"}
+        booklist_id, current_user={"id": "123"}
     )
 
     assert result == {"message": "书单删除成功"}
@@ -342,7 +348,8 @@ async def test_delete_booklist_failure_skips_external_call(
     publish_repo = BooklistPublishRepository(seeded_session)
     booklist = await booklist_repo.create_booklist(owner_id=123, title="Failure")
     assert booklist.id is not None
-    await publish_repo.upsert(booklist.id, 100, 200, 999)
+    booklist_id = booklist.id
+    await publish_repo.upsert(booklist_id, 100, 200, 999)
 
     @asynccontextmanager
     async def session_factory():
@@ -361,7 +368,7 @@ async def test_delete_booklist_failure_skips_external_call(
 
     with pytest.raises(booklists_router.HTTPException) as exc_info:
         await booklists_router.delete_booklist(
-            booklist.id, current_user={"id": "123"}
+            booklist_id, current_user={"id": "123"}
         )
 
     assert exc_info.value.status_code == 404
@@ -377,16 +384,17 @@ async def test_delete_booklist_failure_skips_external_call(
 async def test_publish_sets_pending_status(seeded_session: AsyncSession, booklist: Booklist):
     """测试 publish 将书单状态设为 PENDING"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(
         seeded_session,
         base_url="http://127.0.0.1:10820",
         api_key="test-key",
     )
-    await svc.publish(booklist.id, guild_id=100, thread_id=200, discord_user_id=999)
+    await svc.publish(booklist_id, guild_id=100, thread_id=200, discord_user_id=999)
 
     # 验证 publish_status 已更新
     repo = BooklistPublishRepository(seeded_session)
-    assert await repo.is_published(booklist.id) is True
+    assert await repo.is_published(booklist_id) is True
 
     # 刷新书单检查状态
     await seeded_session.refresh(booklist)
@@ -399,9 +407,12 @@ async def test_publish_raises_when_not_configured(
 ):
     """测试 base_url 为空时 publish 抛出异常"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(seeded_session, base_url="", api_key="")
     with pytest.raises(ValueError, match="未配置"):
-        await svc.publish(booklist.id, guild_id=100, thread_id=200, discord_user_id=999)
+        await svc.publish(
+            booklist_id, guild_id=100, thread_id=200, discord_user_id=999
+        )
 
 
 @pytest.mark.asyncio
@@ -410,18 +421,19 @@ async def test_publish_success_updates_current_record(
 ):
     """测试当前发布请求成功后更新消息信息和状态"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(seeded_session, base_url="http://publisher")
-    record = await svc.publish_repo.upsert(booklist.id, 100, 200, 999)
+    record = await svc.publish_repo.upsert(booklist_id, 100, 200, 999)
     assert record.id is not None
     record_id = record.id
     request_updated_at = record.updated_at
     await svc.booklist_repo.set_publish_status(
-        booklist.id, BooklistPublishStatus.PENDING.value
+        booklist_id, BooklistPublishStatus.PENDING.value
     )
 
     await svc._on_api_success(
         seeded_session,
-        booklist.id,
+        booklist_id,
         200,
         record_id,
         request_updated_at,
@@ -431,7 +443,7 @@ async def test_publish_success_updates_current_record(
         },
     )
 
-    current = await svc.publish_repo.get_by_booklist(booklist.id)
+    current = await svc.publish_repo.get_by_booklist(booklist_id)
     assert current is not None
     assert current.message_id == 300
     await seeded_session.refresh(booklist)
@@ -444,17 +456,18 @@ async def test_publish_failure_updates_current_status(
 ):
     """测试当前发布请求失败后设置 FAILED"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(seeded_session, base_url="http://publisher")
-    record = await svc.publish_repo.upsert(booklist.id, 100, 200, 999)
+    record = await svc.publish_repo.upsert(booklist_id, 100, 200, 999)
     assert record.id is not None
     record_id = record.id
     request_updated_at = record.updated_at
     await svc.booklist_repo.set_publish_status(
-        booklist.id, BooklistPublishStatus.PENDING.value
+        booklist_id, BooklistPublishStatus.PENDING.value
     )
 
     await svc._on_api_failure(
-        seeded_session, booklist.id, 200, record_id, request_updated_at
+        seeded_session, booklist_id, 200, record_id, request_updated_at
     )
 
     await seeded_session.refresh(booklist)
@@ -467,29 +480,30 @@ async def test_stale_publish_callback_cannot_overwrite_latest_request(
 ):
     """测试旧任务即使目标再次相同也不能覆盖最新发布请求"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(seeded_session, base_url="http://publisher")
-    first = await svc.publish_repo.upsert(booklist.id, 100, 200, 999)
+    first = await svc.publish_repo.upsert(booklist_id, 100, 200, 999)
     assert first.id is not None
     first_record_id = first.id
     first_updated_at = first.updated_at
-    await svc.publish_repo.upsert(booklist.id, 100, 201, 999)
-    latest = await svc.publish_repo.upsert(booklist.id, 100, 200, 999)
+    await svc.publish_repo.upsert(booklist_id, 100, 201, 999)
+    latest = await svc.publish_repo.upsert(booklist_id, 100, 200, 999)
     latest_record_id = latest.id
     latest_updated_at = latest.updated_at
     await svc.booklist_repo.set_publish_status(
-        booklist.id, BooklistPublishStatus.PENDING.value
+        booklist_id, BooklistPublishStatus.PENDING.value
     )
 
     await svc._on_api_success(
         seeded_session,
-        booklist.id,
+        booklist_id,
         200,
         first_record_id,
         first_updated_at,
         {"message_id": "300", "message_url": "https://old-message"},
     )
 
-    current = await svc.publish_repo.get_by_booklist(booklist.id)
+    current = await svc.publish_repo.get_by_booklist(booklist_id)
     assert current is not None
     assert current.id == latest_record_id
     assert current.id != first_record_id
@@ -505,27 +519,28 @@ async def test_same_target_stale_callback_cannot_overwrite_latest_request(
 ):
     """测试同目标旧回调由 updated_at 识别并忽略"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(seeded_session, base_url="http://publisher")
-    first = await svc.publish_repo.upsert(booklist.id, 100, 200, 999)
+    first = await svc.publish_repo.upsert(booklist_id, 100, 200, 999)
     assert first.id is not None
     first_record_id = first.id
     first_updated_at = first.updated_at
-    latest = await svc.publish_repo.upsert(booklist.id, 100, 200, 999)
+    latest = await svc.publish_repo.upsert(booklist_id, 100, 200, 999)
     latest_record_id = latest.id
     latest_updated_at = latest.updated_at
     await svc.booklist_repo.set_publish_status(
-        booklist.id, BooklistPublishStatus.PENDING.value
+        booklist_id, BooklistPublishStatus.PENDING.value
     )
 
     await svc._on_api_failure(
         seeded_session,
-        booklist.id,
+        booklist_id,
         200,
         first_record_id,
         first_updated_at,
     )
 
-    current = await svc.publish_repo.get_by_booklist(booklist.id)
+    current = await svc.publish_repo.get_by_booklist(booklist_id)
     assert current is not None
     assert current.id == latest_record_id == first_record_id
     assert current.updated_at == latest_updated_at
@@ -541,29 +556,30 @@ async def test_unpublish_sets_none_status_and_schedules_external_call(
 ):
     """测试 unpublish 完成本地处理后按发布目标创建外部任务。"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(
         seeded_session,
         base_url="http://127.0.0.1:10820",
         api_key="test-key",
     )
     await svc.publish_repo.upsert(
-        booklist.id, guild_id=100, thread_id=200, discord_user_id=999
+        booklist_id, guild_id=100, thread_id=200, discord_user_id=999
     )
     await svc.booklist_repo.set_publish_status(
-        booklist.id, BooklistPublishStatus.SUCCESS.value
+        booklist_id, BooklistPublishStatus.SUCCESS.value
     )
     schedule_unpublish = MagicMock()
     monkeypatch.setattr(svc, "schedule_unpublish", schedule_unpublish)
 
-    await svc.unpublish(booklist.id)
+    await svc.unpublish(booklist_id)
 
     await seeded_session.refresh(booklist)
     assert booklist.publish_status == BooklistPublishStatus.NONE.value
 
     repo = BooklistPublishRepository(seeded_session)
-    assert await repo.is_published(booklist.id) is False
+    assert await repo.is_published(booklist_id) is False
     schedule_unpublish.assert_called_once_with(
-        booklist.id,
+        booklist_id,
         "https://discord.com/channels/100/200",
     )
 
@@ -576,11 +592,12 @@ async def test_unpublish_without_record_does_not_schedule_external_call(
 ):
     """测试未发布书单仅完成本地处理，不创建外部任务。"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(seeded_session, base_url="http://publisher")
     schedule_unpublish = MagicMock()
     monkeypatch.setattr(svc, "schedule_unpublish", schedule_unpublish)
 
-    await svc.unpublish(booklist.id)
+    await svc.unpublish(booklist_id)
 
     schedule_unpublish.assert_not_called()
 
@@ -661,13 +678,14 @@ async def test_sync_published_booklist_skips_when_not_published(
 ):
     """测试未发布书单的 sync 直接跳过"""
     assert booklist.id is not None
+    booklist_id = booklist.id
     svc = BooklistPublishService(
         seeded_session,
         base_url="http://127.0.0.1:10820",
         api_key="test-key",
     )
     # 不应抛出异常
-    await svc.sync_published_booklist(booklist.id)
+    await svc.sync_published_booklist(booklist_id)
 
     # 状态应保持为 NONE
     await seeded_session.refresh(booklist)
@@ -690,11 +708,12 @@ async def test_sync_triggers_on_add_thread(seeded_session: AsyncSession):
     repo = BooklistRepository(seeded_session)
     bl = await repo.create_booklist(owner_id=123, title="Sync Test")
     assert bl.id is not None
+    booklist_id = bl.id
 
     # 先发布书单
     publish_repo = BooklistPublishRepository(seeded_session)
     await publish_repo.upsert(
-        booklist_id=bl.id, guild_id=100, thread_id=200, discord_user_id=999
+        booklist_id=booklist_id, guild_id=100, thread_id=200, discord_user_id=999
     )
 
     # 添加帖子 - 应触发后台同步任务
@@ -703,7 +722,7 @@ async def test_sync_triggers_on_add_thread(seeded_session: AsyncSession):
 
     # 不等待后台任务完成，只验证不会崩溃
     await repo.add_threads_to_booklist(
-        bl.id, items=[BooklistItemAddData(thread_id=1002, comment="Test")]
+        booklist_id, items=[BooklistItemAddData(thread_id=1002, comment="Test")]
     )
     # 给 asyncio.create_task 一个执行窗口
     await asyncio.sleep(0.1)

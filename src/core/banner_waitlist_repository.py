@@ -34,7 +34,7 @@ class BannerWaitlistRepository:
         self,
         thread_id: int,
         channel_id: Optional[int],
-        cover_image_url: str,
+        cover_image_url: str | None,
         title: str,
         target_type: int = 1,
     ) -> None:

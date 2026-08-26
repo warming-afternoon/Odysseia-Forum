@@ -54,13 +54,12 @@ class BannerService:
         target_id: int,
         guild_id: int,
         applicant_id: int,
-        cover_image_url: str,
+        cover_image_url: str | None,
         target_scope: Optional[str] = None,
     ) -> ApplicationResult:
         """验证Banner申请请求，自动检测目标类型（Thread / Channel / 按需索引）。"""
-        # 验证封面图URL格式
-        cover_url = cover_image_url.strip()
-        if not cover_url.startswith(("http://", "https://")):
+        cover_url = cover_image_url.strip() if cover_image_url else None
+        if cover_url and not cover_url.startswith(("http://", "https://")):
             return ApplicationResult(
                 success=False,
                 message="封面图链接必须是有效的URL（以http://或https://开头）",
@@ -79,10 +78,20 @@ class BannerService:
         thread_repo = ThreadRepository(self.session)
         thread = await thread_repo.get_thread_with_tags(target_id)
         if thread:
+            if not thread.show_flag or thread.not_found_count > 0:
+                return ApplicationResult(
+                    success=False,
+                    message="该帖子当前不可见，无法申请Banner",
+                )
             if thread.author_id != applicant_id:
                 return ApplicationResult(
                     success=False,
                     message="只能为自己的帖子申请Banner",
+                )
+            if cover_url is None and not thread.thumbnail_urls:
+                return ApplicationResult(
+                    success=False,
+                    message="帖子没有可用首图，请提交自定义封面图",
                 )
             return ApplicationResult(
                 success=True,
@@ -99,6 +108,11 @@ class BannerService:
         )
         channel = channel_result.scalar_one_or_none()
         if channel:
+            if cover_url is None:
+                return ApplicationResult(
+                    success=False,
+                    message="频道Banner必须提交自定义封面图",
+                )
             return ApplicationResult(
                 success=True,
                 message="验证通过",
@@ -111,6 +125,11 @@ class BannerService:
         if self.channel_sync:
             channel = await self.channel_sync.fetch_and_index(self.session, target_id)
             if channel:
+                if cover_url is None:
+                    return ApplicationResult(
+                        success=False,
+                        message="频道Banner必须提交自定义封面图",
+                    )
                 return ApplicationResult(
                     success=True,
                     message="验证通过",
@@ -129,7 +148,7 @@ class BannerService:
         target_id: int,
         guild_id: int,
         applicant_id: int,
-        cover_image_url: str,
+        cover_image_url: str | None,
         target_scope: str,
     ) -> ApplicationResult:
         """验证并创建Banner申请。"""
@@ -152,7 +171,7 @@ class BannerService:
         else:
             channel_id = guild_id
 
-        cover_url = cover_image_url.strip()
+        cover_url = cover_image_url.strip() if cover_image_url else None
         scope = target_scope.strip()
 
         application = await self.app_repo.create(
@@ -449,7 +468,16 @@ async def send_review_message(
     embed.add_field(name="展示范围", value=scope_text, inline=True)
     embed.add_field(name="类型", value=target_label, inline=True)
     embed.add_field(name=target_label, value=target_link, inline=False)
-    embed.set_image(url=application.cover_image_url)
+    review_cover_url = application.cover_image_url
+    if review_cover_url is None and application.target_type == TargetType.THREAD.value:
+        async with session_factory() as image_session:
+            thread = await ThreadRepository(image_session).get_thread_with_tags(
+                application.thread_id
+            )
+            if thread and thread.thumbnail_urls:
+                review_cover_url = thread.thumbnail_urls[0]
+    if review_cover_url:
+        embed.set_image(url=review_cover_url)
     embed.set_footer(text=f"申请ID: {application.id}")
 
     # 创建审核视图

@@ -16,12 +16,12 @@ from dto.open_graph import (
     ThreadShareQueryDTO,
 )
 from dto.search.fts_result_dto import FTSResultDTO
+from dto.thread_sync_mutation_result import ThreadSyncMutationResult
+from dto.update_data import UpdateData
 from models import Author, Tag, TagVote, Thread, ThreadFollow, ThreadTagLink
 from models.booklist_item import BooklistItem
 from models.user_collection import UserCollection
 from shared.enum import CollectionType
-from ThreadManager.update_data_dto import UpdateData
-
 from shared.fts_utils import build_fts_conditions
 
 logger = logging.getLogger(__name__)
@@ -189,10 +189,8 @@ class ThreadRepository:
 
     async def add_or_update_thread_with_tags(
         self, thread_data: dict, tags: list[Tag]
-    ) -> bool:
-        """
-        添加或更新一个帖子及其标签，并返回标签集合是否变化。
-        """
+    ) -> ThreadSyncMutationResult:
+        """添加或更新帖子及标签并返回明确的变更结果。"""
         # 查找现有帖子
         statement = (
             select(Thread)
@@ -203,6 +201,7 @@ class ThreadRepository:
         db_thread = result.scalars().first()
 
         if db_thread:
+            created = False
             # 更新帖子
             for key, value in thread_data.items():
                 setattr(db_thread, key, value)
@@ -232,9 +231,13 @@ class ThreadRepository:
             new_thread = Thread(**thread_data)
             new_thread.tags = tags
             self.session.add(new_thread)
+            created = True
             tags_changed = True
-        await self.session.commit()
-        return tags_changed
+        await self.session.flush()
+        return ThreadSyncMutationResult(
+            created=created,
+            tags_changed=tags_changed,
+        )
 
     async def delete_thread_index(self, thread_id: int):
         """删除帖子记录"""
@@ -604,7 +607,10 @@ class ThreadRepository:
         stmt = (
             select(Thread)
             .where(Thread.thread_id.in_(thread_ids))  # type: ignore[arg-type]
-            .options(selectinload(Thread.tags))  # type: ignore[arg-type]
+            .options(
+                selectinload(Thread.tags),  # type: ignore[arg-type]
+                joinedload(Thread.author),  # type: ignore[arg-type]
+            )
         )
         result = await self.session.execute(stmt)
         return list(result.scalars().all())

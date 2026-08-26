@@ -1,5 +1,6 @@
 from typing import Optional
 
+from sqlalchemy import CheckConstraint
 from sqlmodel import BigInteger, Column, Field, SQLModel, UniqueConstraint
 
 
@@ -9,6 +10,10 @@ class UserUpdatePreference(SQLModel, table=True):
     __tablename__ = "user_update_preference"  # type: ignore
     __table_args__ = (
         UniqueConstraint("user_id", "thread_id", name="uk_user_thread_update_pref"),
+        CheckConstraint(
+            "NOT (auto_sync AND no_remind)",
+            name="ck_user_update_preference_exclusive",
+        ),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)

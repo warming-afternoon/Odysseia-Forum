@@ -1,7 +1,8 @@
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Thread
+from core.thread_deletion_service import ThreadDeletionService
 
 
 class AuditorService:
@@ -44,7 +45,8 @@ class AuditorService:
         Returns:
             被删除的记录数量。
         """
-        stmt = delete(Thread).where(Thread.not_found_count >= threshold)  # type: ignore
-        result = await self.session.execute(stmt)
+        deleted_count = await ThreadDeletionService(self.session).delete_stale(
+            threshold
+        )
         await self.session.commit()
-        return result.rowcount
+        return deleted_count

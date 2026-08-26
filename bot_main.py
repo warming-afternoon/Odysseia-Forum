@@ -44,6 +44,8 @@ from author.cog import AuthorCog
 from backup.cog import BackupCog
 from shared.api_scheduler import APIScheduler
 from shared.enum import SearchConfigDefaultsInt
+from shared.event_mediator import EventMediator
+from dto.events import IndexUpdatedEvent
 
 load_dotenv()
 
@@ -70,6 +72,7 @@ class MyBot(commands.Bot):
         self.sync_service: SyncService
         self.open_graph_reindex_consumer: OpenGraphReindexConsumer
         self.impression_cache_service: ImpressionCacheService
+        self.event_mediator = EventMediator()
 
         # 从配置初始化API调度器
         concurrency = self.config.get("performance", {}).get(
@@ -98,7 +101,7 @@ class MyBot(commands.Bot):
         """
         return  # 什么都不做
 
-    async def on_index_updated_global(self):
+    async def on_index_updated_global(self, event: IndexUpdatedEvent):
         """接收 'index_updated' 事件并刷新缓存"""
         logger.debug("接收 'index_updated' 事件，开始刷新缓存")
         tasks = []
@@ -235,8 +238,11 @@ class MyBot(commands.Bot):
         )
         logger.info("所有 Cogs 已加载。")
 
-        # 注册全局事件监听器
-        self.add_listener(self.on_index_updated_global, "on_index_updated")
+        # 由组合根注册跨业务模块的可等待事件处理器。
+        self.event_mediator.register(
+            IndexUpdatedEvent,
+            self.on_index_updated_global,
+        )
 
         # 启动健康监控后台任务
         asyncio.create_task(self._heartbeat_writer())
@@ -297,12 +303,28 @@ class MyBot(commands.Bot):
                         else 0
                     ),
                     "is_closed": self.is_closed(),
+                    "update_detector": self._get_update_detector_health(),
                 }
                 with open(self._heartbeat_path, "w", encoding="utf-8") as f:
                     json.dump(state, f)
             except Exception:
                 logger.warning("写入心跳文件失败", exc_info=True)
             await asyncio.sleep(30)
+
+    def _get_update_detector_health(self) -> dict[str, object]:
+        """返回更新检测器的可用性元数据供健康诊断。"""
+        cog = self.get_cog("UpdateDetector")
+        if not isinstance(cog, UpdateDetector):
+            return {"mode": "missing", "available": False}
+        return {
+            "mode": cog.mode,
+            "available": cog.mode != "active" or cog.deepseek_service is not None,
+            "reason": (
+                "missing_deepseek_api_key"
+                if cog.mode == "active" and cog.deepseek_service is None
+                else None
+            ),
+        }
 
     async def _disconnect_timeout_monitor(self):
         """后台任务：若断连超过 5 分钟则主动退出进程。

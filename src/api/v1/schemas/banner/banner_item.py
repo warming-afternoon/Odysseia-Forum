@@ -12,7 +12,7 @@ class BannerItem(BaseModel):
 
     thread_id: int
     title: str
-    cover_image_url: str
+    cover_image_url: Optional[str] = None
     channel_id: int
     guild_id: int = Field(
         default=0,

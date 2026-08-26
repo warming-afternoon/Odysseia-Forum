@@ -27,6 +27,7 @@ from api.v1.schemas.booklist import (
     BooklistUpdateResponse,
 )
 from api.v1.schemas.search.author_detail import AuthorDetail
+from api.v1.utils import BooklistItemEnricher
 from booklist.booklist_publish_service import BooklistPublishService
 from booklist.booklist_service import BooklistService
 from core.author_repository import AuthorRepository
@@ -1063,17 +1064,7 @@ async def get_booklist_items(
                 offset=offset,
             )
 
-            # 检查收藏状态
-            collected_thread_ids = set()
             user_id = int(current_user["id"])
-            if user_id and items:
-                thread_ids = [item.thread_id for item in items]
-                collection_service = CollectionRepository(session)
-                collected_thread_ids = (
-                    await collection_service.get_collected_target_ids(
-                        user_id, CollectionType.THREAD, thread_ids
-                    )
-                )
 
             # 预计算全量反向映射 channel_id -> virtual_tags
             channel_to_virtual: Dict[int, List[str]] = {}
@@ -1083,10 +1074,9 @@ async def get_booklist_items(
 
             # 更新收藏状态与虚拟标签
             for item in items:
-                if item.thread_id in collected_thread_ids:
-                    item.collected_flag = True
                 if item.channel_id in channel_to_virtual:
                     item.virtual_tags = list(set(channel_to_virtual[item.channel_id]))
+            await BooklistItemEnricher.enrich(session, user_id, items)
 
         return PaginatedResponse(total=total, limit=limit, offset=offset, results=items)
 
@@ -1168,6 +1158,8 @@ async def update_booklist_item(
                 item_detail.virtual_tags = list(
                     set(channel_to_virtual[item_detail.channel_id])
                 )
+
+            await BooklistItemEnricher.enrich(session, user_id, [item_detail])
 
             return item_detail
 

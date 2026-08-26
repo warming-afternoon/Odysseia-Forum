@@ -15,7 +15,7 @@ from core.thread_repository import ThreadRepository
 from models import Thread
 from shared.database import is_deadlock_error
 from shared.enum import ConstantEnum
-from ThreadManager.update_data_dto import UpdateData
+from dto.update_data import UpdateData
 from core.redis_trend_service import RedisTrendService
 
 logger = logging.getLogger(__name__)

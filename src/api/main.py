@@ -11,6 +11,7 @@ from sqlalchemy import text
 from api.middleware.rate_limit_middleware import RateLimitMiddleware
 from api.v1.routers import (
     auth,
+    author_follows,
     authors,
     banner,
     booklists,
@@ -18,6 +19,7 @@ from api.v1.routers import (
     fetch_images,
     follows,
     meta,
+    notifications,
     open_graph,
     preferences,
     search,
@@ -113,9 +115,11 @@ app.add_middleware(
 # 包含路由
 app.include_router(auth.router, prefix="/v1")
 app.include_router(authors.router, prefix="/v1")
+app.include_router(author_follows.router, prefix="/v1")
 app.include_router(preferences.router, prefix="/v1")
 app.include_router(search.router, prefix="/v1")
 app.include_router(follows.router, prefix="/v1")
+app.include_router(notifications.router, prefix="/v1")
 app.include_router(meta.router, prefix="/v1")
 app.include_router(open_graph.router, prefix="/v1")
 app.include_router(fetch_images.router, prefix="/v1")

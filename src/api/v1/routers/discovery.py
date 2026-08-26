@@ -10,6 +10,7 @@ from api.v1.schemas.search import ThreadDetail
 from api.v1.utils import ThreadDetailBuilder
 from core.cache_service import CacheService
 from core.collection_repository import CollectionRepository
+from core.thread_presentation_service import ThreadPresentationService
 from core.preferences_repository import PreferencesRepository
 from core.thread_repository import ThreadRepository
 from discovery.discovery_service import DiscoveryService
@@ -124,18 +125,31 @@ async def get_discovery_rails(
 
             # 初始化构造器
             builder = ThreadDetailBuilder(channel_mappings_config)
+            presentation_context = await ThreadPresentationService(session).load(
+                user_id, all_threads
+            )
 
             # 将结果转换为前端 Schema 对象并注入收藏状态与虚拟标签
             return DiscoveryRailsResponse(
-                latest=builder.build_list(rails_data["latest"], collected_ids),
+                latest=builder.build_list(
+                    rails_data["latest"],
+                    collected_ids,
+                    presentation_context=presentation_context,
+                ),
                 reaction_surge=builder.build_list(
-                    rails_data["reaction_surge"], collected_ids
+                    rails_data["reaction_surge"],
+                    collected_ids,
+                    presentation_context=presentation_context,
                 ),
                 discussion_surge=builder.build_list(
-                    rails_data["discussion_surge"], collected_ids
+                    rails_data["discussion_surge"],
+                    collected_ids,
+                    presentation_context=presentation_context,
                 ),
                 collection_surge=builder.build_list(
-                    rails_data["collection_surge"], collected_ids
+                    rails_data["collection_surge"],
+                    collected_ids,
+                    presentation_context=presentation_context,
                 ),
             )
     except Exception as e:
@@ -228,6 +242,9 @@ async def get_random_threads(
                 )
 
             builder = ThreadDetailBuilder(channel_mappings_config)
+            presentation_context = await ThreadPresentationService(session).load(
+                user_id, list(threads)
+            )
             channel_to_virtual = None
 
             # 仅当是在单一频道搜索时，为该上下文计算局部虚拟标签
@@ -242,7 +259,10 @@ async def get_random_threads(
                             )
 
             return builder.build_list(
-                threads, collected_ids, channel_to_virtual=channel_to_virtual
+                threads,
+                collected_ids,
+                channel_to_virtual=channel_to_virtual,
+                presentation_context=presentation_context,
             )
 
     except Exception as e:
@@ -321,7 +341,14 @@ async def get_single_rail(
                 )
 
             builder = ThreadDetailBuilder(channel_mappings_config)
-            return builder.build_list(threads, collected_ids)
+            presentation_context = await ThreadPresentationService(session).load(
+                user_id, list(threads)
+            )
+            return builder.build_list(
+                threads,
+                collected_ids,
+                presentation_context=presentation_context,
+            )
 
     except Exception as e:
         logger.error(f"获取单条轨道数据失败 (rail={rail_name}): {e}", exc_info=True)
