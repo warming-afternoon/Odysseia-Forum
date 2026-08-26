@@ -1,4 +1,5 @@
 import logging
+from typing import Literal
 
 import httpx
 
@@ -54,15 +55,16 @@ class DeepSeekService:
             data = response.json()
             choice = data["choices"][0]
             finish_reason = choice.get("finish_reason")
-            raw_content = choice["message"].get("content") or ""
+            raw_content = str(choice["message"].get("content") or "")
             normalized_content = raw_content.strip().upper()
             usage = data.get("usage") or {}
             truncated = finish_reason == "length"
-            decision = (
-                normalized_content
-                if not truncated and normalized_content in {"YES", "NO"}
-                else None
-            )
+            # 仅将严格匹配的模型输出转换为有效判断。
+            decision: Literal["YES", "NO"] | None = None
+            if not truncated and normalized_content == "YES":
+                decision = "YES"
+            elif not truncated and normalized_content == "NO":
+                decision = "NO"
             return UpdateDetectionResult(
                 api_success=True,
                 decision=decision,

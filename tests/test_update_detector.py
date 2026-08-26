@@ -100,7 +100,7 @@ async def test_observe_message_only_records_estimate(monkeypatch):
         lambda: redis,
     )
     monkeypatch.setattr(
-        "update_detector.cog.UpdatePreferenceService.get_preference",
+        "update_detector.cog.UserUpdatePreferenceRepository.get_preference",
         AsyncMock(return_value=None),
     )
     bot = MagicMock()

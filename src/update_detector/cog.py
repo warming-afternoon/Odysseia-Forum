@@ -8,13 +8,13 @@ from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.thread_repository import ThreadRepository
+from core.user_update_preference_repository import UserUpdatePreferenceRepository
 from shared.redis_client import RedisManager
 from shared.safe_defer import safe_defer
 from update_detector.deepseek_service import DeepSeekService
 from update_detector.prompt_builder import build_update_detection_prompt
 from update_detector.token_estimator import TokenEstimator
 from update_detector.token_stats_service import TokenStatsService
-from update_detector.update_preference_service import UpdatePreferenceService
 from update_detector.views import UpdateDetectorView, build_update_embed
 
 if TYPE_CHECKING:
@@ -141,8 +141,8 @@ class UpdateDetector(commands.Cog):
 
         # 检查用户偏好
         async with self.session_factory() as session:
-            pref_service = UpdatePreferenceService(session)
-            pref = await pref_service.get_preference(message.author.id, thread.id)
+            pref_repository = UserUpdatePreferenceRepository(session)
+            pref = await pref_repository.get_preference(message.author.id, thread.id)
 
         if pref and pref.no_remind:
             return
@@ -176,7 +176,12 @@ class UpdateDetector(commands.Cog):
                 )
             return
 
-        result = await self.deepseek_service.detect_update(
+        # 将可选客户端收窄为可调用的服务实例。
+        deepseek_service = self.deepseek_service
+        if deepseek_service is None:
+            return
+
+        result = await deepseek_service.detect_update(
             system_content=system_content,
             user_content=user_content,
         )
@@ -229,15 +234,15 @@ class UpdateDetector(commands.Cog):
         self, user_id: int, thread_id: int, enabled: bool
     ) -> None:
         async with self.session_factory() as session:
-            pref_service = UpdatePreferenceService(session)
-            await pref_service.set_auto_sync(user_id, thread_id, enabled)
+            pref_repository = UserUpdatePreferenceRepository(session)
+            await pref_repository.set_auto_sync(user_id, thread_id, enabled)
 
     async def set_user_no_remind(
         self, user_id: int, thread_id: int, enabled: bool
     ) -> None:
         async with self.session_factory() as session:
-            pref_service = UpdatePreferenceService(session)
-            await pref_service.set_no_remind(user_id, thread_id, enabled)
+            pref_repository = UserUpdatePreferenceRepository(session)
+            await pref_repository.set_no_remind(user_id, thread_id, enabled)
 
     # ── 用户指令：管理更新提醒偏好 ──
 
@@ -260,8 +265,8 @@ class UpdateDetector(commands.Cog):
 
         thread = interaction.channel
         async with self.session_factory() as session:
-            pref_service = UpdatePreferenceService(session)
-            pref = await pref_service.get_preference(interaction.user.id, thread.id)
+            pref_repository = UserUpdatePreferenceRepository(session)
+            pref = await pref_repository.get_preference(interaction.user.id, thread.id)
 
         auto_sync = pref.auto_sync if pref else False
         no_remind = pref.no_remind if pref else False
@@ -335,18 +340,18 @@ class UpdateDetector(commands.Cog):
 
         changes = []
         async with self.session_factory() as session:
-            pref_service = UpdatePreferenceService(session)
+            pref_repository = UserUpdatePreferenceRepository(session)
 
             if 自动同步 is not None:
                 enabled = 自动同步.value == 1
-                await pref_service.set_auto_sync(
+                await pref_repository.set_auto_sync(
                     interaction.user.id, thread.id, enabled
                 )
                 changes.append(f"自动同步: {'✅ 已开启' if enabled else '❌ 已关闭'}")
 
             if 不再提醒 is not None:
                 enabled = 不再提醒.value == 1
-                await pref_service.set_no_remind(
+                await pref_repository.set_no_remind(
                     interaction.user.id, thread.id, enabled
                 )
                 changes.append(f"更新提醒: {'🔕 已关闭' if enabled else '🔔 已恢复'}")
@@ -376,8 +381,8 @@ class UpdateDetector(commands.Cog):
 
         thread = interaction.channel
         async with self.session_factory() as session:
-            pref_service = UpdatePreferenceService(session)
-            success = await pref_service.reset_preference(
+            pref_repository = UserUpdatePreferenceRepository(session)
+            success = await pref_repository.reset_preference(
                 interaction.user.id, thread.id
             )
 
