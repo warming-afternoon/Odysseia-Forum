@@ -111,7 +111,7 @@ class BackupCog(commands.Cog):
     # ── 数据库备份 ───────────────────────────────────────────
 
     def _create_compressed_backup_sync(self) -> str:
-        """在子线程中执行：使用 pg_dump 生成数据库快照并 gzip 压缩"""
+        """在子线程中执行：使用 pg_dump 生成数据库快照并 zstd 压缩"""
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
         dump_path = f"data/backup_temp_{timestamp}.dump"
 
@@ -132,7 +132,7 @@ class BackupCog(commands.Cog):
                     "--format",
                     "custom",
                     "--compress",
-                    "6",
+                    "zstd:6",
                     "--file",
                     dump_path,
                     "--no-owner",
@@ -184,18 +184,18 @@ class BackupCog(commands.Cog):
 
     # ── 定时任务 ─────────────────────────────────────────────
 
-    @tasks.loop(hours=2.0)
+    @tasks.loop(hours=3.0)
     async def backup_task(self) -> None:
-        """每 2 小时执行一次：数据库快照 + 配置文件加密 → 上传 → 清理本地临时文件"""
+        """每 3 小时执行一次：数据库快照 + 配置文件加密 → 上传 → 清理本地临时文件"""
         logger.info("开始执行定期备份任务...")
-        gz_path = None
+        dump_path = None
         enc_paths: list[str] = []
         try:
             # 数据库快照和压缩是 CPU/IO 密集型操作，放入子线程避免阻塞事件循环
-            gz_path = await asyncio.to_thread(self._create_compressed_backup_sync)
+            dump_path = await asyncio.to_thread(self._create_compressed_backup_sync)
 
             # 从 dump 文件名提取时间戳，用于配置文件加密备份命名
-            basename = os.path.basename(gz_path)  # backup_temp_YYYYMMDD_HHMMSS.dump
+            basename = os.path.basename(dump_path)  # backup_temp_YYYYMMDD_HHMMSS.dump
             timestamp = basename[len("backup_temp_") : -len(".dump")]
 
             # 加密配置文件（若密钥已配置）
@@ -208,7 +208,7 @@ class BackupCog(commands.Cog):
                 logger.debug("未设置 BACKUP_ENCRYPTION_KEY，跳过配置文件加密备份")
 
             # 上传数据库 dump
-            await self._upload_to_s3(gz_path)
+            await self._upload_to_s3(dump_path)
 
             # 上传加密的配置文件（S3 key 去掉 backup_temp_ 前缀，保持路径整洁）
             for enc_path in enc_paths:
@@ -225,8 +225,8 @@ class BackupCog(commands.Cog):
             logger.error(f"数据库备份失败: {e}\n{traceback.format_exc()}")
         finally:
             # 无论上传成功与否，都清理本地临时文件，避免占用 VPS 磁盘
-            if gz_path and os.path.exists(gz_path):
-                os.remove(gz_path)
+            if dump_path and os.path.exists(dump_path):
+                os.remove(dump_path)
             for enc_path in enc_paths:
                 if os.path.exists(enc_path):
                     os.remove(enc_path)
