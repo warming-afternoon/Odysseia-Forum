@@ -37,8 +37,8 @@ class TestGlobalRateLimitEngine:
     @pytest.mark.parametrize(
         ("minute_count", "daily_count", "watched", "daily_active", "allowed"),
         [
-            (800, 1500, 0, 0, True),
-            (801, 1500, 1, 0, False),
+            (300, 1500, 0, 0, True),
+            (301, 1500, 1, 0, False),
             (1, 1501, 1, 1, True),
             (2, 1502, 1, 1, True),
         ],
@@ -73,7 +73,7 @@ class TestGlobalRateLimitEngine:
         assert result.daily_count == daily_count
         assert result.watched is bool(watched)
         assert result.daily_watch_active is bool(daily_active)
-        assert result.minute_remaining == max(0, 800 - minute_count)
+        assert result.minute_remaining == max(0, 300 - minute_count)
 
     @pytest.mark.asyncio
     async def test_single_redis_call_contains_all_keys_and_settings(self):
@@ -98,7 +98,7 @@ class TestGlobalRateLimitEngine:
         assert args[4] == "rate_limit:watch:456"
         assert args[5] == 60
         assert 1 <= args[6] <= 25 * 60 * 60
-        assert args[7:] == (800, 1500, 900)
+        assert args[7:] == (300, 1500, 900)
 
     @pytest.mark.asyncio
     async def test_redis_failure_fails_open(self):
@@ -114,7 +114,7 @@ class TestGlobalRateLimitEngine:
 
         assert result.allowed is True
         assert result.watched is False
-        assert result.minute_remaining == 800
+        assert result.minute_remaining == 300
 
     def test_local_day_expires_at_next_server_midnight(self):
         """每日计数使用服务器本地日期并在次日零点过期。"""
@@ -228,7 +228,7 @@ class TestRateLimitMiddlewareCoordination:
                 return_value=GlobalRateLimitResult(
                     allowed=True,
                     minute_count=61,
-                    minute_remaining=739,
+                    minute_remaining=239,
                     reset_after=30,
                     daily_count=1501,
                     watched=True,
@@ -273,7 +273,7 @@ class TestRateLimitMiddlewareCoordination:
         assert sent[0]["status"] == 429
 
     @pytest.mark.asyncio
-    async def test_global_801st_request_returns_429_and_one_log(
+    async def test_global_301st_request_returns_429_and_one_log(
         self, monkeypatch, caplog
     ):
         """全局分钟硬限流不进入下游且只打印一次。"""
@@ -293,7 +293,7 @@ class TestRateLimitMiddlewareCoordination:
             AsyncMock(
                 return_value=GlobalRateLimitResult(
                     allowed=False,
-                    minute_count=801,
+                    minute_count=301,
                     minute_remaining=0,
                     reset_after=20,
                     daily_count=100,

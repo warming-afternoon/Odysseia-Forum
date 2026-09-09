@@ -73,7 +73,7 @@ cp .env.example .env
 | `api.api_key` | string | — | 机机通信 API Key（赛事等接口需要） |
 | `api.rate_limit.search.max_requests` | number | 60 | 搜索接口每窗口最大请求数 |
 | `api.rate_limit.similar.max_requests` | number | 60 | 相似推荐接口每窗口最大请求数 |
-| `api.rate_limit.global.max_requests` | number | 800 | 已登录业务接口每分钟最大请求数 |
+| `api.rate_limit.global.max_requests` | number | 300 | 已登录业务接口每分钟最大请求数 |
 | `api.rate_limit.global.daily_watch_threshold` | number | 1500 | 服务器本地自然日请求数超过该值后启用并持续续期 Watch |
 
 #### 认证 (`auth`)
