@@ -45,6 +45,11 @@ class Thread(SQLModel, table=True):
     title: str
     """帖子标题"""
 
+    native_tag_revision: int = Field(
+        default=0, description="原生标签集合每次变更时递增的修订号，参与标签编辑版本校验"
+    )
+    """原生标签变更修订号，用于识别同步导致的并发变更"""
+
     author_id: int = Field(
         sa_column=Column(BigInteger, index=True),
         description="帖子作者的 Discord ID",

@@ -39,6 +39,8 @@ class TagCacheService:
 
         temp_name_to_ids = defaultdict(list)
         for tag in all_tags:
+            if getattr(tag, "source", "discord") != "discord":
+                continue
             self._id_to_name[tag.id] = tag.name
             temp_name_to_ids[tag.name].append(tag.id)
 

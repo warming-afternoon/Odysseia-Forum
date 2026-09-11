@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.thread_update_service import ThreadUpdateService
+from core.tag_query import load_custom_tags
 from core.viewer_flag_service import ViewerFlagService
 from dto.thread_presentation_context import ThreadPresentationContext
 from dto.thread_update_dto import ThreadUpdateDTO
@@ -41,5 +42,6 @@ class ThreadPresentationService:
         return ThreadPresentationContext(
             viewer_flags=viewer_flags,
             latest_updates=latest_updates,
+            custom_tags=await load_custom_tags(self.session, "thread", [tid for tid, _ in pairs]),
         )
 

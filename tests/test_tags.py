@@ -82,13 +82,14 @@ async def seeded_tag_session(tag_session: AsyncSession) -> AsyncSession:
     for t in threads:
         await tag_session.refresh(t)
     id_map = {t.thread_id: t.id for t in threads}
+    tag_ids = {t.discord_tag_id: t.id for t in await repo.get_all_tags()}
 
     links = [
-        ThreadTagLink(thread_id=id_map[101], tag_id=10),
-        ThreadTagLink(thread_id=id_map[101], tag_id=20),
-        ThreadTagLink(thread_id=id_map[102], tag_id=10),
-        ThreadTagLink(thread_id=id_map[102], tag_id=30),
-        ThreadTagLink(thread_id=id_map[201], tag_id=40),
+        ThreadTagLink(thread_id=id_map[101], tag_id=tag_ids[10]),
+        ThreadTagLink(thread_id=id_map[101], tag_id=tag_ids[20]),
+        ThreadTagLink(thread_id=id_map[102], tag_id=tag_ids[10]),
+        ThreadTagLink(thread_id=id_map[102], tag_id=tag_ids[30]),
+        ThreadTagLink(thread_id=id_map[201], tag_id=tag_ids[40]),
     ]
     tag_session.add_all(links)
     await tag_session.commit()
@@ -105,7 +106,7 @@ class TestGetOrCreateTags:
         tags = await repo.get_or_create_tags({1: "百合", 2: "纯爱"})
         assert len(tags) == 2
         names = {t.name for t in tags}
-        ids = {t.id for t in tags}
+        ids = {t.discord_tag_id for t in tags}
         assert names == {"百合", "纯爱"}
         assert ids == {1, 2}
 
@@ -116,7 +117,7 @@ class TestGetOrCreateTags:
         await repo.get_or_create_tags({1: "新名称"})
 
         tags = await repo.get_all_tags()
-        tag = next(t for t in tags if t.id == 1)
+        tag = next(t for t in tags if t.discord_tag_id == 1)
         assert tag.name == "新名称"
 
     async def test_empty_tags_data(self, tag_session: AsyncSession):
@@ -224,10 +225,11 @@ class TestUpdateTagName:
     async def test_update_existing_tag(self, seeded_tag_session: AsyncSession):
         """更新已存在标签的名称"""
         repo = TagRepository(seeded_tag_session)
-        await repo.update_tag_name(tag_id=10, new_name="百合破坏")
+        old = next(t for t in await repo.get_all_tags() if t.discord_tag_id == 10)
+        await repo.update_tag_name(tag_id=old.id, new_name="百合破坏")
 
         all_tags = list(await repo.get_all_tags())
-        tag = next(t for t in all_tags if t.id == 10)
+        tag = next(t for t in all_tags if t.discord_tag_id == 10)
         assert tag.name == "百合破坏"
 
     async def test_update_nonexistent_tag(self, seeded_tag_session: AsyncSession):

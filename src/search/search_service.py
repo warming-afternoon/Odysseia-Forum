@@ -8,6 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
+from core.tag_query import tag_filters
 from core.thread_repository import ThreadRepository
 from dto.preferences import UserSearchPreferencesDTO
 from dto.search import (
@@ -300,6 +301,10 @@ class SearchService:
                 filters.append(and_(*conditions))
 
             # 标签过滤
+            filters.extend(tag_filters(
+                "thread", Thread.thread_id, query.include_tag_ids,
+                query.exclude_tag_ids, query.tag_logic,
+            ))
             if CleanedQo.resolved_include_tag_ids:
                 if query.tag_logic == "and":
                     # TODO : 考虑精简

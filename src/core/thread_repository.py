@@ -195,6 +195,7 @@ class ThreadRepository:
         statement = (
             select(Thread)
             .where(Thread.thread_id == thread_data["thread_id"])
+            .with_for_update()
             .options(selectinload(Thread.tags))  # type: ignore
         )
         result = await self.session.execute(statement)
@@ -213,6 +214,8 @@ class ThreadRepository:
             tags_to_add_ids = new_tag_ids - current_tag_ids
             tags_to_remove_ids = current_tag_ids - new_tag_ids
             tags_changed = bool(tags_to_add_ids or tags_to_remove_ids)
+            if tags_changed:
+                db_thread.native_tag_revision += 1
 
             # 移除不再需要的标签关联
             if tags_to_remove_ids:

@@ -8,6 +8,7 @@ from sqlmodel import and_, asc, delete, desc, func, select
 
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
 from core.booklist_sort_constants import DEFAULT_SORT_METHOD, DEFAULT_SORT_ORDER
+from core.tag_query import tag_filters
 from dto.search.fts_result_dto import FTSResultDTO
 from dto.open_graph import BooklistShareQueryDTO
 from models import Booklist, BooklistItem, BooklistPublish, UserCollection
@@ -271,11 +272,17 @@ class BooklistRepository:
         sort_order: str = "desc",
         limit: int = 10,
         offset: int = 0,
+        include_tag_ids: list[int] | None = None,
+        exclude_tag_ids: list[int] | None = None,
+        tag_logic: str = "and",
     ) -> Tuple[List[Booklist], int]:
         """
         分页搜索书单（支持 FTS 全文搜索）
         """
         query = select(Booklist)
+        query = query.where(*tag_filters(
+            "booklist", Booklist.id, include_tag_ids, exclude_tag_ids, tag_logic,
+        ))
 
         if owner_id is not None:
             query = query.where(Booklist.owner_id == owner_id)

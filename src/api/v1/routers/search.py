@@ -170,6 +170,8 @@ async def execute_search(
         channel_ids=effective_channel_ids,
         exclude_channel_ids=exclude_channel_ids,
         include_tags=effective_include_tags,
+        include_tag_ids=request.include_tag_ids,
+        exclude_tag_ids=request.exclude_tag_ids,
         exclude_tags=effective_exclude_tags,
         tag_logic=request.tag_logic,
         keywords=final_keywords,

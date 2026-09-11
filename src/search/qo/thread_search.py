@@ -20,6 +20,12 @@ class ThreadSearchQuery:
     include_tags: List[str] = field(default_factory=list)
     """包含的标签名称列表，帖子必须包含这些标签"""
 
+    include_tag_ids: list[int] = field(default_factory=list)
+    """包含的内部标签 ID 列表，可混合原生与自定义标签，按 tag_logic 统一匹配"""
+
+    exclude_tag_ids: list[int] = field(default_factory=list)
+    """排除的内部标签 ID 列表，命中任意原生或自定义标签即排除帖子"""
+
     exclude_tags: List[str] = field(default_factory=list)
     """排除的标签名称列表，帖子不能包含这些标签"""
 

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.follow_repository import ThreadFollowRepository
 from core.thread_repository import ThreadRepository
+from core.tag_repository import TagRepository
 from shared.safe_defer import safe_defer
 from shared.enum import ConstantEnum
 from ThreadManager.batch_update_service import BatchUpdateService
@@ -383,7 +384,12 @@ class ThreadManager(commands.Cog):
                 )
                 return
 
-            tag_map = {tag.id: tag.name for tag in interaction.channel.applied_tags}
+            async with self.session_factory() as tag_session:
+                tags = await TagRepository(tag_session).get_or_create_tags(
+                    {tag.id: tag.name for tag in interaction.channel.applied_tags}
+                )
+                tag_map = {tag.id: tag.name for tag in tags}
+                await tag_session.commit()
 
             view = TagVoteView(
                 thread_id=interaction.channel.id,

@@ -44,7 +44,7 @@ async def list_notifications(
                 user_id, unread_only, limit, offset
             )
         )
-        thread_ids = list({item.thread_id for item in notifications})
+        thread_ids = list({item.thread_id for item in notifications if item.thread_id is not None})
         threads = await ThreadRepository(session).get_threads_by_ids_with_tags(
             thread_ids
         )
@@ -70,6 +70,13 @@ async def list_notifications(
 
         results: list[NotificationItem] = []
         for item in notifications:
+            if item.event_type == "tag_review":
+                results.append(NotificationItem(
+                    id=item.id, type="tag_review", target_type=item.target_type,
+                    target_id=str(item.target_id), proposal_id=str(item.event_source_id),
+                    created_at=item.created_at, read_at=item.read_at,
+                ))
+                continue
             if item.id is None or (thread := thread_map.get(item.thread_id)) is None:
                 continue
             update_response = None
@@ -159,6 +166,15 @@ async def mark_all_read(
         count = await NotificationRepository(session).mark_all_read(
             int(current_user["id"])
         )
+        await session.commit()
+    return MarkReadResponse(marked_read=count)
+
+
+@router.post("/{notification_id}/read", response_model=MarkReadResponse, summary="标记单条通知已读")
+async def mark_one_read(notification_id: int, current_user: dict[str, Any] = Depends(get_current_user)):
+    """读取书单审核等不关联作品的通知时可单独标记。"""
+    async with AsyncSessionFactory() as session:
+        count = await NotificationRepository(session).mark_one_read(int(current_user["id"]), notification_id)
         await session.commit()
     return MarkReadResponse(marked_read=count)
 

@@ -19,28 +19,31 @@ class TagRepository:
 
     async def get_or_create_tags(self, tags_data: dict[int, str]) -> List[Tag]:
         """
-        根据标签ID和名称的字典，获取或创建标签对象。
+        根据 Discord 标签 ID 和名称获取原生实体，返回内部 ID。
         """
         if not tags_data:
             return []
 
         tag_ids = list(tags_data.keys())
-        values_to_insert = [{"id": id, "name": name} for id, name in tags_data.items()]
+        values_to_insert = [
+            {"discord_tag_id": id, "name": name, "source": "discord", "enabled": True}
+            for id, name in tags_data.items()
+        ]
 
         # 使用 INSERT ... ON CONFLICT DO UPDATE 一次性完成创建和更新
         insert_stmt = pg_insert(Tag).values(values_to_insert)
 
         # 构建 ON CONFLICT ... DO UPDATE 子句
-        # 当 'id' 冲突时，更新 'name' 字段
+        # Discord ID 冲突只更新名称，不改变内部主键。
         # 'excluded' 是一个特殊的对象，代表了在 INSERT 语句中试图插入的值
         update_stmt = insert_stmt.on_conflict_do_update(
-            constraint="tag_pkey", set_={"name": insert_stmt.excluded.name}
+            index_elements=[Tag.discord_tag_id], set_={"name": insert_stmt.excluded.name}
         )
 
         await self.session.execute(update_stmt)
 
         # 查询所有相关的标签对象
-        final_statement = select(Tag).where(cast(ColumnElement, Tag.id).in_(tag_ids))
+        final_statement = select(Tag).where(cast(ColumnElement, Tag.discord_tag_id).in_(tag_ids)).execution_options(populate_existing=True)
         result = await self.session.execute(final_statement)
         return list(result.scalars().all())
 

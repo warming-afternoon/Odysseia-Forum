@@ -1,7 +1,8 @@
 """书单相关路由"""
 
 import logging
-from typing import Any, Dict, List, Optional
+from core.tag_query import load_custom_tags
+from typing import Literal, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -254,6 +255,9 @@ async def create_booklist(
     response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_public_booklists(
+    include_tag_ids: list[int] | None = Query(default=None),
+    exclude_tag_ids: list[int] | None = Query(default=None),
+    tag_logic: Literal["and", "or"] = "and",
     owner_id: Optional[int] = Query(None, description="创建者用户ID"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
     included_thread_id: Optional[int] = Query(
@@ -327,6 +331,9 @@ async def list_public_booklists(
 
             service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
+                include_tag_ids=include_tag_ids,
+                exclude_tag_ids=exclude_tag_ids,
+                tag_logic=tag_logic,
                 owner_id=owner_id if resolved_owner_ids is None else None,
                 is_public=True,  # 强制只搜索公开书单
                 is_tournament=is_tournament,
@@ -355,6 +362,7 @@ async def list_public_booklists(
 
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, booklists)
+            custom_tag_map = await load_custom_tags(session, "booklist", [b.id for b in booklists])
 
             # 为无自定义封面的书单批量获取 fallback 封面
             fallback_covers = await _fill_fallback_covers(session, booklists)
@@ -362,6 +370,7 @@ async def list_public_booklists(
             results = []
             for b in booklists:
                 summary = BooklistSummary.model_validate(b, from_attributes=True)
+                summary.custom_tags = custom_tag_map.get(b.id, [])
                 _apply_anonymous_author(summary, b, user_id, author_map)
 
                 if b.id in collected_booklist_ids:
@@ -387,6 +396,9 @@ async def list_public_booklists(
     response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_my_booklists(
+    include_tag_ids: list[int] | None = Query(default=None),
+    exclude_tag_ids: list[int] | None = Query(default=None),
+    tag_logic: Literal["and", "or"] = "and",
     is_public: Optional[bool] = Query(None, description="筛选公开状态 (不传则不筛选)"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
     collect_by_current_user: Optional[bool] = Query(
@@ -463,6 +475,9 @@ async def list_my_booklists(
 
             service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
+                include_tag_ids=include_tag_ids,
+                exclude_tag_ids=exclude_tag_ids,
+                tag_logic=tag_logic,
                 owner_id=owner_id if resolved_owner_ids is None else None,
                 is_public=is_public,
                 keywords=final_keywords,
@@ -500,6 +515,7 @@ async def list_my_booklists(
 
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, booklists)
+            custom_tag_map = await load_custom_tags(session, "booklist", [b.id for b in booklists])
 
             # 为无自定义封面的书单批量获取 fallback 封面
             fallback_covers = await _fill_fallback_covers(session, booklists)
@@ -507,6 +523,7 @@ async def list_my_booklists(
             results = []
             for b in booklists:
                 summary = BooklistSummary.model_validate(b, from_attributes=True)
+                summary.custom_tags = custom_tag_map.get(b.id, [])
                 _apply_anonymous_author(summary, b, user_id, author_map)
 
                 if b.id in collected_booklist_ids:
@@ -565,6 +582,7 @@ async def get_booklist(
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, [booklist])
             detail = BooklistDetail.model_validate(booklist, from_attributes=True)
+            detail.custom_tags = (await load_custom_tags(session, "booklist", [booklist.id])).get(booklist.id, [])
             detail.collected_flag = collected_flag
             _apply_anonymous_author(detail, booklist, user_id, author_map)
 

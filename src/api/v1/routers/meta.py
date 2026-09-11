@@ -5,24 +5,45 @@ import orjson
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 
-from api.v1.dependencies.security import get_current_user
+from api.v1.dependencies.security import get_current_user, require_auth
 from dto.meta import ChannelDetail
 from core.cache_service import CacheService
+from core.user_role_service import UserRoleService
+from dto.meta.user_role import UserRole
 from meta.meta_service import MetaService
 from shared.database import AsyncSessionFactory
 from shared.redis_client import RedisManager
 from shared.enum import ConstantEnum, SearchConfigType
+from shared.tag_error import TagError
 
 logger = logging.getLogger(__name__)
 
 # 全局依赖，将在 bot_main.py 中被注入
 cache_service_instance: Optional[CacheService] = None
 channel_mappings_config: Dict[int, List[Dict]] = {}
+role_config: dict | None = None
 
 
 router = APIRouter(
     prefix="/meta", tags=["元数据"], dependencies=[Depends(get_current_user)]
 )
+
+
+@router.get("/role", response_model=UserRole, summary="查询当前用户的管理身份")
+async def get_user_role(
+    response: Response,
+    current_user: dict = Depends(require_auth),
+) -> UserRole:
+    """独立返回主服务器管理组和 BOT 管理员身份，用于前端控制按钮显示。"""
+    cache_headers = {"Cache-Control": "private, no-store"}
+    response.headers.update(cache_headers)
+    if role_config is None:
+        raise HTTPException(503, "用户身份查询服务尚未初始化", headers=cache_headers)
+    try:
+        # 每次请求创建独立核验实例，避免复用其他用户或过期的身份组数据。
+        return await UserRoleService(role_config).get_role(int(current_user["id"]))
+    except TagError as exc:
+        raise HTTPException(exc.status, exc.detail, headers=cache_headers) from exc
 
 
 def _build_channel_meta_cache_key(

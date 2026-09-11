@@ -45,6 +45,7 @@ from backup.cog import BackupCog
 from shared.api_scheduler import APIScheduler
 from shared.enum import SearchConfigDefaultsInt
 from shared.event_mediator import EventMediator
+from tag.cog import TagCog
 from dto.events import IndexUpdatedEvent
 
 load_dotenv()
@@ -232,6 +233,7 @@ class MyBot(commands.Bot):
                 session_factory=AsyncSessionFactory,
             ),
             BackupCog(bot=self, config=self.config),
+            TagCog(self, AsyncSessionFactory, self.config),
         ]
         await asyncio.gather(
             *(self.add_cog(cog) for cog in cogs_to_load), return_exceptions=True

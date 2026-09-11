@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from dto.thread_update_dto import ThreadUpdateDTO
 from dto.viewer_flag_map import ViewerFlagMap
@@ -9,5 +9,11 @@ class ThreadPresentationContext:
     """保存批量构建作品响应所需的附加数据。"""
 
     viewer_flags: ViewerFlagMap
+    """按帖子组织的查看者收藏、关注及未读等状态"""
+
     latest_updates: dict[int, ThreadUpdateDTO]
+    """以 Discord 帖子 ID 为键的最新作品更新信息"""
+
+    custom_tags: dict[int, list[dict]] = field(default_factory=dict)
+    """以 Discord 帖子 ID 为键的当前自定义标签列表，包含分类、绑定轮次及正负票数"""
 

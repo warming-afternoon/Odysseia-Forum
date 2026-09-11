@@ -26,6 +26,7 @@ import booklist.booklist_service as booklist_service_module
 from core.api_cache_service import ApiCacheService
 from core.impression_cache_service import ImpressionCacheService
 from core.tag_cache_service import TagCacheService
+from tag.tag_runtime import create_tag_mediator
 from search.similar_threads_cache_service import SimilarThreadsCacheService
 from shared.enum import AbyssDefaults, SearchConfigDefaultsInt
 from api.v1.routers import (
@@ -58,11 +59,13 @@ def _inject_api_dependencies(
     """向 API 路由模块注入运行期依赖。"""
 
     main_guild_id = _get_main_guild_id_from_config(config)
+    tags_api.event_mediator = create_tag_mediator(AsyncSessionFactory, config)
 
     preferences_api.async_session_factory = AsyncSessionFactory
     preferences_api.main_guild_id = main_guild_id
 
     meta_api.cache_service_instance = cache_service
+    meta_api.role_config = {**config, "main_guild_id": main_guild_id}
 
     search_api.async_session_factory = AsyncSessionFactory
     search_api.cache_service_instance = cache_service

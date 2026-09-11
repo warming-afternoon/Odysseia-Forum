@@ -17,6 +17,8 @@ from sqlmodel import SQLModel
 
 import os
 import sys
+import re
+from sqlalchemy import text
 
 # 确保 src/ 在 Python 路径中
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
@@ -50,15 +52,21 @@ async def db_session_factory(
     redis_client,  # noqa: ARG001 — 确保 Redis 已初始化
 ) -> AsyncGenerator[async_sessionmaker[AsyncSession], None]:
     """函数级别的 PostgreSQL 数据库引擎 + 会话工厂（每测试独立）。"""
+    schema = os.environ.get("TEST_DB_SCHEMA")
+    if schema and not re.fullmatch(r"test_[a-z0-9_]+", schema):
+        raise ValueError("TEST_DB_SCHEMA 必须是 test_ 前缀的安全测试 schema")
     engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
         pool_size=5,
         max_overflow=5,
         pool_pre_ping=True,
+        connect_args={"server_settings": {"search_path": schema}} if schema else {},
     )
 
     async with engine.begin() as conn:
+        if schema:
+            await conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{schema}"'))
         await conn.run_sync(SQLModel.metadata.create_all)
 
     factory = async_sessionmaker(engine, expire_on_commit=True, class_=AsyncSession)
@@ -66,7 +74,10 @@ async def db_session_factory(
 
     # 清空所有表，确保每个测试独立
     async with engine.begin() as conn:
-        for table in reversed(SQLModel.metadata.sorted_tables):
-            await conn.execute(table.delete())
+        if schema:
+            await conn.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        else:
+            for table in reversed(SQLModel.metadata.sorted_tables):
+                await conn.execute(table.delete())
 
     await engine.dispose()

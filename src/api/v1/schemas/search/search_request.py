@@ -21,6 +21,12 @@ class SearchRequest(BaseModel):
     include_tags: List[str] = Field(
         default_factory=list, description="必须包含的标签名列表"
     )
+    include_tag_ids: list[int] = Field(default_factory=list, max_length=100, description="包含的内部标签 ID，可混合原生与自定义标签")
+    """包含的内部标签 ID 列表，可混合原生与自定义标签，按 tag_logic 统一匹配"""
+
+    exclude_tag_ids: list[int] = Field(default_factory=list, max_length=100, description="排除的内部标签 ID，可混合原生与自定义标签")
+    """排除的内部标签 ID 列表，命中任意标签即排除帖子"""
+
     exclude_tags: List[str] = Field(
         default_factory=list, description="必须排除的标签名列表"
     )

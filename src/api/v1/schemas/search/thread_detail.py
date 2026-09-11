@@ -62,6 +62,9 @@ class ThreadDetail(BaseModel):
     tags: List[str] = Field(default_factory=list, description="帖子关联的标签列表")
     """帖子关联的标签列表"""
 
+    custom_tags: list[dict] = Field(default_factory=list, description="帖子当前生效的自定义标签列表，包含内部 ID、标准名、分类、绑定轮次及正负票数")
+    """帖子当前生效的自定义标签及票数；软删除标签和已结束绑定不返回"""
+
     virtual_tags: List[str] = Field(
         default_factory=list, description="帖子匹配的虚拟映射标签名列表"
     )
