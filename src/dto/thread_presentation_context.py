@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 
 from dto.thread_update_dto import ThreadUpdateDTO
+from dto.custom_tag_binding_response import CustomTagBindingResponse
 from dto.viewer_flag_map import ViewerFlagMap
 
 
@@ -14,6 +15,6 @@ class ThreadPresentationContext:
     latest_updates: dict[int, ThreadUpdateDTO]
     """以 Discord 帖子 ID 为键的最新作品更新信息"""
 
-    custom_tags: dict[int, list[dict]] = field(default_factory=dict)
+    custom_tags: dict[int, list[CustomTagBindingResponse]] = field(default_factory=dict)
     """以 Discord 帖子 ID 为键的当前自定义标签列表，包含分类、绑定轮次及正负票数"""
 

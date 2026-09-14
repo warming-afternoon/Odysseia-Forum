@@ -1,6 +1,7 @@
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+from shared.request_id import PositiveRequestId
 
 
 class TagRelationRequest(BaseModel):
@@ -8,8 +9,7 @@ class TagRelationRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    target_tag_id: int = Field(
-        gt=0,
+    target_tag_id: PositiveRequestId = Field(
         description="关系目标标签的内部 ID，不是 Discord 标签 ID；包含关系中表示父标签",
     )
     """关系目标标签的内部 ID；包含关系中为父标签"""

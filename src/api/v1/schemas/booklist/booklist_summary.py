@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from api.v1.schemas.search.author_detail import AuthorDetail
+from dto.custom_tag_binding_response import CustomTagBindingResponse
 from shared.utc_datetime import UTCDateTime
 
 
@@ -18,7 +19,7 @@ class BooklistSummary(BaseModel):
     title: str = Field(description="书单标题")
     """书单标题"""
 
-    custom_tags: list[dict] = Field(default_factory=list, description="书单自身当前生效的自定义标签列表，包含内部 ID、标准名、分类、绑定轮次及正负票数")
+    custom_tags: list[CustomTagBindingResponse] = Field(default_factory=list, description="书单自身当前生效的自定义标签列表，包含内部 ID、标准名、分类、绑定轮次及正负票数")
     """书单自身当前生效的自定义标签及票数，不继承单内帖子的标签"""
 
     description: Optional[str] = Field(None, description="书单简介")

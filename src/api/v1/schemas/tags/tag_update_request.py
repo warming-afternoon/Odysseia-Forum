@@ -1,30 +1,33 @@
-from typing import Self
+from typing import Annotated, Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
+from pydantic.json_schema import SkipJsonSchema
+
+
+def remove_null_defaults(schema: dict[str, Any]) -> None:
+    """移除仅用于内部缺省占位的 null 默认值。"""
+    for field in schema.get("properties", {}).values():
+        field.pop("default", None)
 
 
 class TagUpdateRequest(BaseModel):
     """部分更新名称、分类或启用状态，禁止空更新与显式空值。"""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", json_schema_extra=remove_null_defaults)
 
-    name: str | None = Field(
+    name: Annotated[str, Field(min_length=1, max_length=100)] | SkipJsonSchema[None] = Field(
         default=None,
-        min_length=1,
-        max_length=100,
         description="新的标签标准名，不含分类前缀；未传保持原值，不允许显式 null",
     )
     """新的标签标准名；未传保持原值，不允许显式 null"""
 
-    category: int | None = Field(
+    category: Annotated[int, Field(ge=1, le=7)] | SkipJsonSchema[None] = Field(
         default=None,
-        ge=1,
-        le=7,
         description="分类枚举：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；未传保持原值，不允许显式 null",
     )
     """新的分类整数值；未传保持原值，不允许显式 null"""
 
-    enabled: StrictBool | None = Field(
+    enabled: StrictBool | SkipJsonSchema[None] = Field(
         default=None,
         description="true=启用，false=停用；未传保持原值，不允许显式 null；恢复软删除标签需使用恢复接口",
     )

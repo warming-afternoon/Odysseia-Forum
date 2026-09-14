@@ -1,7 +1,7 @@
 import logging
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from api.v1.dependencies.security import get_current_user, require_auth
@@ -20,8 +20,17 @@ from api.v1.schemas.tags.tag_vote_request import TagVoteRequest
 from dto.events.tag_command import TagCommand
 from shared.enum.tag_category import TagCategory
 from shared.tag_error import TagError
+from shared.request_id import PositiveRequestId, RequestId
 
 from shared.event_mediator import EventMediator
+
+from api.v1.schemas.tags.tag_response import TagResponse
+from api.v1.schemas.tags.tag_category_response import TagCategoryResponse
+from api.v1.schemas.tags.tag_pool_item_response import TagPoolItemResponse
+from api.v1.schemas.tags.tag_relation_response import TagRelationResponse
+from api.v1.schemas.tags.tag_proposal_response import TagProposalResponse
+from api.v1.schemas.tags.tag_audit_response import TagAuditResponse
+from api.v1.schemas.tags.target_tags_response import TargetTagsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -80,13 +89,13 @@ async def dispatch(action: str, user: dict[str, Any], **payload: Any) -> Any:
         raise HTTPException(exc.status, exc.detail) from exc
 
 
-@router.get("/categories")
+@router.get("/categories", response_model=list[TagCategoryResponse])
 async def categories(user=Depends(require_auth)):
     """返回稳定分类枚举。"""
     return [{"value": item.value, "name": item.name} for item in TagCategory]
 
 
-@router.get("")
+@router.get("", response_model=list[TagPoolItemResponse])
 async def pool(
     q: str = Query(default="", max_length=200),
     category: int | None = Query(default=None, ge=1, le=7),
@@ -107,21 +116,21 @@ async def pool(
     )
 
 
-@router.get("/relations")
+@router.get("/relations", response_model=list[TagRelationResponse])
 async def relations(user=Depends(require_auth)):
     """提供全部直接关系边，层级由前端计算。"""
     return await dispatch("relations", user)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, summary="创建标签")
+@router.post("", status_code=status.HTTP_201_CREATED, summary="创建标签", response_model=TagResponse)
 async def create_tag(body: TagCreateRequest, user=Depends(require_auth)):
     """BOT 管理员创建一个标准标签。"""
     return await dispatch("manage", user, operation="create", **body.model_dump())
 
 
-@router.patch("/{tag_id}", summary="修改标签")
+@router.patch("/{tag_id}", summary="修改标签", response_model=TagResponse)
 async def update_tag(
-    body: TagUpdateRequest, tag_id: int = Path(gt=0), user=Depends(require_auth)
+    body: TagUpdateRequest, tag_id: PositiveRequestId, user=Depends(require_auth)
 ):
     """原子修改名称、分类及启用状态。"""
     return await dispatch(
@@ -133,21 +142,21 @@ async def update_tag(
     )
 
 
-@router.delete("/{tag_id}", summary="软删除标签")
-async def delete_tag(tag_id: int = Path(gt=0), user=Depends(require_auth)):
+@router.delete("/{tag_id}", summary="软删除标签", response_model=TagResponse)
+async def delete_tag(tag_id: PositiveRequestId, user=Depends(require_auth)):
     """软删除标签并保留治理历史。"""
     return await dispatch("manage", user, operation="delete", tag_id=tag_id)
 
 
-@router.post("/{tag_id}/restore", summary="恢复标签")
-async def restore_tag(tag_id: int = Path(gt=0), user=Depends(require_auth)):
+@router.post("/{tag_id}/restore", summary="恢复标签", response_model=TagResponse)
+async def restore_tag(tag_id: PositiveRequestId, user=Depends(require_auth)):
     """恢复标签实体，不恢复旧绑定。"""
     return await dispatch("manage", user, operation="restore", tag_id=tag_id)
 
 
-@router.put("/{tag_id}/aliases", summary="替换标签别名")
+@router.put("/{tag_id}/aliases", summary="替换标签别名", response_model=TagResponse)
 async def replace_aliases(
-    body: TagAliasesRequest, tag_id: int = Path(gt=0), user=Depends(require_auth)
+    body: TagAliasesRequest, tag_id: PositiveRequestId, user=Depends(require_auth)
 ):
     """完整替换别名集合。"""
     return await dispatch(
@@ -155,9 +164,9 @@ async def replace_aliases(
     )
 
 
-@router.post("/{tag_id}/relations", summary="添加标签关系")
+@router.post("/{tag_id}/relations", summary="添加标签关系", response_model=TagResponse)
 async def add_relation(
-    body: TagRelationRequest, tag_id: int = Path(gt=0), user=Depends(require_auth)
+    body: TagRelationRequest, tag_id: PositiveRequestId, user=Depends(require_auth)
 ):
     """添加包含或互斥关系。"""
     return await dispatch(
@@ -165,11 +174,11 @@ async def add_relation(
     )
 
 
-@router.delete("/{tag_id}/relations/{kind}/{target_tag_id}", summary="删除标签关系")
+@router.delete("/{tag_id}/relations/{kind}/{target_tag_id}", summary="删除标签关系", response_model=TagResponse)
 async def remove_relation(
     kind: Literal["implies", "excludes"],
-    tag_id: int = Path(gt=0),
-    target_tag_id: int = Path(gt=0),
+    tag_id: PositiveRequestId,
+    target_tag_id: PositiveRequestId,
     user=Depends(require_auth),
 ):
     """删除指定的直接标签关系。"""
@@ -183,16 +192,16 @@ async def remove_relation(
     )
 
 
-@router.get("/{target_type}/{target_id}")
-async def read(target_type: Target, target_id: int, user=Depends(require_auth)):
+@router.get("/{target_type}/{target_id}", response_model=TargetTagsResponse)
+async def read(target_type: Target, target_id: RequestId, user=Depends(require_auth)):
     """读取原生标签、自定义标签、票数和版本。"""
     return await dispatch("read", user, target_type=target_type, target_id=target_id)
 
 
-@router.put("/{target_type}/{target_id}")
+@router.put("/{target_type}/{target_id}", response_model=TargetTagsResponse)
 async def replace(
     target_type: Target,
-    target_id: int,
+    target_id: RequestId,
     body: TagSelectionRequest,
     user=Depends(require_auth),
 ):
@@ -206,10 +215,10 @@ async def replace(
     )
 
 
-@router.post("/{target_type}/{target_id}/proposals")
+@router.post("/{target_type}/{target_id}/proposals", response_model=TagProposalResponse)
 async def propose(
     target_type: Target,
-    target_id: int,
+    target_id: RequestId,
     body: TagProposalRequest,
     user=Depends(require_auth),
 ):
@@ -223,10 +232,10 @@ async def propose(
     )
 
 
-@router.get("/{target_type}/{target_id}/proposals")
+@router.get("/{target_type}/{target_id}/proposals", response_model=list[TagProposalResponse])
 async def proposals(
     target_type: Target,
-    target_id: int,
+    target_id: RequestId,
     review_queue: bool = False,
     offset: int = Query(default=0, ge=0),
     user=Depends(require_auth),
@@ -242,11 +251,11 @@ async def proposals(
     )
 
 
-@router.put("/{target_type}/{target_id}/proposals/{proposal_id}")
+@router.put("/{target_type}/{target_id}/proposals/{proposal_id}", response_model=TagProposalResponse)
 async def review(
     target_type: Target,
-    target_id: int,
-    proposal_id: int,
+    target_id: RequestId,
+    proposal_id: RequestId,
     body: TagReviewRequest,
     user=Depends(require_auth),
 ):
@@ -261,11 +270,11 @@ async def review(
     )
 
 
-@router.put("/{target_type}/{target_id}/votes/{binding_id}")
+@router.put("/{target_type}/{target_id}/votes/{binding_id}", response_model=TargetTagsResponse)
 async def vote(
     target_type: Target,
-    target_id: int,
-    binding_id: int,
+    target_id: RequestId,
+    binding_id: RequestId,
     body: TagVoteRequest,
     user=Depends(require_auth),
 ):
@@ -280,10 +289,10 @@ async def vote(
     )
 
 
-@router.get("/{target_type}/{target_id}/audit")
+@router.get("/{target_type}/{target_id}/audit", response_model=list[TagAuditResponse])
 async def audit(
     target_type: Literal["thread", "booklist", "tag"],
-    target_id: int,
+    target_id: RequestId,
     offset: int = Query(default=0, ge=0),
     user=Depends(require_auth),
 ):

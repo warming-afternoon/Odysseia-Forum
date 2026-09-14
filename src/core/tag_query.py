@@ -1,6 +1,7 @@
 from sqlalchemy import and_, or_, select
 
 from models import Tag, Thread, ThreadTagLink
+from dto.custom_tag_binding_response import CustomTagBindingResponse
 from models.custom_tag_binding import CustomTagBinding
 from shared.enum.tag_category import TagCategory
 
@@ -48,7 +49,7 @@ def tag_filters(kind, target_column, included, excluded, logic="and"):
     return conditions
 
 
-async def load_custom_tags(session, kind, target_ids):
+async def load_custom_tags(session, kind, target_ids) -> dict[int, list[CustomTagBindingResponse]]:
     """批量读取标签展示数据，避免逐目标查询和缓存陈旧票数。"""
     if not target_ids:
         return {}
@@ -63,19 +64,19 @@ async def load_custom_tags(session, kind, target_ids):
         )
         .order_by(Tag.category, Tag.name)
     )
-    result = {}
+    result: dict[int, list[CustomTagBindingResponse]] = {}
     for binding, tag in (await session.execute(statement)).all():
         result.setdefault(binding.target_id, []).append(
-            {
-                "id": str(tag.id),
-                "name": tag.name,
-                "category": tag.category,
-                "category_name": TagCategory(tag.category).name,
-                "source": "custom",
-                "enabled": tag.enabled,
-                "binding_id": str(binding.id),
-                "upvotes": binding.upvotes,
-                "downvotes": binding.downvotes,
-            }
+            CustomTagBindingResponse(
+                id=str(tag.id),
+                name=tag.name,
+                category=tag.category,
+                category_name=TagCategory(tag.category).name,
+                source="custom",
+                enabled=tag.enabled,
+                binding_id=str(binding.id),
+                upvotes=binding.upvotes,
+                downvotes=binding.downvotes,
+            )
         )
     return result

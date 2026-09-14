@@ -1,4 +1,5 @@
 from pydantic import BaseModel, Field
+from shared.request_id import RequestId
 
 
 class TagSelectionRequest(BaseModel):
@@ -9,7 +10,7 @@ class TagSelectionRequest(BaseModel):
     )
     """GET 返回的标签集合版本标记，原样传回用于并发校验"""
 
-    tag_ids: list[int] = Field(
+    tag_ids: list[RequestId] = Field(
         max_length=100,
         description="目标完整自定义标签内部 ID 集合，不含原生标签；未传入的现有自定义标签将解绑，空列表表示全部解绑",
     )

@@ -40,6 +40,7 @@ from dto.booklist_items_sync_dto import BooklistItemsSyncDTO
 from models import Author, BooklistItem
 from shared.database import AsyncSessionFactory
 from shared.keyword_parser import parse_search_keywords
+from shared.request_id import RequestId
 from shared.thread_link_parser import ThreadLinkParser
 from sqlmodel import func, select
 from shared.enum import CollectionType
@@ -255,8 +256,8 @@ async def create_booklist(
     response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_public_booklists(
-    include_tag_ids: list[int] | None = Query(default=None),
-    exclude_tag_ids: list[int] | None = Query(default=None),
+    include_tag_ids: list[RequestId] | None = Query(default=None),
+    exclude_tag_ids: list[RequestId] | None = Query(default=None),
     tag_logic: Literal["and", "or"] = "and",
     owner_id: Optional[int] = Query(None, description="创建者用户ID"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
@@ -396,8 +397,8 @@ async def list_public_booklists(
     response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_my_booklists(
-    include_tag_ids: list[int] | None = Query(default=None),
-    exclude_tag_ids: list[int] | None = Query(default=None),
+    include_tag_ids: list[RequestId] | None = Query(default=None),
+    exclude_tag_ids: list[RequestId] | None = Query(default=None),
     tag_logic: Literal["and", "or"] = "and",
     is_public: Optional[bool] = Query(None, description="筛选公开状态 (不传则不筛选)"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),

@@ -7,7 +7,7 @@
 ## 公共约定
 
 - 所有接口位于 `/v1/tags`，需要现有登录认证。
-- 新接口的 ID 响应均为十进制字符串；提交 ID 可以使用字符串。前端不要使用 JavaScript Number 保存 BIGINT ID。
+- 新接口的 ID 响应均为十进制字符串；请求 ID 在 OpenAPI 中声明为 `string | integer`，支持十进制字符串或整数，后端在进入业务层前统一转换为整数。这一约定同样适用于路径 ID、`tag_ids`、帖子搜索及书单筛选的 `include_tag_ids` / `exclude_tag_ids` 数组。前端请使用字符串保存和提交 BIGINT ID，避免 JavaScript Number 丢失精度；非法 ID 返回 422。
 - `target_type` 为 `thread` 或 `booklist`。
 - 时间均为 UTC；七天期限从提议提交时开始，不依赖通知是否成功。
 - 分类：1 癖好、2 作品、3 角色、4 特质、5 情节、6 背景、7 玩法。
@@ -61,7 +61,7 @@
 {"name":"爱丽丝(BA)","category":3,"aliases":["Alice","アリス"]}
 ```
 
-修改 `PATCH /v1/tags/123`，未传字段保持不变。名称、分类和启用状态在同一事务中修改：
+修改 `PATCH /v1/tags/123`，未传字段保持不变。`name`、`category`、`enabled` 均可省略，但传入时不能为 `null`；空对象 `{}` 也会被拒绝，返回 422。`{"enabled":false}` 是有效的停用请求。OpenAPI 中这些字段为可选且不可为 null。名称、分类和启用状态在同一事务中修改：
 
 ```json
 {"name":"爱丽丝(蔚蓝档案)","enabled":false}
