@@ -885,9 +885,12 @@ async def add_threads_to_booklist(
 
     - **booklist_id**: 书单ID
     - **request body**: 包含一个`items`列表，每个元素包含:
-        - **thread_id**: 帖子ID (必填)
+        - **thread_id**: 帖子ID (必填)，支持整数或数字字符串，范围为 1 至 9223372036854775807
         - **comment**: 推荐语 (可选)
         - **display_order**: 排序序号 (可选)
+
+    每个帖子 ID 应作为独立的 items 条目提交。任一 ID 非法时整批返回 HTTP 422，
+    detail[].msg 提供中文提示，detail[].loc 定位具体条目；超范围时提示检查遗漏逗号。
     """
     try:
         user_id = int(current_user["id"])
