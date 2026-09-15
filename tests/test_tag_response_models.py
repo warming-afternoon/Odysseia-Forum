@@ -52,8 +52,8 @@ def test_all_tag_routes_have_response_schema():
     items = schema["components"]["schemas"]["TargetTagsResponse"]["properties"]["tags"][
         "items"
     ]
-    assert items["discriminator"]["propertyName"] == "source"
-    assert set(items["discriminator"]["mapping"]) == {"discord", "custom"}
+    assert items["discriminator"]["propertyName"] == "binding_source"
+    assert set(items["discriminator"]["mapping"]) == {"discord_sync", "local"}
 
 
 @pytest.mark.asyncio
@@ -99,9 +99,11 @@ async def test_snapshot_preserves_native_and_custom_fields(
         category=None,
         category_name=None,
         readonly=True,
+        binding_source="discord_sync",
     )
     custom = dict(
-        TAG, readonly=False, binding_id=BIG_ID, upvotes=3, downvotes=1, my_vote=-1
+        TAG, readonly=False,
+        binding_source="local", binding_id=BIG_ID, upvotes=3, downvotes=1, my_vote=-1
     )
     expected = {"version": "v", "tags": [native, custom]}
     mediator.request.return_value = expected
@@ -124,6 +126,7 @@ async def test_proposal_states_and_utc(response_client, state):
     value = {
         "id": BIG_ID,
         "tag_id": BIG_ID,
+        "tag_name": "测试",
         "status": state,
         "reason": None if state == "pending" else "review",
         "created_at": datetime(2026, 9, 14),

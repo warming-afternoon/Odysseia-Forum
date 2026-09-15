@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, ForeignKey
+from sqlalchemy import BigInteger, Column
 from sqlmodel import Field, SQLModel
 
 
@@ -8,7 +8,7 @@ class TagAlias(SQLModel, table=True):
     __tablename__ = "tag_alias"
 
     tag_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("tag.id"), primary_key=True),
+        sa_column=Column(BigInteger, primary_key=True),
         description="别名所属标准标签的内部 ID，与别名文本组成联合主键",
     )
     """别名所属标准标签的内部 ID，与别名文本组成联合主键"""

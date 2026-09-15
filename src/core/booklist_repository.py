@@ -1,3 +1,4 @@
+from core.tag_binding_repository import TagBindingRepository
 import logging
 from typing import List, Optional, Set, Tuple
 
@@ -231,6 +232,7 @@ class BooklistRepository:
         )
         await self.session.execute(statement_publish)
         # 删除书单
+        await TagBindingRepository(self.session).delete_targets("booklist", [booklist_id])
         statement = delete(Booklist).where(Booklist.id == booklist_id)  # type: ignore
         result = await self.session.execute(statement)
         await self.session.commit()

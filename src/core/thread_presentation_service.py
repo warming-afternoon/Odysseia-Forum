@@ -42,6 +42,6 @@ class ThreadPresentationService:
         return ThreadPresentationContext(
             viewer_flags=viewer_flags,
             latest_updates=latest_updates,
-            custom_tags=await load_custom_tags(self.session, "thread", [tid for tid, _ in pairs]),
+            custom_tags=await load_custom_tags(self.session, "thread", [getattr(t, "id") for t in threads]),
         )
 

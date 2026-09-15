@@ -72,7 +72,7 @@ class ThreadDetailBuilder:
             )
 
         return ThreadDetail(
-            custom_tags=presentation_context.custom_tags.get(thread.thread_id, []) if presentation_context else [],
+            custom_tags=presentation_context.custom_tags.get(thread.id, []) if presentation_context else [],
             thread_id=thread.thread_id,
             guild_id=thread.guild_id,
             channel_id=thread.channel_id,
@@ -88,7 +88,7 @@ class ThreadDetailBuilder:
             display_count=thread.display_count,
             first_message_excerpt=thread.first_message_excerpt,
             thumbnail_urls=thread.thumbnail_urls or [],
-            tags=[tag.name for tag in thread.tags]
+            tags=[tag.name for tag in thread.tags if tag.source == "discord"]
             if getattr(thread, "tags", None)
             else [],
             virtual_tags=list(set(matched_virtual)),

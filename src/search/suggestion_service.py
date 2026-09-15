@@ -1,3 +1,4 @@
+from models.tag_alias import TagAlias
 import re
 from typing import List, Optional
 
@@ -110,11 +111,17 @@ class SuggestionService:
             )
         booklist_stmt = booklist_stmt.order_by(Booklist.view_count.desc()).limit(limit)  # type: ignore[attr-defined]
 
+        escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        tag_stmt = select(Tag).where(Tag.deleted_at.is_(None), Tag.enabled.is_(True),
+            or_(Tag.name.ilike(pattern), Tag.id.in_(select(TagAlias.tag_id).where(TagAlias.name.ilike(pattern)))))
+        tag_res = await self.session.execute(tag_stmt.order_by(Tag.name, Tag.category, Tag.id).limit(limit))
         author_res = await self.session.execute(author_stmt)
         thread_res = await self.session.execute(thread_stmt)
         booklist_res = await self.session.execute(booklist_stmt)
 
         return SuggestionResultDTO(
+            tags=list(tag_res.scalars().all()),
             authors=list(author_res.scalars().all()),
             threads=list(thread_res.scalars().all()),
             booklists=list(booklist_res.scalars().all()),

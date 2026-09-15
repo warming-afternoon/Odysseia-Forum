@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, ForeignKey, Index, text
+from sqlalchemy import BigInteger, Column, Index, text
 from sqlmodel import Field, SQLModel
 
 from shared.time_utils import utc_now
@@ -12,7 +12,7 @@ class TagProposal(SQLModel, table=True):
     __tablename__ = "tag_proposal"
 
     id: int | None = Field(
-        default=None, primary_key=True, description="标签添加申请的内部主键"
+        default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True), description="标签添加申请的内部主键"
     )
     """标签添加申请的内部主键"""
 
@@ -23,12 +23,12 @@ class TagProposal(SQLModel, table=True):
 
     target_id: int = Field(
         sa_column=Column(BigInteger, nullable=False, index=True),
-        description="申请目标 ID：帖子使用 Discord 帖子 ID，书单使用内部书单 ID",
+        description="申请目标 ID：帖子使用内部帖子 ID，书单使用内部书单 ID",
     )
-    """申请目标 ID：帖子使用 Discord 帖子 ID，书单使用内部书单 ID"""
+    """申请目标 ID：帖子使用内部帖子 ID，书单使用内部书单 ID"""
 
     tag_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("tag.id"), nullable=False),
+        sa_column=Column(BigInteger, nullable=False),
         description="申请添加的自定义标签内部 ID",
     )
     """申请添加的自定义标签内部 ID"""

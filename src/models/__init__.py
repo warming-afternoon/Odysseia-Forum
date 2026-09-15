@@ -11,7 +11,6 @@ from models.mutex_tag_group import MutexTagGroup
 from models.mutex_tag_rule import MutexTagRule
 from models.thread_tag_link import ThreadTagLink
 from models.tag import Tag
-from models.tag_vote import TagVote
 from models.thread import Thread
 from models.thread_follow import ThreadFollow
 from models.user_collection import UserCollection
@@ -22,18 +21,18 @@ from models.notification import Notification
 from models.thread_update import ThreadUpdate
 from models.tag_alias import TagAlias
 from models.tag_relation import TagRelation
-from models.custom_tag_binding import CustomTagBinding
-from models.custom_tag_vote import CustomTagVote
+from models.tag_binding import TagBinding
+from models.tag_vote import TagVote
 from models.tag_proposal import TagProposal
 from models.tag_proposal_block import TagProposalBlock
 from models.operation_log import OperationLog
 from models.tag_notification_task import TagNotificationTask
 
 __all__ = [
+    "TagAlias", "TagRelation", "TagBinding", "TagVote", "TagProposal", "TagProposalBlock", "OperationLog", "TagNotificationTask",
     "ThreadTagLink",
     "Tag",
     "Thread",
-    "TagVote",
     "UserSearchPreferences",
     "UserUpdatePreference",
     "MutexTagGroup",

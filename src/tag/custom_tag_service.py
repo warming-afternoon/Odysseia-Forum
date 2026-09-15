@@ -6,9 +6,9 @@ from sqlalchemy import func, or_, select, text
 
 from core.tag_access_service import TagAccessService
 from core.tag_data_repository import TagDataRepository
-from models import Booklist, Tag, Thread, ThreadTagLink
-from models.custom_tag_binding import CustomTagBinding
-from models.custom_tag_vote import CustomTagVote
+from models import Booklist, Tag, Thread
+from models.tag_binding import TagBinding
+from models.tag_vote import TagVote
 from models.operation_log import OperationLog
 from models.tag_alias import TagAlias
 from models.tag_notification_task import TagNotificationTask
@@ -76,6 +76,7 @@ class CustomTagService:
             if tag:
                 detail["tag_name"] = tag.name
                 detail["category"] = tag.category
+        detail["target_id_kind"] = "internal"
         await self.repo(OperationLog).add(
             type=action,
             actor_id=actor,
@@ -91,21 +92,22 @@ class CustomTagService:
         if kind not in ("thread", "booklist"):
             raise TagError("invalid_target", "目标类型无效", 422)
         model = Thread if kind == "thread" else Booklist
-        key = Thread.thread_id if kind == "thread" else Booklist.id
+        key = (Thread.id if payload.get("_internal_target") else Thread.thread_id) if kind == "thread" else Booklist.id
         target = await self.repo(model).one(key == target_id, lock=True)
         if target is None:
             raise TagError("not_found", "目标不存在", 404)
         allowed = await self.access.access(
             actor, kind, target, manage=manage, audit=audit
         )
-        return kind, target_id, target, allowed
+        return kind, target.id, target, allowed
 
     async def bindings(self, kind, target_id):
         """读取目标的全部生效绑定轮次。"""
-        rows = await self.repo(CustomTagBinding).rows(
-            CustomTagBinding.target_type == kind,
-            CustomTagBinding.target_id == target_id,
-            CustomTagBinding.ended_at.is_(None),
+        rows = await self.repo(TagBinding).rows(
+            TagBinding.target_type == kind,
+            TagBinding.target_id == target_id,
+            TagBinding.ended_at.is_(None),
+            TagBinding.binding_source == "local",
         )
         return {b.tag_id: b for b in rows}
 
@@ -115,9 +117,13 @@ class CustomTagService:
             return []
         statement = (
             select(Tag)
-            .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id)
+            .join(TagBinding, Tag.id == TagBinding.tag_id)
             .where(
-                ThreadTagLink.thread_id == target.id,
+                TagBinding.target_type == "thread",
+                TagBinding.target_id == target.id,
+                TagBinding.binding_source == "discord_sync",
+                TagBinding.ended_at.is_(None),
+                Tag.deleted_at.is_(None),
                 Tag.source == "discord",
             )
         )
@@ -129,9 +135,9 @@ class CustomTagService:
         native = await self.native_tags(kind, target)
         tags = await self.repo(Tag).rows(Tag.id.in_(bindings), Tag.deleted_at.is_(None))
         self.tag_cache.update({tag.id: tag for tag in tags})
-        votes = await self.repo(CustomTagVote).rows(
-            CustomTagVote.binding_id.in_([b.id for b in bindings.values()]),
-            CustomTagVote.user_id == actor,
+        votes = await self.repo(TagVote).rows(
+            TagVote.binding_id.in_([b.id for b in bindings.values()]),
+            TagVote.user_id == actor,
         )
         mine = {v.binding_id: v.vote for v in votes}
         version_data = sorted(
@@ -140,24 +146,25 @@ class CustomTagService:
         history = (
             await self.session.execute(
                 select(
-                    func.max(CustomTagBinding.id),
-                    func.max(CustomTagBinding.created_at),
-                    func.max(CustomTagBinding.ended_at),
+                    func.max(TagBinding.id),
+                    func.max(TagBinding.created_at),
+                    func.max(TagBinding.ended_at),
                 ).where(
-                    CustomTagBinding.target_type == kind,
-                    CustomTagBinding.target_id == target_id,
+                    TagBinding.target_type == kind,
+                    TagBinding.target_id == target_id,
                 )
             )
         ).one()
         version_data.append(str(tuple(history)))
         version_data.append(str(getattr(target, "native_tag_revision", 0)))
-        result = [dict(self.tag_data(t), readonly=True) for t in native]
+        result = [dict(self.tag_data(t), readonly=True, binding_source="discord_sync") for t in native]
         for tag in tags:
             binding = bindings[tag.id]
             result.append(
                 dict(
                     self.tag_data(tag),
                     readonly=False,
+                    binding_source="local",
                     binding_id=str(binding.id),
                     upvotes=binding.upvotes,
                     downvotes=binding.downvotes,
@@ -176,7 +183,7 @@ class CustomTagService:
 
     async def validate(self, kind, target, current, desired):
         """验证目标最终集合，不计算包含关系。"""
-        tags = await self.repo(Tag).rows(Tag.id.in_(desired), Tag.source == "custom")
+        tags = await self.repo(Tag).rows(Tag.id.in_(desired), *([Tag.source == "custom"] if kind == "thread" else []))
         self.tag_cache.update({tag.id: tag for tag in tags})
         relations = await self.repo(TagRelation).rows(TagRelation.kind == "excludes")
         validate_selection(
@@ -205,7 +212,7 @@ class CustomTagService:
 
     async def attach(self, actor, kind, tid, tag_id, reason):
         """建立新的零票绑定并完成同标签待审核项。"""
-        binding = await self.repo(CustomTagBinding).add(
+        binding = await self.repo(TagBinding).add(
             target_type=kind,
             target_id=tid,
             tag_id=tag_id,
@@ -288,13 +295,14 @@ class CustomTagService:
         await self.log(
             "tag.propose", actor, kind, tid, tag_id, proposal_id=str(proposal.id)
         )
-        return self.proposal_data(proposal)
+        return await self.proposal_data(proposal)
 
-    @staticmethod
-    def proposal_data(proposal):
+    async def proposal_data(self, proposal):
         """输出不含其他用户身份的提议状态。"""
+        tag = self.tag_cache.get(proposal.tag_id) or await self.session.get(Tag, proposal.tag_id)
         return {
             "id": str(proposal.id),
+            "tag_name": tag.name if tag else "已删除标签",
             "tag_id": str(proposal.tag_id),
             "status": proposal.status,
             "reason": proposal.reason,
@@ -320,10 +328,10 @@ class CustomTagService:
             .limit(100)
             .offset(payload.get("offset", 0))
         )
-        return [
-            self.proposal_data(p)
-            for p in (await self.session.execute(statement)).scalars()
-        ]
+        proposals = list((await self.session.execute(statement)).scalars())
+        tags = await self.repo(Tag).rows(Tag.id.in_({p.tag_id for p in proposals}))
+        self.tag_cache.update({tag.id: tag for tag in tags})
+        return [await self.proposal_data(p) for p in proposals]
 
     async def resolve(
         self, actor, proposal, kind, tid, target, approve, automatic=False
@@ -366,7 +374,7 @@ class CustomTagService:
             status=proposal.status,
             reason=proposal.reason,
         )
-        return self.proposal_data(proposal)
+        return await self.proposal_data(proposal)
 
     async def review(self, actor, payload):
         """作者或管理组审核指定目标上的申请。"""
@@ -385,20 +393,22 @@ class CustomTagService:
     async def vote(self, actor, payload):
         """幂等设置当前轮次投票，净负票超过五票自动下标。"""
         kind, tid, target, _ = await self.target(actor, payload)
-        binding = await self.repo(CustomTagBinding).one(
-            CustomTagBinding.id == int(payload["binding_id"]),
-            CustomTagBinding.target_type == kind,
-            CustomTagBinding.target_id == tid,
-            CustomTagBinding.ended_at.is_(None),
+        binding = await self.repo(TagBinding).one(
+            TagBinding.id == int(payload["binding_id"]),
+            TagBinding.target_type == kind,
+            TagBinding.target_id == tid,
+            TagBinding.ended_at.is_(None),
         )
+        if binding is not None and binding.binding_source != "local":
+            raise TagError("readonly_tag", "DC 原生绑定不可投票", 403)
         if binding is None:
             raise TagError("stale_binding", "挂标轮次已结束，请刷新")
         value = payload["vote"]
         if value not in (-1, 0, 1):
             raise TagError("invalid_vote", "投票必须为 -1、0 或 1", 422)
-        vote = await self.repo(CustomTagVote).one(
-            CustomTagVote.binding_id == binding.id,
-            CustomTagVote.user_id == actor,
+        vote = await self.repo(TagVote).one(
+            TagVote.binding_id == binding.id,
+            TagVote.user_id == actor,
         )
         old = vote.vote if vote else 0
         if old != value:
@@ -407,9 +417,9 @@ class CustomTagService:
             if vote and value:
                 vote.vote = value
             elif vote:
-                await self.repo(CustomTagVote).remove(vote)
+                await self.repo(TagVote).remove(vote)
             elif value:
-                await self.repo(CustomTagVote).add(
+                await self.repo(TagVote).add(
                     binding_id=binding.id, user_id=actor, vote=value
                 )
             await self.log(
@@ -433,7 +443,7 @@ class CustomTagService:
 
     async def pool(self, actor, payload):
         """搜索标准名与别名，默认仅列出可选标签。"""
-        conditions = [Tag.source == "custom"]
+        conditions = []
         if payload.get("include_deleted"):
             if not self.access.bot_admin(actor):
                 raise TagError("forbidden", "仅 BOT 管理员可查询已删除标签", 403)
@@ -496,6 +506,10 @@ class CustomTagService:
             )
             if tag is None:
                 raise TagError("not_found", "自定义标签不存在", 404)
+        if action == "classify":
+            if tag is None or not tag.discord_tag_id or tag.category is not None or tag.deleted_at:
+                raise TagError("already_classified", "标签已分类或不可处理")
+            action = "update"
         if tag is not None:
             self.tag_cache[tag.id] = tag
         before = (
@@ -515,18 +529,19 @@ class CustomTagService:
                 "NFC", payload.get("name", tag.name if tag else "")
             ).strip()
             category = payload.get("category", tag.category if tag else None)
-            if not name or len(name) > 100 or category not in range(1, 8):
+            if not name or len(name) > 100 or (category not in range(1, 8) and not (tag and tag.discord_tag_id and category is None)):
                 raise TagError(
                     "invalid_tag", "名称须为 1 至 100 字且分类须为 1 至 7", 422
                 )
             duplicate = await self.repo(Tag).one(
                 Tag.source == "custom", Tag.name == name, Tag.category == category
-            )
-            if duplicate and (tag is None or duplicate.id != tag.id):
+            ) if category is not None else None
+            if category is not None and duplicate and (tag is None or duplicate.id != tag.id):
                 raise TagError(
                     "deleted_tag_exists" if duplicate.deleted_at else "tag_exists",
                     "该标签已删除，可恢复" if duplicate.deleted_at else "标签已存在",
                     tag_id=str(duplicate.id),
+                    conflict_tag_id=str(tag.id) if tag and tag.discord_tag_id else None,
                 )
             if tag is None:
                 tag = await self.repo(Tag).add(
@@ -566,9 +581,9 @@ class CustomTagService:
                 tag.deleted_at, tag.enabled = None, True
             elif not tag.deleted_at:
                 tag.deleted_at = utc_now()
-                for binding in await self.repo(CustomTagBinding).rows(
-                    CustomTagBinding.tag_id == tag.id,
-                    CustomTagBinding.ended_at.is_(None),
+                for binding in await self.repo(TagBinding).rows(
+                    TagBinding.tag_id == tag.id,
+                    TagBinding.ended_at.is_(None),
                 ):
                     await self.end(binding, actor, "tag_deleted")
                 for proposal in await self.repo(TagProposal).rows(

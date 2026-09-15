@@ -1,3 +1,4 @@
+from core.tag_binding_repository import TagBindingRepository
 import logging
 
 from sqlalchemy import delete, select
@@ -9,10 +10,8 @@ from models import (
     BannerWaitlist,
     BooklistItem,
     Notification,
-    TagVote,
     Thread,
     ThreadFollow,
-    ThreadTagLink,
     ThreadUpdate,
     UserCollection,
     UserUpdatePreference,
@@ -51,7 +50,7 @@ class ThreadDeletionService:
         unique_ids = sorted(set(thread_ids))
         if not unique_ids:
             return 0
-        internal_statement = select(Thread.id).where(Thread.thread_id.in_(unique_ids))
+        internal_statement = select(Thread.id).where(Thread.thread_id.in_(unique_ids)).with_for_update()
         internal_ids = list(
             (await self.session.execute(internal_statement)).scalars().all()
         )
@@ -86,13 +85,7 @@ class ThreadDeletionService:
                     banner_model.thread_id.in_(unique_ids),
                 )
             )
-        if internal_ids:
-            await self.session.execute(
-                delete(TagVote).where(TagVote.thread_id.in_(internal_ids))
-            )
-            await self.session.execute(
-                delete(ThreadTagLink).where(ThreadTagLink.thread_id.in_(internal_ids))
-            )
+        await TagBindingRepository(self.session).delete_targets("thread", internal_ids)
         result = await self.session.execute(
             delete(Thread).where(Thread.thread_id.in_(unique_ids))
         )

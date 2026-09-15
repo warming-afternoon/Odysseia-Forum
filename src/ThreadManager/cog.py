@@ -9,7 +9,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.follow_repository import ThreadFollowRepository
 from core.thread_repository import ThreadRepository
-from core.tag_repository import TagRepository
 from shared.safe_defer import safe_defer
 from shared.enum import ConstantEnum
 from ThreadManager.batch_update_service import BatchUpdateService
@@ -17,7 +16,6 @@ from ThreadManager.inactive_follow_buffer import InactiveFollowBuffer
 from ThreadManager.reaction_batch_service import ReactionBatchService
 from ThreadManager.thread_logic import ThreadLogic
 from ThreadManager.views.visibility_view import ThreadVisibilityView
-from ThreadManager.views.vote_view import TagVoteView
 from core.redis_trend_service import RedisTrendService
 
 import logging
@@ -369,46 +367,5 @@ class ThreadManager(commands.Cog):
     #     name="标签评价", description="对当前帖子的标签进行评价（赞或踩）"
     # )
     async def tag_rate(self, interaction: discord.Interaction):
-        """打开标签评价面板，允许用户对当前帖子的标签进行赞踩投票。"""
-        await safe_defer(interaction)
-        try:
-            if not isinstance(interaction.channel, discord.Thread):
-                await interaction.followup.send(
-                    "此命令只能在帖子中使用。", ephemeral=True
-                )
-                return
-
-            if not interaction.channel.applied_tags:
-                await interaction.followup.send(
-                    "该帖子没有应用任何标签。", ephemeral=True
-                )
-                return
-
-            async with self.session_factory() as tag_session:
-                tags = await TagRepository(tag_session).get_or_create_tags(
-                    {tag.id: tag.name for tag in interaction.channel.applied_tags}
-                )
-                tag_map = {tag.id: tag.name for tag in tags}
-                await tag_session.commit()
-
-            view = TagVoteView(
-                thread_id=interaction.channel.id,
-                thread_name=interaction.channel.name,
-                tag_map=tag_map,
-                session_factory=self.session_factory,
-                api_scheduler=self.bot.api_scheduler,
-            )
-            # 获取初始统计数据
-            async with self.session_factory() as session:
-                repo = ThreadRepository(session)
-                initial_stats = await repo.get_tag_vote_stats(
-                    interaction.channel.id, tag_map
-                )
-
-            # 使用初始统计数据创建嵌入
-            embed = view.create_embed(initial_stats)
-
-            await interaction.followup.send(embed=embed, view=view, ephemeral=True)
-        except Exception as e:
-            error_message = f"❌ 命令执行失败: {e}"
-            await interaction.followup.send(error_message, ephemeral=True)
+        """旧标签评价入口已停用，不再写入原生投票。"""
+        await interaction.response.send_message("DC 原生标签为只读，不再支持投票。", ephemeral=True)

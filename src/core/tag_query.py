@@ -1,8 +1,8 @@
 from sqlalchemy import and_, or_, select
 
-from models import Tag, Thread, ThreadTagLink
+from models import Tag
 from dto.custom_tag_binding_response import CustomTagBindingResponse
-from models.custom_tag_binding import CustomTagBinding
+from models.tag_binding import TagBinding
 from shared.enum.tag_category import TagCategory
 
 
@@ -12,33 +12,18 @@ def tag_filters(kind, target_column, included, excluded, logic="and"):
     def matches(ids):
         """合并同一批 ID 在两类绑定中的命中结果。"""
         custom = (
-            select(CustomTagBinding.id)
-            .join(Tag, Tag.id == CustomTagBinding.tag_id)
+            select(TagBinding.id)
+            .join(Tag, Tag.id == TagBinding.tag_id)
             .where(
-                CustomTagBinding.target_type == kind,
-                CustomTagBinding.target_id == target_column,
-                CustomTagBinding.ended_at.is_(None),
+                TagBinding.target_type == kind,
+                TagBinding.target_id == target_column,
+                TagBinding.ended_at.is_(None),
                 Tag.deleted_at.is_(None),
                 Tag.id.in_(ids),
             )
             .exists()
         )
-        if kind != "thread":
-            return custom
-        # 使用独立帖子别名，防止与外层搜索的 Thread 发生错误关联。
-        native_thread = Thread.__table__.alias("native_tag_thread")  # type: ignore[attr-defined]
-        native = (
-            select(ThreadTagLink.thread_id)
-            .join(native_thread, native_thread.c.id == ThreadTagLink.thread_id)
-            .join(Tag, Tag.id == ThreadTagLink.tag_id)
-            .where(
-                native_thread.c.thread_id == target_column,
-                Tag.source == "discord",
-                Tag.id.in_(ids),
-            )
-            .exists()
-        )
-        return or_(native, custom)
+        return custom
 
     conditions = []
     if included:
@@ -54,12 +39,13 @@ async def load_custom_tags(session, kind, target_ids) -> dict[int, list[CustomTa
     if not target_ids:
         return {}
     statement = (
-        select(CustomTagBinding, Tag)
-        .join(Tag, Tag.id == CustomTagBinding.tag_id)
+        select(TagBinding, Tag)
+        .join(Tag, Tag.id == TagBinding.tag_id)
         .where(
-            CustomTagBinding.target_type == kind,
-            CustomTagBinding.target_id.in_(target_ids),
-            CustomTagBinding.ended_at.is_(None),
+            TagBinding.target_type == kind,
+            TagBinding.target_id.in_(target_ids),
+            TagBinding.ended_at.is_(None),
+            TagBinding.binding_source == "local",
             Tag.deleted_at.is_(None),
         )
         .order_by(Tag.category, Tag.name)
@@ -71,8 +57,8 @@ async def load_custom_tags(session, kind, target_ids) -> dict[int, list[CustomTa
                 id=str(tag.id),
                 name=tag.name,
                 category=tag.category,
-                category_name=TagCategory(tag.category).name,
-                source="custom",
+                category_name=TagCategory(tag.category).name if tag.category else None,
+                source=tag.source,
                 enabled=tag.enabled,
                 binding_id=str(binding.id),
                 upvotes=binding.upvotes,

@@ -1,9 +1,8 @@
 import logging
 from collections import defaultdict
-from typing import Any, Dict, List, cast, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 
-from sqlalchemy import ColumnElement, func
-from sqlalchemy.sql import Select
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
@@ -13,9 +12,10 @@ from api.v1.schemas.tags import (
     TagStatsRequest,
     TagStatsResponse,
 )
+from shared.enum.tag_category import TagCategory
 from core.thread_repository import ThreadRepository
 from core.cache_service import CacheService
-from models import Tag, Thread, ThreadTagLink
+from models import Tag, Thread, TagBinding
 
 logger = logging.getLogger(__name__)
 
@@ -85,35 +85,24 @@ class TagStatisticsService:
             request.guild_id, scoped_channel_ids
         )
 
-        # 按标签名聚合真实标签与虚拟标签统计
-        tag_buckets: Dict[str, Dict[str, Any]] = defaultdict(
-            lambda: {"total": 0, "channels": []}
-        )
-
-        # 仅把请求范围内的真实标签装入结果桶
-        for row_tag_name, row_tag_id, row_channel_id, row_count in real_tag_rows:
-            if requested_channels is None or row_channel_id in requested_channels:
-                guild_id, guild_name, c_name, cat_id, cat_name = self._get_channel_meta(
-                    row_channel_id
-                )
-                tag_buckets[row_tag_name]["total"] += row_count
-                tag_buckets[row_tag_name]["channels"].append(
-                    ChannelTagInfo(
-                        guild_id=guild_id,
-                        guild_name=guild_name,
-                        channel_id=row_channel_id,
-                        channel_name=c_name,
-                        category_id=cat_id,
-                        category_name=cat_name,
-                        tag_id=row_tag_id,
-                        thread_count=row_count,
-                        is_virtual=False,
-                    )
-                )
-
-        # 按频道映射规则补充虚拟标签统计
+        tag_buckets = defaultdict(lambda: {"total": 0, "channels": [], "ids": set()})
+        for name, source, category, channel_id, count, ids in real_tag_rows:
+            if requested_channels is not None and channel_id not in requested_channels:
+                continue
+            key = (source, category, name)
+            bucket = tag_buckets[key]
+            bucket["total"] += count
+            bucket["ids"].update(ids)
+            guild_id, guild_name, channel_name, cat_id, cat_name = self._get_channel_meta(channel_id)
+            bucket["channels"].append(ChannelTagInfo(
+                guild_id=guild_id, guild_name=guild_name, channel_id=channel_id,
+                channel_name=channel_name, category_id=cat_id, category_name=cat_name,
+                tag_id=min(ids), tag_ids=[str(v) for v in sorted(ids)],
+                thread_count=count, is_virtual=False,
+            ))
+        virtual_buckets = defaultdict(lambda: {"total": 0, "channels": []})
         if request.include_virtual:
-            await self._append_virtual_tag_stats(tag_buckets, request)
+            await self._append_virtual_tag_stats(virtual_buckets, request)
 
         # 统计当前查询范围内的有效帖子总数
         thread_repository = ThreadRepository(self.session)
@@ -122,57 +111,32 @@ class TagStatisticsService:
             channel_ids=scoped_channel_ids,
         )
 
-        # 构造响应并按帖子数降序排序
-        items = [
-            TagStatItem(
-                tag_name=tag_name,
-                total_thread_count=tag_data["total"],
-                channel_info=tag_data["channels"],
-            )
-            for tag_name, tag_data in tag_buckets.items()
-            if tag_data["channels"]
-        ]
-        items.sort(key=lambda item: item.total_thread_count, reverse=True)
-
+        items = [TagStatItem(
+            tag_name=name, source=source, category=category,
+            category_name=TagCategory(category).name if category else None,
+            tag_ids=[str(v) for v in sorted(data["ids"])],
+            total_thread_count=data["total"], channel_info=data["channels"],
+        ) for (source, category, name), data in tag_buckets.items()]
+        items.extend(TagStatItem(tag_name=name, source="virtual",
+            total_thread_count=data["total"], channel_info=data["channels"])
+            for name, data in virtual_buckets.items() if data["channels"])
+        items.sort(key=lambda item: (-item.total_thread_count, item.tag_name))
         return TagStatsResponse(total_threads=total_threads, items=items)
 
-    async def _get_real_tag_rows(
-        self, guild_id: int | None, channel_ids: List[int] | None
-    ) -> List[tuple[str, int, int, int]]:
-        """查询真实标签在各频道下的聚合统计"""
-        tag_id_column = cast(ColumnElement, Tag.id)
-        tag_name_column = cast(ColumnElement, Tag.name)
-        link_tag_id_column = cast(ColumnElement, ThreadTagLink.tag_id)
-        link_thread_id_column = cast(ColumnElement, ThreadTagLink.thread_id)
-        thread_id_column = cast(ColumnElement, Thread.id)
-        thread_channel_id_column = cast(ColumnElement, Thread.channel_id)
-        thread_guild_id_column = cast(ColumnElement, Thread.guild_id)
-        thread_not_found_count_column = cast(ColumnElement, Thread.not_found_count)
-
-        # 通过一次跨表聚合查询拿到真实标签统计
-        statement: Select = (
-            select(
-                tag_name_column,
-                tag_id_column,
-                thread_channel_id_column,
-                func.count(func.distinct(thread_id_column)),
-            )
-            .select_from(Tag)
-            .join(ThreadTagLink, tag_id_column == link_tag_id_column)
-            .join(Thread, link_thread_id_column == thread_id_column)
-            .where(thread_not_found_count_column == 0)
-            .group_by(tag_name_column, tag_id_column, thread_channel_id_column)
-        )
-
+    async def _get_real_tag_rows(self, guild_id, channel_ids):
+        """按来源、分类、名称和频道聚合有效绑定，并对同组帖子去重。"""
+        statement = (select(Tag.name, Tag.source, Tag.category, Thread.channel_id,
+            func.count(func.distinct(Thread.id)), func.array_agg(func.distinct(Tag.id)))
+            .select_from(TagBinding).join(Tag, Tag.id == TagBinding.tag_id)
+            .join(Thread, Thread.id == TagBinding.target_id)
+            .where(TagBinding.target_type == "thread", TagBinding.ended_at.is_(None),
+                   Tag.deleted_at.is_(None), Thread.not_found_count == 0, Thread.show_flag.is_(True))
+            .group_by(Tag.name, Tag.source, Tag.category, Thread.channel_id))
         if guild_id is not None:
-            statement = statement.where(thread_guild_id_column == guild_id)
+            statement = statement.where(Thread.guild_id == guild_id)
         if channel_ids:
-            statement = statement.where(thread_channel_id_column.in_(channel_ids))
-
-        result = await self.session.execute(statement)
-        return [
-            (str(row[0]), int(row[1]), int(row[2]), int(row[3])) for row in result.all()
-        ]
+            statement = statement.where(Thread.channel_id.in_(channel_ids))
+        return (await self.session.execute(statement)).all()
 
     async def _append_virtual_tag_stats(
         self,

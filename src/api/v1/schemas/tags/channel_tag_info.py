@@ -25,8 +25,11 @@ class ChannelTagInfo(BaseModel):
     category_name: Optional[str] = Field(default=None, description="频道所属类别名称")
     """频道所属类别名称"""
 
-    tag_id: int = Field(description="标签的 Discord ID（虚拟标签为 0）")
-    """标签的 Discord ID（虚拟标签为 0）"""
+    tag_ids: list[str] = Field(default_factory=list, description="该频道分组包含的全部标签内部 ID；tag_id 仅保留代表 ID 兼容旧端")
+    """分组实体 ID 列表"""
+
+    tag_id: int = Field(description="分组代表标签的内部 ID（虚拟标签为 0），完整集合见 tag_ids")
+    """分组代表标签的内部 ID（虚拟标签为 0），完整集合见 tag_ids"""
 
     thread_count: int = Field(description="该频道下包含此标签的帖子数量")
     """该频道下包含此标签的帖子数量"""

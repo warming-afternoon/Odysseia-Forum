@@ -1,19 +1,19 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, ForeignKey, Index, text
+from sqlalchemy import BigInteger, CheckConstraint, Column, Index, text
 from sqlmodel import Field, SQLModel
 
 from shared.time_utils import utc_now
 
 
-class CustomTagBinding(SQLModel, table=True):
-    """保存自定义标签的一轮绑定及汇总票数，解绑后保留历史。"""
+class TagBinding(SQLModel, table=True):
+    """保存原生或本地标签的一轮绑定及汇总票数，解绑后保留历史。"""
 
-    __tablename__ = "custom_tag_binding"
+    __tablename__ = "tag_binding"
 
     id: int | None = Field(
         default=None,
-        primary_key=True,
+        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
         description="本轮挂标记录的内部主键；重新挂标会创建新的轮次 ID",
     )
     """本轮挂标记录的内部主键；重新挂标会创建新的轮次 ID"""
@@ -25,18 +25,25 @@ class CustomTagBinding(SQLModel, table=True):
 
     target_id: int = Field(
         sa_column=Column(BigInteger, nullable=False, index=True),
-        description="绑定目标 ID：帖子使用 Discord 帖子 ID，书单使用内部书单 ID",
+        description="绑定目标 ID：帖子使用内部帖子 ID，书单使用内部书单 ID",
     )
-    """绑定目标 ID：帖子使用 Discord 帖子 ID，书单使用内部书单 ID"""
+    """绑定目标 ID：帖子使用内部帖子 ID，书单使用内部书单 ID"""
 
     tag_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("tag.id"), nullable=False, index=True),
-        description="绑定的自定义标签内部 ID",
+        sa_column=Column(BigInteger, nullable=False, index=True),
+        description="绑定的标签内部 ID",
     )
-    """绑定的自定义标签内部 ID"""
+    """绑定的标签内部 ID"""
 
-    actor_id: int = Field(
-        sa_column=Column(BigInteger, nullable=False),
+    binding_source: str = Field(
+        default="local",
+        description="绑定来源：discord_sync 为只读同步，local 为项目内添加",
+    )
+    """绑定来源决定治理权限，与标签实体来源独立"""
+
+    actor_id: int | None = Field(
+        sa_column=Column(BigInteger, nullable=True),
+        default=None,
         description="执行挂标的 Discord 用户 ID；自动超时挂标时为 0",
     )
     """执行挂标的 Discord 用户 ID；自动超时挂标时为 0"""
@@ -70,15 +77,23 @@ class CustomTagBinding(SQLModel, table=True):
     # 同一目标和标签仅允许一轮生效绑定，已结束的轮次保留为历史。
     __table_args__ = (
         Index(
-            "uq_active_custom_tag",
+            "uq_active_tag_binding",
             "target_type",
             "target_id",
             "tag_id",
             unique=True,
             postgresql_where=text("ended_at IS NULL"),
         ),
+        Index(
+            "ix_tag_binding_active_reverse",
+            "target_type",
+            "tag_id",
+            "target_id",
+            postgresql_where=text("ended_at IS NULL"),
+        ),
+        Index("ix_tag_binding_history", "target_type", "target_id", "id"),
         CheckConstraint(
-            "target_type IN ('thread', 'booklist') AND upvotes >= 0 AND downvotes >= 0",
-            name="ck_custom_tag_binding",
+            "target_type IN ('thread', 'booklist') AND binding_source IN ('discord_sync', 'local') AND (binding_source <> 'discord_sync' OR target_type = 'thread') AND upvotes >= 0 AND downvotes >= 0",
+            name="ck_tag_binding",
         ),
     )

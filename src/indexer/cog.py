@@ -300,6 +300,7 @@ class Indexer(commands.Cog):
         )
 
         try:
+            await self.sync_service.pre_sync_forum_tags(after)
             # 调用服务重建整个缓存，确保数据完全同步
             await self.tag_service.build_cache()
             logging.info("TagService 缓存已因频道更新而成功刷新。")

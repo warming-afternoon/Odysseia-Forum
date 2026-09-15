@@ -7,7 +7,7 @@ from core.tag_cache_service import TagCacheService
 from core.thread_repository import ThreadRepository
 from dto.preferences import UserSearchPreferencesDTO
 from dto.search import SearchConfigDTO
-from models import Tag, Thread, ThreadTagLink
+from models import Tag, Thread, TagBinding
 from search.search_service import SearchService
 
 
@@ -17,9 +17,9 @@ async def test_candidate_pool_and_live_preference_ranking(
 ):
     """候选池保留匹配层级，返回时应用反选偏好并按层级优先排序。"""
     now = datetime.now()
-    common = Tag(id=8101, name="共同")
-    niche = Tag(id=8102, name="细分")
-    excluded = Tag(id=8103, name="反选")
+    common = Tag(id=8101, discord_tag_id=8101, name="共同")
+    niche = Tag(id=8102, discord_tag_id=8102, name="细分")
+    excluded = Tag(id=8103, discord_tag_id=8103, name="反选")
     threads = [
         Thread(
             thread_id=9100,
@@ -90,7 +90,7 @@ async def test_candidate_pool_and_live_preference_ranking(
             9105: [8101, 8103],
         }
         session.add_all(
-            ThreadTagLink(thread_id=internal_ids[thread_id], tag_id=tag_id)
+            TagBinding(target_type="thread", binding_source="discord_sync", target_id=internal_ids[thread_id], tag_id=tag_id)
             for thread_id, tag_ids in links.items()
             for tag_id in tag_ids
         )

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, ForeignKey
+from sqlalchemy import BigInteger, Column
 from sqlmodel import Field, SQLModel
 
 from shared.time_utils import utc_now
@@ -18,12 +18,12 @@ class TagProposalBlock(SQLModel, table=True):
 
     target_id: int = Field(
         sa_column=Column(BigInteger, primary_key=True),
-        description="被限制的目标 ID：帖子使用 Discord 帖子 ID，书单使用内部书单 ID",
+        description="被限制的目标 ID：帖子使用内部帖子 ID，书单使用内部书单 ID",
     )
-    """被限制的目标 ID：帖子使用 Discord 帖子 ID，书单使用内部书单 ID"""
+    """被限制的目标 ID：帖子使用内部帖子 ID，书单使用内部书单 ID"""
 
     tag_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("tag.id"), primary_key=True),
+        sa_column=Column(BigInteger, primary_key=True),
         description="曾在此目标被投票移除的标签内部 ID；软删除与恢复不会清除此限制",
     )
     """曾在此目标被投票移除的标签内部 ID；软删除与恢复不会清除此限制"""

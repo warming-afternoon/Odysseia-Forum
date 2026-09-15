@@ -1,3 +1,5 @@
+from models.tag_notification_task import TagNotificationTask
+
 from sqlalchemy.exc import IntegrityError
 
 from dto.events.tag_command import TagCommand
@@ -15,6 +17,12 @@ def create_tag_mediator(session_factory, config) -> EventMediator:
         try:
             async with session_factory() as session, session.begin():
                 return await CustomTagService(session, config).dispatch(command)
+        except TagError as exc:
+            conflict_id = exc.detail.get("conflict_tag_id")
+            if conflict_id:
+                async with session_factory() as session, session.begin():
+                    session.add(TagNotificationTask(kind="conflict", tag_id=int(conflict_id)))
+            raise
         except IntegrityError as exc:
             raise TagError("concurrent_conflict", "数据已变化，请刷新后重试") from exc
         except (KeyError, TypeError, ValueError) as exc:

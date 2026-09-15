@@ -1,3 +1,8 @@
+from sqlalchemy import select
+from models import Thread, Tag, TagBinding
+from types import SimpleNamespace
+from dto.events.discord_tags_snapshot import DiscordTagsSnapshot
+from shared.time_utils import utc_now
 import asyncio
 import datetime
 import logging
@@ -38,12 +43,13 @@ class SyncService:
 
     async def pre_sync_forum_tags(self, channel: discord.ForumChannel) -> None:
         """预同步论坛频道的全部可用标签。"""
-        if not channel.available_tags:
+        observed_at = utc_now()
+        fresh = await self.bot.fetch_channel(channel.id)
+        if not isinstance(fresh, discord.ForumChannel):
             return
-        tags_data = {tag.id: tag.name for tag in channel.available_tags}
-        async with self.session_factory() as session:
-            await TagRepository(session).get_or_create_tags(tags_data)
-            await session.commit()
+        await self.bot.event_mediator.publish(DiscordTagsSnapshot(
+            fresh.id, {tag.id: tag.name for tag in fresh.available_tags}, observed_at,
+        ))
 
     async def _invalidate_similarity_cache(self, thread_id: int) -> None:
         """尽力失效源帖候选池，Redis 故障不影响同步主流程。"""
@@ -380,11 +386,19 @@ class SyncService:
         # 准备标签数据并存入数据库
         tags_data = {t.id: t.name for t in thread.applied_tags or []}
 
-        # 保存帖子数据
+        # 移除原生绑定前先确认源频道标签是否被删除，避免事件乱序丢失应转换的绑定。
         try:
             async with self.session_factory() as session:
+                existing = set((await session.execute(select(Tag.discord_tag_id)
+                    .join(TagBinding, TagBinding.tag_id == Tag.id)
+                    .join(Thread, Thread.id == TagBinding.target_id)
+                    .where(Thread.thread_id == thread.id, TagBinding.target_type == "thread",
+                           TagBinding.binding_source == "discord_sync", TagBinding.ended_at.is_(None)))).scalars())
+            if existing - set(tags_data):
+                await self.pre_sync_forum_tags(SimpleNamespace(id=thread.parent_id))
+            async with self.session_factory() as session:
                 tag_repo = TagRepository(session=session)
-                tags = await tag_repo.get_or_create_tags(tags_data)
+                tags = await tag_repo.get_or_create_tags(tags_data, update_names=False)
 
                 repo = ThreadRepository(session=session)
                 mutation = await repo.add_or_update_thread_with_tags(
@@ -411,7 +425,7 @@ class SyncService:
             # 检查是否是首次被关注（检查关注表而不是帖子表）
             is_first_follow = False
             async with self.session_factory() as session:
-                from sqlmodel import func, select
+                from sqlmodel import func
 
                 from models import ThreadFollow
 

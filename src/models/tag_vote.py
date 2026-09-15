@@ -1,40 +1,27 @@
-from typing import TYPE_CHECKING, Optional
-
-from sqlalchemy import BigInteger, Column
-from sqlmodel import Field, Relationship, SQLModel, UniqueConstraint
-
-if TYPE_CHECKING:
-    from models import Tag, Thread
+from sqlalchemy import BigInteger, CheckConstraint, Column
+from sqlmodel import Field, SQLModel
 
 
 class TagVote(SQLModel, table=True):
-    """标签投票模型，记录用户对特定帖子中特定标签的评价。"""
+    """保存用户对某轮自定义挂标的当前投票。"""
 
-    __tablename__ = "tag_vote"  # type: ignore
-    __table_args__ = (
-        UniqueConstraint(
-            "user_id", "tag_id", "thread_id", name="uq_user_tag_thread_vote"
-        ),
-    )
+    __tablename__ = "tag_vote"
 
-    id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(sa_column=Column(BigInteger, index=True))
-    tag_id: int = Field(sa_column=Column(BigInteger, index=True))
-    thread_id: int = Field(sa_column=Column(BigInteger, index=True))
-    vote: int  # 1 代表赞成, -1 代表反对
+    binding_id: int = Field(
+        sa_column=Column(BigInteger, primary_key=True),
+        description="挂标轮次 ID，与用户 ID 组成联合主键；不是标签实体 ID",
+    )
+    """挂标轮次 ID，与用户 ID 组成联合主键；不是标签实体 ID"""
 
-    # 关系定义，用于 ORM 查询，不产生外键约束
-    tag: "Tag" = Relationship(
-        back_populates="votes",
-        sa_relationship_kwargs={
-            "primaryjoin": "TagVote.tag_id == Tag.id",
-            "foreign_keys": "[TagVote.tag_id]",
-        },
+    user_id: int = Field(
+        sa_column=Column(BigInteger, primary_key=True),
+        description="投票用户的 Discord ID；同一轮次每人最多一票",
     )
-    thread: "Thread" = Relationship(
-        back_populates="votes",
-        sa_relationship_kwargs={
-            "primaryjoin": "TagVote.thread_id == Thread.id",
-            "foreign_keys": "[TagVote.thread_id]",
-        },
+    """投票用户的 Discord ID；同一轮次每人最多一票"""
+
+    vote: int = Field(
+        description="当前票值：1 为赞，-1 为踩；撤票时删除此记录，变更历史保留在操作日志"
     )
+    """当前票值：1 为赞，-1 为踩；撤票时删除此记录，变更历史保留在操作日志"""
+
+    __table_args__ = (CheckConstraint("vote IN (-1, 1)", name="ck_tag_vote"),)

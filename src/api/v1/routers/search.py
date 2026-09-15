@@ -1,3 +1,6 @@
+from core.tag_repository import TagRepository
+from api.v1.schemas.tags.tag_response import TagResponse
+from shared.enum.tag_category import TagCategory
 import asyncio
 import logging
 import time
@@ -283,6 +286,10 @@ async def execute_search(
                 has_mapping,  # type: ignore
             )
 
+            if request.channel_ids and len(request.channel_ids) == 1:
+                scoped_tags = await TagRepository(session).get_tags_for_channels(list(searched_channel_ids))
+                available_tags = list(virtual_tags) + sorted((set(available_tags) | {tag.name for tag in scoped_tags}) - set(virtual_tags))
+
             if request.debug_timing:
                 t_after_build = time.perf_counter()
                 logger.info(
@@ -408,13 +415,18 @@ async def get_similar_threads(
             detail="thread_id 必须为数字",
         )
 
+    # 捕获请求依赖，确保内部异步函数使用已检查的局部引用。
+    session_factory = async_session_factory
+    tag_cache_service = tag_cache_service_instance
+    similar_threads_cache_service = similar_threads_cache_service_instance
+
     # 检查服务是否初始化完成
     if (
-        not async_session_factory
+        not session_factory
         or not cache_service_instance
-        or not tag_cache_service_instance
+        or not tag_cache_service
         or not impression_cache_service_instance
-        or not similar_threads_cache_service_instance
+        or not similar_threads_cache_service
     ):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -443,13 +455,13 @@ async def get_similar_threads(
         if user_id and redis_client:
             prefs = await get_user_preferences_cached(
                 redis_client,
-                async_session_factory,
+                session_factory,
                 user_id,
                 main_guild_id,
             )
 
         # 每次请求只用单列投影实时校验源帖权限，不预加载作者和标签。
-        async with async_session_factory() as session:
+        async with session_factory() as session:
             thread_repo = ThreadRepository(session)
             source_is_searchable = await asyncio.wait_for(
                 thread_repo.is_thread_searchable(
@@ -468,26 +480,26 @@ async def get_similar_threads(
 
         async def build_candidates():
             """用独立 Session 构建可跨请求共享的候选池。"""
-            async with async_session_factory() as build_session:
-                build_service = SearchService(build_session, tag_cache_service_instance)
+            async with session_factory() as build_session:
+                build_service = SearchService(build_session, tag_cache_service)
                 return await build_service.build_similar_thread_candidates(
                     thread_id_int,
                     candidate_limit=(
-                        similar_threads_cache_service_instance.CANDIDATE_LIMIT
+                        similar_threads_cache_service.CANDIDATE_LIMIT
                     ),
                     exclude_channel_ids=exclude_channel_ids or None,
                     ucb1_config=ucb1_config,
                     timeout_seconds=SearchTimeout.SIMILAR_THREADS.value,
                 )
 
-        candidate_pool = await similar_threads_cache_service_instance.get_or_build(
+        candidate_pool = await similar_threads_cache_service.get_or_build(
             thread_id_int,
             include_abyss,
             build_candidates,
         )
 
-        async with async_session_factory() as session:
-            service = SearchService(session, tag_cache_service_instance)
+        async with session_factory() as session:
+            service = SearchService(session, tag_cache_service)
             (
                 threads,
                 matched_tag_count,
@@ -602,6 +614,25 @@ async def get_search_suggestions(
             )
 
             return SearchSuggestionResponse(
+                tags=[
+                    TagResponse.model_validate(
+                        {
+                            "id": str(t.id),
+                            "name": t.name,
+                            "source": t.source,
+                            "discord_tag_id": (
+                                str(t.discord_tag_id) if t.discord_tag_id else None
+                            ),
+                            "category": t.category,
+                            "category_name": (
+                                TagCategory(t.category).name if t.category else None
+                            ),
+                            "enabled": t.enabled,
+                            "deleted_at": t.deleted_at,
+                        }
+                    )
+                    for t in raw_data.tags
+                ],
                 authors=[
                     AuthorSuggestion(
                         id=a.id,

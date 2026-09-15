@@ -1,10 +1,11 @@
+from types import SimpleNamespace
 import logging
 from datetime import timedelta
 
 from sqlalchemy import select, text
 
 from core.tag_data_repository import TagDataRepository
-from models import Notification
+from models import Notification, Thread
 from models.tag_notification_task import TagNotificationTask
 from models.tag_proposal import TagProposal
 from shared.tag_error import TagError
@@ -53,6 +54,7 @@ class TagWorker:
                             {
                                 "target_type": proposal.target_type,
                                 "target_id": proposal.target_id,
+                                "_internal_target": True,
                             },
                         )
                         await session.refresh(proposal)
@@ -87,7 +89,7 @@ class TagWorker:
                     "标签超时处理失败，稍后重试 proposal_id=%s", proposal_id
                 )
 
-    async def deliver(self, send):
+    async def deliver(self, send, send_lifecycle=None):
         """领取一条通知，发送失败保留重试，永久失败站内兜底。"""
         async with self.session_factory() as session, session.begin():
             statement = (
@@ -103,13 +105,33 @@ class TagWorker:
             task = (await session.execute(statement)).scalar_one_or_none()
             if task is None:
                 return
+            if task.kind != "proposal":
+                if send_lifecycle is None:
+                    return
+                try:
+                    await send_lifecycle(task)
+                    task.status = "sent"
+                except Exception as exc:
+                    task.attempts += 1
+                    task.error = type(exc).__name__
+                    task.available_at = utc_now() + timedelta(seconds=min(3600, 30 * 2 ** min(task.attempts, 7)))
+                return
             proposal = await session.get(TagProposal, task.proposal_id)
             if proposal is None or proposal.status != "pending":
                 task.status = "cancelled"
                 return
+            external_id = proposal.target_id
+            if proposal.target_type == "thread":
+                target = await session.get(Thread, proposal.target_id)
+                if target is None:
+                    task.status = "cancelled"
+                    return
+                external_id = target.thread_id
+            notice = SimpleNamespace(id=proposal.id, owner_id=proposal.owner_id,
+                                     target_type=proposal.target_type, target_id=external_id)
             task.attempts += 1
             try:
-                delivered = await send(proposal)
+                delivered = await send(notice)
                 if not delivered:
                     existing = await TagDataRepository(session, Notification).one(
                         Notification.user_id == proposal.owner_id,
@@ -122,7 +144,7 @@ class TagWorker:
                             event_type="tag_review",
                             event_source_id=proposal.id,
                             target_type=proposal.target_type,
-                            target_id=proposal.target_id,
+                            target_id=external_id,
                         )
                     task.error = "Discord 通知无法送达，已使用站内通知"
                 task.status = "sent"

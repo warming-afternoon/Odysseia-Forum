@@ -17,9 +17,9 @@ class TargetTagsResponse(BaseModel):
     tags: list[
         Annotated[
             NativeTagSnapshotResponse | CustomTagSnapshotResponse,
-            Field(discriminator="source"),
+            Field(discriminator="binding_source"),
         ]
     ] = Field(
-        description="当前生效的原生和自定义标签；按 source 区分结构，无标签时为空数组"
+        description="当前生效的原生和自定义标签；按 binding_source 区分结构，无标签时为空数组"
     )
     """原生标签只读；自定义标签包含当前轮次票数及本人投票"""

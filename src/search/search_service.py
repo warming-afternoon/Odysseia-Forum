@@ -17,7 +17,7 @@ from dto.search import (
     SimilarThreadSourceDTO,
     SimilarThreadSourceTagDTO,
 )
-from models import Author, Tag, Thread, ThreadTagLink, BooklistItem
+from models import Author, Tag, Thread, TagBinding, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
 from shared.channel_mapping_utils import ChannelMappingUtils
@@ -302,27 +302,16 @@ class SearchService:
 
             # 标签过滤
             filters.extend(tag_filters(
-                "thread", Thread.thread_id, query.include_tag_ids,
+                "thread", Thread.id, query.include_tag_ids,
                 query.exclude_tag_ids, query.tag_logic,
             ))
-            if CleanedQo.resolved_include_tag_ids:
+            if query.include_tags:
                 if query.tag_logic == "and":
-                    # TODO : 考虑精简
-                    for tag_name in query.include_tags:
-                        ids_for_name = self.tag_cache_service.get_ids_by_tag_name(
-                            tag_name
-                        )
-                        if ids_for_name:
-                            filters.append(Thread.tags.any(Tag.id.in_(ids_for_name)))  # type: ignore
+                    filters.extend(Thread.tags.any(Tag.name == name) for name in set(query.include_tags))
                 else:
-                    filters.append(
-                        Thread.tags.any(Tag.id.in_(CleanedQo.resolved_include_tag_ids))  # type: ignore
-                    )
-
-            if CleanedQo.resolved_exclude_tag_ids:
-                filters.append(
-                    ~Thread.tags.any(Tag.id.in_(CleanedQo.resolved_exclude_tag_ids))  # type: ignore
-                )
+                    filters.append(Thread.tags.any(Tag.name.in_(query.include_tags)))
+            if query.exclude_tags:
+                filters.append(~Thread.tags.any(Tag.name.in_(query.exclude_tags)))
 
             # 关键词匹配过滤
             thread_repo = ThreadRepository(self.session)
@@ -543,13 +532,13 @@ class SearchService:
 
         statement = (
             select(Tag)
-            .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id)  # type: ignore
-            .join(Thread, ThreadTagLink.thread_id == Thread.id)  # type: ignore
+            .join(TagBinding, Tag.id == TagBinding.tag_id)  # type: ignore
+            .join(Thread, TagBinding.target_id == Thread.id)  # type: ignore
             .join(
                 BooklistItem,
                 Thread.thread_id == BooklistItem.thread_id,  # type: ignore
             )
-            .where(BooklistItem.owner_id == user_id)
+            .where(BooklistItem.owner_id == user_id, TagBinding.target_type == "thread", TagBinding.ended_at.is_(None), Tag.deleted_at.is_(None))
             .distinct()
         )
         result = await self.session.execute(statement)
@@ -564,9 +553,9 @@ class SearchService:
             return {}
 
         stmt = (
-            select(ThreadTagLink.tag_id, func.count(ThreadTagLink.thread_id))
-            .where(ThreadTagLink.tag_id.in_(tag_ids))  # type: ignore[arg-type]
-            .group_by(ThreadTagLink.tag_id)
+            select(TagBinding.tag_id, func.count(TagBinding.target_id))
+            .join(Tag, Tag.id == TagBinding.tag_id).where(TagBinding.tag_id.in_(tag_ids), TagBinding.target_type == "thread", TagBinding.ended_at.is_(None), Tag.deleted_at.is_(None))  # type: ignore[arg-type]
+            .group_by(TagBinding.tag_id)
         )
         result = await self.session.execute(stmt)
         return {tag_id: count for tag_id, count in result.all()}
@@ -769,10 +758,10 @@ class SearchService:
             select(Thread.thread_id, Tag.id, Tag.name)
             .select_from(Thread)
             .outerjoin(
-                ThreadTagLink,
-                Thread.id == ThreadTagLink.thread_id,  # type: ignore[arg-type]
+                TagBinding,
+                and_(Thread.id == TagBinding.target_id, TagBinding.target_type == "thread", TagBinding.ended_at.is_(None)),  # type: ignore[arg-type]
             )
-            .outerjoin(Tag, ThreadTagLink.tag_id == Tag.id)  # type: ignore[arg-type]
+            .outerjoin(Tag, and_(TagBinding.tag_id == Tag.id, Tag.deleted_at.is_(None)))  # type: ignore[arg-type]
             .where(*filters)
         )
         rows = (await self.session.execute(statement)).all()

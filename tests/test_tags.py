@@ -5,7 +5,7 @@
 - get_or_create_tags（INSERT ON CONFLICT DO UPDATE）
 - get_all_tags / get_tags_for_channels
 - update_tag_name
-- 跨表聚合查询（Tag → ThreadTagLink → Thread）
+- 跨表聚合查询（Tag → TagBinding → Thread）
 
 PG 关注点：pg_insert(Tag).on_conflict_do_update()
 """
@@ -16,7 +16,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from models import Tag, Thread, ThreadTagLink
+from models import Tag, Thread, TagBinding
 from core.tag_repository import TagRepository
 from shared.time_utils import utc_now
 
@@ -32,7 +32,7 @@ async def tag_session(
 
 @pytest_asyncio.fixture(scope="function")
 async def seeded_tag_session(tag_session: AsyncSession) -> AsyncSession:
-    """预填充 Tag + Thread + ThreadTagLink 数据。"""
+    """预填充 Tag + Thread + TagBinding 数据。"""
     # 创建线程
     threads = [
         Thread(
@@ -78,18 +78,18 @@ async def seeded_tag_session(tag_session: AsyncSession) -> AsyncSession:
         }
     )
 
-    # 获取内部 ID → 直接创建 ThreadTagLink（与生产代码一致：ThreadTagLink.thread_id = Thread.id）
+    # 获取内部 ID → 直接创建 TagBinding（与生产代码一致：TagBinding.target_id = Thread.id）
     for t in threads:
         await tag_session.refresh(t)
     id_map = {t.thread_id: t.id for t in threads}
     tag_ids = {t.discord_tag_id: t.id for t in await repo.get_all_tags()}
 
     links = [
-        ThreadTagLink(thread_id=id_map[101], tag_id=tag_ids[10]),
-        ThreadTagLink(thread_id=id_map[101], tag_id=tag_ids[20]),
-        ThreadTagLink(thread_id=id_map[102], tag_id=tag_ids[10]),
-        ThreadTagLink(thread_id=id_map[102], tag_id=tag_ids[30]),
-        ThreadTagLink(thread_id=id_map[201], tag_id=tag_ids[40]),
+        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[101], tag_id=tag_ids[10]),
+        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[101], tag_id=tag_ids[20]),
+        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[102], tag_id=tag_ids[10]),
+        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[102], tag_id=tag_ids[30]),
+        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[201], tag_id=tag_ids[40]),
     ]
     tag_session.add_all(links)
     await tag_session.commit()
@@ -147,8 +147,8 @@ class TestGetTagsForChannels:
         stmt = (
             select(func.count(func.distinct(Tag.id)))
             .select_from(Tag)
-            .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id)
-            .join(Thread, ThreadTagLink.thread_id == Thread.id)
+            .join(TagBinding, Tag.id == TagBinding.tag_id)
+            .join(Thread, TagBinding.target_id == Thread.id)
             .where(Thread.channel_id == 1)
         )
         r = await seeded_tag_session.execute(stmt)
@@ -163,8 +163,8 @@ class TestGetTagsForChannels:
         stmt = (
             select(Tag.name)
             .select_from(Tag)
-            .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id)
-            .join(Thread, ThreadTagLink.thread_id == Thread.id)
+            .join(TagBinding, Tag.id == TagBinding.tag_id)
+            .join(Thread, TagBinding.target_id == Thread.id)
             .where(Thread.channel_id == 2)
         )
         r = await seeded_tag_session.execute(stmt)
@@ -211,7 +211,7 @@ class TestGetAllTags:
         stmt = (
             select(func.count(func.distinct(Tag.id)))
             .select_from(Tag)
-            .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id)
+            .join(TagBinding, Tag.id == TagBinding.tag_id)
         )
         r = await seeded_tag_session.execute(stmt)
         count = r.scalar_one()
@@ -241,7 +241,7 @@ class TestUpdateTagName:
 
 @pytest.mark.asyncio
 class TestCrossTableAggregation:
-    """跨表聚合查询 — Tag → ThreadTagLink → Thread"""
+    """跨表聚合查询 — Tag → TagBinding → Thread"""
 
     async def test_aggregate_tag_thread_count(self, seeded_tag_session: AsyncSession):
         """按标签聚合帖子数"""
@@ -253,8 +253,8 @@ class TestCrossTableAggregation:
                 func.count(func.distinct(Thread.id)),
             )
             .select_from(Tag)
-            .join(ThreadTagLink, Tag.id == ThreadTagLink.tag_id)
-            .join(Thread, ThreadTagLink.thread_id == Thread.id)
+            .join(TagBinding, Tag.id == TagBinding.tag_id)
+            .join(Thread, TagBinding.target_id == Thread.id)
             .group_by(Tag.name)
         )
         result = await seeded_tag_session.execute(stmt)

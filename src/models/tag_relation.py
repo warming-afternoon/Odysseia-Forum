@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, CheckConstraint, Column, ForeignKey
+from sqlalchemy import BigInteger, CheckConstraint, Column
 from sqlmodel import Field, SQLModel
 
 
@@ -8,13 +8,13 @@ class TagRelation(SQLModel, table=True):
     __tablename__ = "tag_relation"
 
     source_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("tag.id"), primary_key=True),
+        sa_column=Column(BigInteger, primary_key=True),
         description="关系源标签的内部 ID；包含关系中为子标签",
     )
     """关系源标签的内部 ID；包含关系中为子标签"""
 
     target_id: int = Field(
-        sa_column=Column(BigInteger, ForeignKey("tag.id"), primary_key=True),
+        sa_column=Column(BigInteger, primary_key=True),
         description="关系目标标签的内部 ID；包含关系中为父标签",
     )
     """关系目标标签的内部 ID；包含关系中为父标签"""

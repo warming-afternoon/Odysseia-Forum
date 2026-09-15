@@ -4,10 +4,9 @@ from typing import TYPE_CHECKING, List
 from sqlalchemy import BigInteger, CheckConstraint, Index, text
 from sqlmodel import Column, Field, Relationship, SQLModel
 
-from models import ThreadTagLink
 
 if TYPE_CHECKING:
-    from models import TagVote, Thread
+    from models import Thread
 
 
 class Tag(SQLModel, table=True):
@@ -23,7 +22,7 @@ class Tag(SQLModel, table=True):
             postgresql_where=text("source = 'custom'"),
         ),
         CheckConstraint(
-            "(source = 'custom' AND category IS NOT NULL AND category BETWEEN 1 AND 7 AND discord_tag_id IS NULL) OR (source = 'discord' AND category IS NULL)",
+            "(source = 'custom' AND ((category BETWEEN 1 AND 7 AND category IS NOT NULL) OR (category IS NULL AND discord_tag_id IS NOT NULL))) OR (source = 'discord' AND category IS NULL AND discord_tag_id IS NOT NULL)",
             name="ck_tag_source_category",
         ),
     )
@@ -50,15 +49,21 @@ class Tag(SQLModel, table=True):
     discord_tag_id: int | None = Field(
         default=None,
         sa_column=Column(BigInteger, unique=True),
-        description="DC 原生标签的唯一 Discord ID，用于同步定位；自定义标签为空",
+        description="DC 原生标签的唯一 Discord ID，用于同步定位；转换标签保留原始 ID",
     )
-    """DC 原生标签的唯一 Discord ID，用于同步定位；自定义标签为空"""
+    """DC 原生标签的唯一 Discord ID，用于同步定位；转换标签保留原始 ID"""
+
+    discord_channel_id: int | None = Field(default=None, sa_column=Column(BigInteger, index=True), description="原始 DC 来源频道 ID，转换后保留用于溯源")
+    """标签来源频道；不因转为自定义实体而清空"""
+
+    discord_synced_at: datetime | None = Field(default=None, description="最近一次完整频道同步确认时间（UTC）")
+    """用于识别已完成同步及离线补偿的时间"""
 
     category: int | None = Field(
         default=None,
-        description="自定义分类：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；原生标签为空",
+        description="自定义分类：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；原生及未分类转换标签为空",
     )
-    """自定义分类：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；原生标签为空"""
+    """自定义分类：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；原生及未分类转换标签为空"""
 
     enabled: bool = Field(
         default=True,
@@ -73,20 +78,11 @@ class Tag(SQLModel, table=True):
     """软删除时间（UTC）；为空表示未删除，恢复实体时不恢复旧绑定"""
 
     threads: List["Thread"] = Relationship(
-        back_populates="tags",
         sa_relationship_kwargs={
-            "primaryjoin": "Tag.id == ThreadTagLink.tag_id",
-            "secondaryjoin": "Thread.id == ThreadTagLink.thread_id",
-            "secondary": ThreadTagLink.__table__,
+            "secondary": "tag_binding",
+            "primaryjoin": "and_(Tag.id == foreign(TagBinding.tag_id), Tag.deleted_at.is_(None))",
+            "secondaryjoin": "and_(Thread.id == foreign(TagBinding.target_id), TagBinding.target_type == 'thread', TagBinding.ended_at.is_(None))",
+            "viewonly": True,
         },
     )
-    """通过原生标签关联表连接的帖子；自定义绑定由 CustomTagBinding 独立记录"""
-
-    votes: List["TagVote"] = Relationship(
-        back_populates="tag",
-        sa_relationship_kwargs={
-            "primaryjoin": "Tag.id == TagVote.tag_id",
-            "foreign_keys": "[TagVote.tag_id]",
-        },
-    )
-    """原有原生标签投票关系；自定义标签投票由 CustomTagVote 独立记录"""
+    """通过统一有效绑定查询帖子；迁移备份表不参与 ORM 关系"""

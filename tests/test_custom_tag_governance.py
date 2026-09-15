@@ -18,7 +18,7 @@ from core.tag_repository import TagRepository
 from dto.events.tag_command import TagCommand
 from models import Booklist, Notification, Thread
 from core.thread_repository import ThreadRepository
-from models.custom_tag_binding import CustomTagBinding
+from models.tag_binding import TagBinding
 from models.operation_log import OperationLog
 from models.tag_proposal import TagProposal
 from shared.tag_error import TagError
@@ -53,6 +53,7 @@ async def setup_tags(monkeypatch):
     async with factory() as session, session.begin():
         session.add(
             Thread(
+                id=100,
                 thread_id=100,
                 guild_id=10,
                 channel_id=20,
@@ -136,7 +137,7 @@ async def test_internal_id_and_alias_lifecycle(setup_tags):
     await call("manage", 99, operation="restore", tag_id=a["id"])
     assert not (await call("read", target_type="thread", target_id=100))["tags"]
     async with factory() as session:
-        history = (await session.execute(select(CustomTagBinding))).scalar_one()
+        history = (await session.execute(select(TagBinding))).scalar_one()
         assert history.end_reason == "tag_deleted"
 
 
@@ -210,7 +211,7 @@ async def test_proposals_timeout_and_notifications(setup_tags):
     await worker.expire()
     async with factory() as session:
         assert (
-            len((await session.execute(select(CustomTagBinding))).scalars().all()) == 1
+            len((await session.execute(select(TagBinding))).scalars().all()) == 1
         )
 
 
@@ -238,7 +239,7 @@ async def test_versions_permissions_and_search(setup_tags):
     await call("manage", 99, operation="disable", tag_id=tag["id"])
     async with factory() as session:
         query = select(Thread).where(
-            *tag_filters("thread", Thread.thread_id, [tag["id"]], [])
+            *tag_filters("thread", Thread.id, [tag["id"]], [])
         )
         assert (await session.execute(query)).scalar_one().thread_id == 100
     await call("manage", 99, operation="delete", tag_id=tag["id"])
@@ -397,7 +398,7 @@ async def test_unified_tag_filter_mixed_sources(setup_tags):
     async def matched(included, excluded=(), logic="and"):
         async with factory() as session:
             query = select(Thread.thread_id).where(
-                *tag_filters("thread", Thread.thread_id, included, excluded, logic)
+                *tag_filters("thread", Thread.id, included, excluded, logic)
             )
             return set((await session.execute(query)).scalars())
 
@@ -445,7 +446,7 @@ async def test_legacy_migration_preserves_keys(setup_tags):
         await session.execute(
             text("CREATE TABLE tag (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL)")
         )
-        await session.execute(text("CREATE TABLE thread (id INTEGER PRIMARY KEY)"))
+        await session.execute(text("CREATE TABLE thread (id INTEGER PRIMARY KEY, channel_id BIGINT NOT NULL)"))
         await session.execute(
             text("CREATE TABLE thread_tag_link (thread_id INTEGER, tag_id BIGINT)")
         )
@@ -457,6 +458,9 @@ async def test_legacy_migration_preserves_keys(setup_tags):
         await session.execute(
             text("INSERT INTO tag VALUES (:id, '旧标签')"), {"id": old_id}
         )
+        await session.execute(text("INSERT INTO thread VALUES (1, 20)"))
+        await session.execute(text("CREATE TABLE tag_vote (id SERIAL PRIMARY KEY, vote INTEGER)"))
+        await session.execute(text("INSERT INTO tag_vote (vote) VALUES (1)"))
         await session.execute(
             text("INSERT INTO thread_tag_link VALUES (1, :id)"), {"id": old_id}
         )
@@ -480,6 +484,11 @@ async def test_legacy_migration_preserves_keys(setup_tags):
         assert (
             await session.execute(text("SELECT tag_id FROM thread_tag_link"))
         ).scalar_one() == old_id
+        binding = (await session.execute(text("SELECT target_id, tag_id, binding_source, upvotes, downvotes FROM tag_binding"))).one()
+        assert binding == (1, old_id, "discord_sync", 0, 0)
+        assert (await session.execute(text("SELECT count(*) FROM tag_vote"))).scalar_one() == 0
+        assert (await session.execute(text("SELECT data_type FROM information_schema.columns WHERE table_schema=:schema AND table_name='tag_binding' AND column_name='id'"), {"schema": schema})).scalar_one() == "bigint"
+        assert (await session.execute(text("SELECT count(*) FROM information_schema.table_constraints WHERE constraint_schema=:schema AND constraint_type='FOREIGN KEY'"), {"schema": schema})).scalar_one() == 0
         await session.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
 
 

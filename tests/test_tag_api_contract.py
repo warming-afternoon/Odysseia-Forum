@@ -86,7 +86,7 @@ async def test_http_path_and_body_ids_are_normalized(monkeypatch):
     application.include_router(tags.router, prefix="/v1")
     application.dependency_overrides[require_auth] = lambda: {"id": "123"}
     dispatch = AsyncMock(return_value={
-        "id": str(BIG_ID), "tag_id": str(BIG_ID), "status": "pending",
+        "id": str(BIG_ID), "tag_id": str(BIG_ID), "tag_name": "测试", "status": "pending",
         "reason": None, "created_at": "2026-09-14T00:00:00Z",
         "due_at": "2026-09-21T00:00:00Z", "resolved_at": None,
     })
@@ -134,7 +134,7 @@ def test_update_schema_matches_validation():
 async def test_custom_tags_are_assembled_as_typed_models():
     """批量装配生成共享 DTO，响应序列化保留完整字符串 ID。"""
     binding = SimpleNamespace(id=BIG_ID + 1, target_id=BIG_ID, upvotes=3, downvotes=1)
-    tag = SimpleNamespace(id=BIG_ID, name="爱丽丝(BA)", category=3, enabled=False)
+    tag = SimpleNamespace(id=BIG_ID, name="爱丽丝(BA)", category=3, enabled=False, source="custom")
     session = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [(binding, tag)])))
     result = await load_custom_tags(session, "thread", [BIG_ID])
     item = result[BIG_ID][0]

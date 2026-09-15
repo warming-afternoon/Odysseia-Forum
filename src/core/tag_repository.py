@@ -17,7 +17,7 @@ class TagRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_or_create_tags(self, tags_data: dict[int, str]) -> List[Tag]:
+    async def get_or_create_tags(self, tags_data: dict[int, str], update_names: bool = True) -> List[Tag]:
         """
         根据 Discord 标签 ID 和名称获取原生实体，返回内部 ID。
         """
@@ -37,9 +37,11 @@ class TagRepository:
         # Discord ID 冲突只更新名称，不改变内部主键。
         # 'excluded' 是一个特殊的对象，代表了在 INSERT 语句中试图插入的值
         update_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=[Tag.discord_tag_id], set_={"name": insert_stmt.excluded.name}
+            index_elements=[Tag.discord_tag_id], set_={"name": insert_stmt.excluded.name}, where=Tag.source == "discord"
         )
 
+        if not update_names:
+            update_stmt = insert_stmt.on_conflict_do_nothing(index_elements=[Tag.discord_tag_id])
         await self.session.execute(update_stmt)
 
         # 查询所有相关的标签对象

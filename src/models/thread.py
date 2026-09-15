@@ -5,12 +5,11 @@ from sqlalchemy import Index, event, func, inspect, text
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlmodel import JSON, BigInteger, Column, Field, Relationship, SQLModel
 
-from models import ThreadTagLink
 from shared.text_utils import build_search_vector_text
 from shared.time_utils import utc_now
 
 if TYPE_CHECKING:
-    from models import Author, Tag, TagVote
+    from models import Author, Tag
 
 
 class Thread(SQLModel, table=True):
@@ -123,23 +122,15 @@ class Thread(SQLModel, table=True):
     """在搜索结果中的总展示次数"""
 
     tags: List["Tag"] = Relationship(
-        back_populates="threads",
         sa_relationship_kwargs={
-            "primaryjoin": "Thread.id == ThreadTagLink.thread_id",
-            "secondaryjoin": "ThreadTagLink.tag_id == Tag.id",
-            "secondary": ThreadTagLink.__table__,
+            "secondary": "tag_binding",
+            "primaryjoin": "and_(Thread.id == foreign(TagBinding.target_id), TagBinding.target_type == 'thread', TagBinding.ended_at.is_(None))",
+            "secondaryjoin": "and_(Tag.id == foreign(TagBinding.tag_id), Tag.deleted_at.is_(None))",
+            "viewonly": True,
         },
     )
-    """帖子关联的标签列表"""
+    """统一绑定中的全部有效标签，只读；写入由绑定仓储负责"""
 
-    votes: List["TagVote"] = Relationship(
-        back_populates="thread",
-        sa_relationship_kwargs={
-            "primaryjoin": "Thread.id == TagVote.thread_id",
-            "foreign_keys": "[TagVote.thread_id]",
-        },
-    )
-    """帖子关联的标签投票记录"""
 
     author: Optional["Author"] = Relationship(
         sa_relationship_kwargs={

@@ -14,6 +14,9 @@ class TagProposalResponse(BaseModel):
     tag_id: str = Field(description="提议标签内部 ID，以十进制字符串返回")
     """提议标签内部 ID，以十进制字符串返回"""
 
+    tag_name: str = Field(description="申请标签的当前标准名")
+    """申请标签标准名，历史操作名称见审计记录"""
+
     status: Literal["pending", "approved", "rejected", "failed"] = Field(
         description="pending 待审核，approved 通过，rejected 拒绝，failed 生效校验失败"
     )

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Column, JSON
+from sqlalchemy import BigInteger, Column, JSON, Index
 from sqlmodel import Field, SQLModel
 
 from shared.time_utils import utc_now
@@ -10,9 +10,10 @@ class OperationLog(SQLModel, table=True):
     """保存管理与治理操作的审计快照，支持扩展其他操作类型。"""
 
     __tablename__ = "operation_log"
+    __table_args__ = (Index("ix_operation_log_target_history", "target_type", "target_id", "id"),)
 
     id: int | None = Field(
-        default=None, primary_key=True, description="操作日志的内部主键"
+        default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True), description="操作日志的内部主键"
     )
     """操作日志的内部主键"""
 
@@ -37,9 +38,9 @@ class OperationLog(SQLModel, table=True):
 
     target_id: int = Field(
         sa_column=Column(BigInteger, nullable=False, index=True),
-        description="操作目标 ID：Discord 帖子 ID、内部书单 ID 或内部标签 ID，由 target_type 决定",
+        description="操作目标 ID：内部帖子 ID、内部书单 ID 或内部标签 ID，由 target_type 决定",
     )
-    """操作目标 ID：Discord 帖子 ID、内部书单 ID 或内部标签 ID，由 target_type 决定"""
+    """操作目标 ID：内部帖子 ID、内部书单 ID 或内部标签 ID，由 target_type 决定"""
 
     tag_id: int | None = Field(
         default=None,

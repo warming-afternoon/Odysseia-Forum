@@ -1,3 +1,9 @@
+from core.discord_tag_sync_service import DiscordTagSyncService
+from dto.events.discord_tags_snapshot import DiscordTagsSnapshot
+from models import Tag
+from shared.time_utils import utc_now
+from tag.tag_category_select import TagCategorySelect
+
 import json
 import logging
 
@@ -17,6 +23,7 @@ class TagCog(commands.Cog):
     """提供 BOT 标签管理命令与审核后台任务。"""
 
     def __init__(self, bot, session_factory, config):
+        self.session_factory = session_factory
         self.bot = bot
         self.config = config
         self.worker = TagWorker(session_factory, config)
@@ -24,11 +31,16 @@ class TagCog(commands.Cog):
 
     async def cog_load(self):
         """启动可恢复的审核和通知循环。"""
+        self.bot.add_dynamic_items(TagCategorySelect)
+        self.bot.event_mediator.register(DiscordTagsSnapshot, self.sync_snapshot)
+        self.reconcile.start()
         self.expire.start()
         self.notify.start()
 
     async def cog_unload(self):
         """停止后台循环。"""
+        self.reconcile.cancel()
+        self.bot.remove_dynamic_items(TagCategorySelect)
         self.expire.cancel()
         self.notify.cancel()
 
@@ -44,7 +56,7 @@ class TagCog(commands.Cog):
     async def notify(self):
         """逐条发送持久化通知。"""
         try:
-            await self.worker.deliver(self.send_notice)
+            await self.worker.deliver(self.send_notice, self.send_lifecycle_notice)
         except Exception:
             logger.exception("标签通知循环失败")
 
@@ -56,6 +68,8 @@ class TagCog(commands.Cog):
     async def send_notice(self, proposal):
         """私信失败后在帖子提醒，书单和不可写帖子使用站内通知。"""
         frontend = self.config.get("auth", {}).get("frontend_url", "").rstrip("/")
+        path = "threads" if proposal.target_type == "thread" else "booklists"
+        frontend = f"{frontend}/{path}/{proposal.target_id}"
         message = (
             f"你有一条待审核的标签提议（申请 {proposal.id}，"
             f"{'帖子' if proposal.target_type == 'thread' else '书单'} {proposal.target_id}）。"
@@ -86,6 +100,47 @@ class TagCog(commands.Cog):
             except (discord.Forbidden, discord.NotFound):
                 pass
         return False
+
+    async def sync_snapshot(self, event):
+        """接收跨模块快照事件并持久化标签生命周期变化。"""
+        async with self.session_factory() as session, session.begin():
+            await DiscordTagSyncService(session).apply(event)
+
+    @tasks.loop(minutes=10)
+    async def reconcile(self):
+        """启动后及周期性读取完整频道快照，补偿离线事件。"""
+        for channel_id in list(self.bot.cache_service.indexed_channels):
+            try:
+                observed_at = utc_now()
+                channel = await self.bot.fetch_channel(channel_id)
+                if isinstance(channel, discord.ForumChannel):
+                    await self.bot.event_mediator.publish(DiscordTagsSnapshot(
+                        channel.id, {t.id: t.name for t in channel.available_tags}, observed_at))
+            except Exception:
+                logger.exception("频道标签同步失败，保留已有数据 channel_id=%s", channel_id)
+
+    @reconcile.before_loop
+    async def before_reconcile(self):
+        """等待连接完成再执行启动补偿。"""
+        await self.bot.wait_until_ready()
+
+    async def send_lifecycle_notice(self, task):
+        """发送转换或分类冲突提醒，失败交由持久化任务重试。"""
+        channel_id = self.config.get("banner", {}).get("review_thread_id")
+        if not channel_id:
+            raise RuntimeError("未配置 banner.review_thread_id")
+        async with self.session_factory() as session:
+            tag = await session.get(Tag, task.tag_id)
+            if tag is None:
+                return
+            title = "DC 标签已转为自定义标签，等待分类" if task.kind == "converted" else "标签分类发生名称冲突，请手动检查数据库"
+            message = f"{title}\n标签：{tag.name}（内部 ID：{tag.id}）\n来源频道：{tag.discord_channel_id}"
+            view = None
+            if task.kind == "converted" and tag.source == "custom" and tag.category is None and tag.deleted_at is None:
+                view = discord.ui.View(timeout=None)
+                view.add_item(TagCategorySelect(tag.id))
+        channel = await self.bot.fetch_channel(int(channel_id))
+        await channel.send(message, view=view, allowed_mentions=discord.AllowedMentions.none())
 
     @app_commands.command(
         name="tag_manage", description="BOT 管理员维护标签池，提交 JSON 管理命令"
