@@ -231,9 +231,7 @@ async def test_publish_update_rolls_back_when_fanout_fails(
 
     async with db_session_factory() as session:
         thread = (
-            await session.execute(
-                select(Thread).where(Thread.thread_id == thread_id)
-            )
+            await session.execute(select(Thread).where(Thread.thread_id == thread_id))
         ).scalar_one()
         update_count = (
             await session.execute(

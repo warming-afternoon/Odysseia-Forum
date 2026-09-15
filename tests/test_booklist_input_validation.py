@@ -17,7 +17,9 @@ OVERFLOW_MESSAGE = (
 INVALID_MESSAGE = "帖子 ID 必须是有效的正整数。"
 
 
-@pytest.mark.parametrize("value", [1, "1", MAX_ID, str(MAX_ID), "000123", "0" * 5000 + "1"])
+@pytest.mark.parametrize(
+    "value", [1, "1", MAX_ID, str(MAX_ID), "000123", "0" * 5000 + "1"]
+)
 def test_valid_thread_id_is_normalized(value):
     """合法 ID 保持整数形式，前导零不影响范围判断。"""
     item = BooklistItemAddData(thread_id=value)
@@ -28,8 +30,31 @@ def test_valid_thread_id_is_normalized(value):
 
 @pytest.mark.parametrize(
     "value, message",
-    [(v, OVERFLOW_MESSAGE) for v in [MAX_ID + 1, str(MAX_ID + 1), PASTED_ID, str(PASTED_ID), "9" * 5000]]
-    + [(v, INVALID_MESSAGE) for v in [0, "0", -1, "-1", True, False, 1.0, 1.5, None, "", "abc", "1,2", " ", [], {}, "²"]],
+    [
+        (v, OVERFLOW_MESSAGE)
+        for v in [MAX_ID + 1, str(MAX_ID + 1), PASTED_ID, str(PASTED_ID), "9" * 5000]
+    ]
+    + [
+        (v, INVALID_MESSAGE)
+        for v in [
+            0,
+            "0",
+            -1,
+            "-1",
+            True,
+            False,
+            1.0,
+            1.5,
+            None,
+            "",
+            "abc",
+            "1,2",
+            " ",
+            [],
+            {},
+            "²",
+        ]
+    ],
 )
 def test_invalid_thread_id_has_chinese_message(value, message):
     """非法类型与越界 ID 返回对应中文提示。"""

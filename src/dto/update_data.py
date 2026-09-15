@@ -7,4 +7,3 @@ class UpdateData(TypedDict):
 
     increment: int
     last_active_at: datetime | None
-

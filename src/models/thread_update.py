@@ -1,7 +1,14 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, Index, String, UniqueConstraint
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    Index,
+    String,
+    UniqueConstraint,
+)
 from sqlmodel import Field, SQLModel
 
 from shared.time_utils import utc_now

@@ -15,4 +15,3 @@ class ThreadUpdateDTO:
     source_message_at: datetime
     published_at: datetime
     overview_message_id: int | None
-

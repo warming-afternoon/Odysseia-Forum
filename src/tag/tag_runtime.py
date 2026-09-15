@@ -21,7 +21,9 @@ def create_tag_mediator(session_factory, config) -> EventMediator:
             conflict_id = exc.detail.get("conflict_tag_id")
             if conflict_id:
                 async with session_factory() as session, session.begin():
-                    session.add(TagNotificationTask(kind="conflict", tag_id=int(conflict_id)))
+                    session.add(
+                        TagNotificationTask(kind="conflict", tag_id=int(conflict_id))
+                    )
             raise
         except IntegrityError as exc:
             raise TagError("concurrent_conflict", "数据已变化，请刷新后重试") from exc

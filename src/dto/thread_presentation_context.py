@@ -17,4 +17,3 @@ class ThreadPresentationContext:
 
     custom_tags: dict[int, list[CustomTagBindingResponse]] = field(default_factory=dict)
     """以内部帖子 ID 为键的当前本地标签列表，包含分类、绑定轮次及正负票数"""
-

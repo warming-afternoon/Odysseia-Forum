@@ -301,13 +301,21 @@ class SearchService:
                 filters.append(and_(*conditions))
 
             # 标签过滤
-            filters.extend(tag_filters(
-                "thread", Thread.id, query.include_tag_ids,
-                query.exclude_tag_ids, query.tag_logic,
-            ))
+            filters.extend(
+                tag_filters(
+                    "thread",
+                    Thread.id,
+                    query.include_tag_ids,
+                    query.exclude_tag_ids,
+                    query.tag_logic,
+                )
+            )
             if query.include_tags:
                 if query.tag_logic == "and":
-                    filters.extend(Thread.tags.any(Tag.name == name) for name in set(query.include_tags))
+                    filters.extend(
+                        Thread.tags.any(Tag.name == name)
+                        for name in set(query.include_tags)
+                    )
                 else:
                     filters.append(Thread.tags.any(Tag.name.in_(query.include_tags)))
             if query.exclude_tags:
@@ -538,7 +546,12 @@ class SearchService:
                 BooklistItem,
                 Thread.thread_id == BooklistItem.thread_id,  # type: ignore
             )
-            .where(BooklistItem.owner_id == user_id, TagBinding.target_type == "thread", TagBinding.ended_at.is_(None), Tag.deleted_at.is_(None))
+            .where(
+                BooklistItem.owner_id == user_id,
+                TagBinding.target_type == "thread",
+                TagBinding.ended_at.is_(None),
+                Tag.deleted_at.is_(None),
+            )
             .distinct()
         )
         result = await self.session.execute(statement)
@@ -554,7 +567,13 @@ class SearchService:
 
         stmt = (
             select(TagBinding.tag_id, func.count(TagBinding.target_id))
-            .join(Tag, Tag.id == TagBinding.tag_id).where(TagBinding.tag_id.in_(tag_ids), TagBinding.target_type == "thread", TagBinding.ended_at.is_(None), Tag.deleted_at.is_(None))  # type: ignore[arg-type]
+            .join(Tag, Tag.id == TagBinding.tag_id)
+            .where(
+                TagBinding.tag_id.in_(tag_ids),
+                TagBinding.target_type == "thread",
+                TagBinding.ended_at.is_(None),
+                Tag.deleted_at.is_(None),
+            )  # type: ignore[arg-type]
             .group_by(TagBinding.tag_id)
         )
         result = await self.session.execute(stmt)
@@ -759,7 +778,11 @@ class SearchService:
             .select_from(Thread)
             .outerjoin(
                 TagBinding,
-                and_(Thread.id == TagBinding.target_id, TagBinding.target_type == "thread", TagBinding.ended_at.is_(None)),  # type: ignore[arg-type]
+                and_(
+                    Thread.id == TagBinding.target_id,
+                    TagBinding.target_type == "thread",
+                    TagBinding.ended_at.is_(None),
+                ),  # type: ignore[arg-type]
             )
             .outerjoin(Tag, and_(TagBinding.tag_id == Tag.id, Tag.deleted_at.is_(None)))  # type: ignore[arg-type]
             .where(*filters)
@@ -852,9 +875,7 @@ class SearchService:
         if prefs and prefs.exclude_tags:
             thread_repo = ThreadRepository(self.session)
             all_channel_ids = list(await thread_repo.get_all_indexed_channel_ids())
-            channel_result = ChannelMappingUtils(
-                channel_mappings_config or {}
-            ).resolve(
+            channel_result = ChannelMappingUtils(channel_mappings_config or {}).resolve(
                 channel_ids=None,
                 include_tags=[],
                 exclude_tags=prefs.exclude_tags,

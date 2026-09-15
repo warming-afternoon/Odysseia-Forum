@@ -93,13 +93,23 @@ class TagStatisticsService:
             bucket = tag_buckets[key]
             bucket["total"] += count
             bucket["ids"].update(ids)
-            guild_id, guild_name, channel_name, cat_id, cat_name = self._get_channel_meta(channel_id)
-            bucket["channels"].append(ChannelTagInfo(
-                guild_id=guild_id, guild_name=guild_name, channel_id=channel_id,
-                channel_name=channel_name, category_id=cat_id, category_name=cat_name,
-                tag_id=min(ids), tag_ids=[str(v) for v in sorted(ids)],
-                thread_count=count, is_virtual=False,
-            ))
+            guild_id, guild_name, channel_name, cat_id, cat_name = (
+                self._get_channel_meta(channel_id)
+            )
+            bucket["channels"].append(
+                ChannelTagInfo(
+                    guild_id=guild_id,
+                    guild_name=guild_name,
+                    channel_id=channel_id,
+                    channel_name=channel_name,
+                    category_id=cat_id,
+                    category_name=cat_name,
+                    tag_id=min(ids),
+                    tag_ids=[str(v) for v in sorted(ids)],
+                    thread_count=count,
+                    is_virtual=False,
+                )
+            )
         virtual_buckets = defaultdict(lambda: {"total": 0, "channels": []})
         if request.include_virtual:
             await self._append_virtual_tag_stats(virtual_buckets, request)
@@ -111,27 +121,54 @@ class TagStatisticsService:
             channel_ids=scoped_channel_ids,
         )
 
-        items = [TagStatItem(
-            tag_name=name, source=source, category=category,
-            category_name=TagCategory(category).name if category else None,
-            tag_ids=[str(v) for v in sorted(data["ids"])],
-            total_thread_count=data["total"], channel_info=data["channels"],
-        ) for (source, category, name), data in tag_buckets.items()]
-        items.extend(TagStatItem(tag_name=name, source="virtual",
-            total_thread_count=data["total"], channel_info=data["channels"])
-            for name, data in virtual_buckets.items() if data["channels"])
+        items = [
+            TagStatItem(
+                tag_name=name,
+                source=source,
+                category=category,
+                category_name=TagCategory(category).name if category else None,
+                tag_ids=[str(v) for v in sorted(data["ids"])],
+                total_thread_count=data["total"],
+                channel_info=data["channels"],
+            )
+            for (source, category, name), data in tag_buckets.items()
+        ]
+        items.extend(
+            TagStatItem(
+                tag_name=name,
+                source="virtual",
+                total_thread_count=data["total"],
+                channel_info=data["channels"],
+            )
+            for name, data in virtual_buckets.items()
+            if data["channels"]
+        )
         items.sort(key=lambda item: (-item.total_thread_count, item.tag_name))
         return TagStatsResponse(total_threads=total_threads, items=items)
 
     async def _get_real_tag_rows(self, guild_id, channel_ids):
         """按来源、分类、名称和频道聚合有效绑定，并对同组帖子去重。"""
-        statement = (select(Tag.name, Tag.source, Tag.category, Thread.channel_id,
-            func.count(func.distinct(Thread.id)), func.array_agg(func.distinct(Tag.id)))
-            .select_from(TagBinding).join(Tag, Tag.id == TagBinding.tag_id)
+        statement = (
+            select(
+                Tag.name,
+                Tag.source,
+                Tag.category,
+                Thread.channel_id,
+                func.count(func.distinct(Thread.id)),
+                func.array_agg(func.distinct(Tag.id)),
+            )
+            .select_from(TagBinding)
+            .join(Tag, Tag.id == TagBinding.tag_id)
             .join(Thread, Thread.id == TagBinding.target_id)
-            .where(TagBinding.target_type == "thread", TagBinding.ended_at.is_(None),
-                   Tag.deleted_at.is_(None), Thread.not_found_count == 0, Thread.show_flag.is_(True))
-            .group_by(Tag.name, Tag.source, Tag.category, Thread.channel_id))
+            .where(
+                TagBinding.target_type == "thread",
+                TagBinding.ended_at.is_(None),
+                Tag.deleted_at.is_(None),
+                Thread.not_found_count == 0,
+                Thread.show_flag.is_(True),
+            )
+            .group_by(Tag.name, Tag.source, Tag.category, Thread.channel_id)
+        )
         if guild_id is not None:
             statement = statement.where(Thread.guild_id == guild_id)
         if channel_ids:

@@ -92,7 +92,11 @@ class CustomTagService:
         if kind not in ("thread", "booklist"):
             raise TagError("invalid_target", "目标类型无效", 422)
         model = Thread if kind == "thread" else Booklist
-        key = (Thread.id if payload.get("_internal_target") else Thread.thread_id) if kind == "thread" else Booklist.id
+        key = (
+            (Thread.id if payload.get("_internal_target") else Thread.thread_id)
+            if kind == "thread"
+            else Booklist.id
+        )
         target = await self.repo(model).one(key == target_id, lock=True)
         if target is None:
             raise TagError("not_found", "目标不存在", 404)
@@ -157,7 +161,10 @@ class CustomTagService:
         ).one()
         version_data.append(str(tuple(history)))
         version_data.append(str(getattr(target, "native_tag_revision", 0)))
-        result = [dict(self.tag_data(t), readonly=True, binding_source="discord_sync") for t in native]
+        result = [
+            dict(self.tag_data(t), readonly=True, binding_source="discord_sync")
+            for t in native
+        ]
         for tag in tags:
             binding = bindings[tag.id]
             result.append(
@@ -183,7 +190,9 @@ class CustomTagService:
 
     async def validate(self, kind, target, current, desired):
         """验证目标最终集合，不计算包含关系。"""
-        tags = await self.repo(Tag).rows(Tag.id.in_(desired), *([Tag.source == "custom"] if kind == "thread" else []))
+        tags = await self.repo(Tag).rows(
+            Tag.id.in_(desired), *([Tag.source == "custom"] if kind == "thread" else [])
+        )
         self.tag_cache.update({tag.id: tag for tag in tags})
         relations = await self.repo(TagRelation).rows(TagRelation.kind == "excludes")
         validate_selection(
@@ -299,7 +308,9 @@ class CustomTagService:
 
     async def proposal_data(self, proposal):
         """输出不含其他用户身份的提议状态。"""
-        tag = self.tag_cache.get(proposal.tag_id) or await self.session.get(Tag, proposal.tag_id)
+        tag = self.tag_cache.get(proposal.tag_id) or await self.session.get(
+            Tag, proposal.tag_id
+        )
         return {
             "id": str(proposal.id),
             "tag_name": tag.name if tag else "已删除标签",
@@ -507,7 +518,12 @@ class CustomTagService:
             if tag is None:
                 raise TagError("not_found", "自定义标签不存在", 404)
         if action == "classify":
-            if tag is None or not tag.discord_tag_id or tag.category is not None or tag.deleted_at:
+            if (
+                tag is None
+                or not tag.discord_tag_id
+                or tag.category is not None
+                or tag.deleted_at
+            ):
                 raise TagError("already_classified", "标签已分类或不可处理")
             action = "update"
         if tag is not None:
@@ -529,14 +545,29 @@ class CustomTagService:
                 "NFC", payload.get("name", tag.name if tag else "")
             ).strip()
             category = payload.get("category", tag.category if tag else None)
-            if not name or len(name) > 100 or (category not in range(1, 8) and not (tag and tag.discord_tag_id and category is None)):
+            if (
+                not name
+                or len(name) > 100
+                or (
+                    category not in range(1, 8)
+                    and not (tag and tag.discord_tag_id and category is None)
+                )
+            ):
                 raise TagError(
                     "invalid_tag", "名称须为 1 至 100 字且分类须为 1 至 7", 422
                 )
-            duplicate = await self.repo(Tag).one(
-                Tag.source == "custom", Tag.name == name, Tag.category == category
-            ) if category is not None else None
-            if category is not None and duplicate and (tag is None or duplicate.id != tag.id):
+            duplicate = (
+                await self.repo(Tag).one(
+                    Tag.source == "custom", Tag.name == name, Tag.category == category
+                )
+                if category is not None
+                else None
+            )
+            if (
+                category is not None
+                and duplicate
+                and (tag is None or duplicate.id != tag.id)
+            ):
                 raise TagError(
                     "deleted_tag_exists" if duplicate.deleted_at else "tag_exists",
                     "该标签已删除，可恢复" if duplicate.deleted_at else "标签已存在",

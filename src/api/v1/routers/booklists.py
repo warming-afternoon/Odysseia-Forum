@@ -256,9 +256,18 @@ async def create_booklist(
     response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_public_booklists(
-    include_tag_ids: list[RequestId] | None = Query(default=None),
-    exclude_tag_ids: list[RequestId] | None = Query(default=None),
-    tag_logic: Literal["and", "or"] = "and",
+    include_tag_ids: list[RequestId] | None = Query(
+        default=None,
+        description="按书单自身绑定的标签内部 ID 筛选，不继承单内帖子的标签；多个值使用重复查询参数，接受十进制字符串或整数；按 tag_logic 组合",
+    ),
+    exclude_tag_ids: list[RequestId] | None = Query(
+        default=None,
+        description="排除自身绑定任一指定标签的书单；传标签内部 ID，多个值使用重复查询参数，接受十进制字符串或整数",
+    ),
+    tag_logic: Literal["and", "or"] = Query(
+        default="and",
+        description="包含标签的组合逻辑：and 要求全部命中，or 要求至少命中一个；仅作用于 include_tag_ids，不改变排除条件",
+    ),
     owner_id: Optional[int] = Query(None, description="创建者用户ID"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
     included_thread_id: Optional[int] = Query(
@@ -363,7 +372,9 @@ async def list_public_booklists(
 
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, booklists)
-            custom_tag_map = await load_custom_tags(session, "booklist", [b.id for b in booklists])
+            custom_tag_map = await load_custom_tags(
+                session, "booklist", [b.id for b in booklists]
+            )
 
             # 为无自定义封面的书单批量获取 fallback 封面
             fallback_covers = await _fill_fallback_covers(session, booklists)
@@ -397,9 +408,18 @@ async def list_public_booklists(
     response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_my_booklists(
-    include_tag_ids: list[RequestId] | None = Query(default=None),
-    exclude_tag_ids: list[RequestId] | None = Query(default=None),
-    tag_logic: Literal["and", "or"] = "and",
+    include_tag_ids: list[RequestId] | None = Query(
+        default=None,
+        description="按书单自身绑定的标签内部 ID 筛选，不继承单内帖子的标签；多个值使用重复查询参数，接受十进制字符串或整数；按 tag_logic 组合",
+    ),
+    exclude_tag_ids: list[RequestId] | None = Query(
+        default=None,
+        description="排除自身绑定任一指定标签的书单；传标签内部 ID，多个值使用重复查询参数，接受十进制字符串或整数",
+    ),
+    tag_logic: Literal["and", "or"] = Query(
+        default="and",
+        description="包含标签的组合逻辑：and 要求全部命中，or 要求至少命中一个；仅作用于 include_tag_ids，不改变排除条件",
+    ),
     is_public: Optional[bool] = Query(None, description="筛选公开状态 (不传则不筛选)"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
     collect_by_current_user: Optional[bool] = Query(
@@ -516,7 +536,9 @@ async def list_my_booklists(
 
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, booklists)
-            custom_tag_map = await load_custom_tags(session, "booklist", [b.id for b in booklists])
+            custom_tag_map = await load_custom_tags(
+                session, "booklist", [b.id for b in booklists]
+            )
 
             # 为无自定义封面的书单批量获取 fallback 封面
             fallback_covers = await _fill_fallback_covers(session, booklists)
@@ -583,7 +605,9 @@ async def get_booklist(
             # 获取书单创建者信息
             author_map = await _fill_authors_for_booklists(session, [booklist])
             detail = BooklistDetail.model_validate(booklist, from_attributes=True)
-            detail.custom_tags = (await load_custom_tags(session, "booklist", [booklist.id])).get(booklist.id, [])
+            detail.custom_tags = (
+                await load_custom_tags(session, "booklist", [booklist.id])
+            ).get(booklist.id, [])
             detail.collected_flag = collected_flag
             _apply_anonymous_author(detail, booklist, user_id, author_map)
 
@@ -761,7 +785,6 @@ async def delete_booklist(
         )
 
 
-
 @router.post(
     "/publish/{booklist_id}", summary="发布书单到 Discord", response_model=dict
 )
@@ -818,9 +841,7 @@ async def publish_booklist(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         logger.error(f"发布书单失败: {e}", exc_info=True)
         raise HTTPException(
@@ -828,9 +849,7 @@ async def publish_booklist(
         )
 
 
-@router.delete(
-    "/publish/{booklist_id}", summary="取消发布书单"
-)
+@router.delete("/publish/{booklist_id}", summary="取消发布书单")
 async def unpublish_booklist(
     booklist_id: int,
     current_user: Dict[str, Any] = Depends(require_auth),
@@ -1065,7 +1084,9 @@ async def get_booklist_items(
                     )
                 resolved_method = sort_method
             else:
-                resolved_method = booklist.default_sort_method or DEFAULT_SORT_METHOD.value
+                resolved_method = (
+                    booklist.default_sort_method or DEFAULT_SORT_METHOD.value
+                )
 
             if sort_order is not None:
                 if sort_order not in ("asc", "desc"):

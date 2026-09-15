@@ -287,8 +287,13 @@ async def execute_search(
             )
 
             if request.channel_ids and len(request.channel_ids) == 1:
-                scoped_tags = await TagRepository(session).get_tags_for_channels(list(searched_channel_ids))
-                available_tags = list(virtual_tags) + sorted((set(available_tags) | {tag.name for tag in scoped_tags}) - set(virtual_tags))
+                scoped_tags = await TagRepository(session).get_tags_for_channels(
+                    list(searched_channel_ids)
+                )
+                available_tags = list(virtual_tags) + sorted(
+                    (set(available_tags) | {tag.name for tag in scoped_tags})
+                    - set(virtual_tags)
+                )
 
             if request.debug_timing:
                 t_after_build = time.perf_counter()
@@ -484,9 +489,7 @@ async def get_similar_threads(
                 build_service = SearchService(build_session, tag_cache_service)
                 return await build_service.build_similar_thread_candidates(
                     thread_id_int,
-                    candidate_limit=(
-                        similar_threads_cache_service.CANDIDATE_LIMIT
-                    ),
+                    candidate_limit=(similar_threads_cache_service.CANDIDATE_LIMIT),
                     exclude_channel_ids=exclude_channel_ids or None,
                     ucb1_config=ucb1_config,
                     timeout_seconds=SearchTimeout.SIMILAR_THREADS.value,

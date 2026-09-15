@@ -21,10 +21,14 @@ class AutoPublishOverviewView(discord.ui.View):
             return None
         update = await self.cog.get_update_by_overview(interaction.message.id)
         if update is None:
-            await interaction.response.send_message("此次发布已不存在。", ephemeral=True)
+            await interaction.response.send_message(
+                "此次发布已不存在。", ephemeral=True
+            )
             return None
         if interaction.user.id != update.publisher_id:
-            await interaction.response.send_message("此操作仅发布者可用。", ephemeral=True)
+            await interaction.response.send_message(
+                "此操作仅发布者可用。", ephemeral=True
+            )
             return None
         return update
 
@@ -78,9 +82,7 @@ class AutoPublishOverviewView(discord.ui.View):
         if update is None:
             return
         await interaction.response.defer(ephemeral=True)
-        await self.cog.set_user_auto_sync(
-            update.publisher_id, update.thread_id, False
-        )
+        await self.cog.set_user_auto_sync(update.publisher_id, update.thread_id, False)
         await interaction.followup.send("已关闭此帖的自动同步。", ephemeral=True)
 
 

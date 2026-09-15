@@ -603,9 +603,7 @@ class TestActiveBannerChannelFilters:
         assert "invalid" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_service_batches_channels_in_request_order(
-        self, db_session_factory
-    ):
+    async def test_service_batches_channels_in_request_order(self, db_session_factory):
         """多频道每频道最多五个，并在末尾追加一次全局 Banner。"""
         now = datetime.now()
         channel_10_banners = [
@@ -645,9 +643,7 @@ class TestActiveBannerChannelFilters:
             for position in range(4)
         ]
         async with db_session_factory() as session:
-            session.add_all(
-                channel_10_banners + channel_20_banners + global_banners
-            )
+            session.add_all(channel_10_banners + channel_20_banners + global_banners)
             await session.commit()
 
             service = BannerService(session)
@@ -688,9 +684,7 @@ class TestBannerPreferenceFiltering:
     """Banner 帖子复用搜索反选规则。"""
 
     @pytest.mark.asyncio
-    async def test_batch_filter_uses_all_search_exclusions(
-        self, db_session_factory
-    ):
+    async def test_batch_filter_uses_all_search_exclusions(self, db_session_factory):
         """作者、真实标签、关键词、豁免和可见性在一次查询中生效。"""
         from core.tag_cache_service import TagCacheService
         from dto.preferences import UserSearchPreferencesDTO
@@ -757,7 +751,9 @@ class TestBannerPreferenceFiltering:
             session.add(blocked_tag)
             session.add_all(threads)
             await session.flush()
-            tagged_thread = next(thread for thread in threads if thread.thread_id == 102)
+            tagged_thread = next(
+                thread for thread in threads if thread.thread_id == 102
+            )
             session.add(
                 ThreadTagLink(thread_id=tagged_thread.id, tag_id=blocked_tag.id)
             )
@@ -783,9 +779,7 @@ class TestBannerPreferenceFiltering:
         assert set(result) == {100, 104}
 
     @pytest.mark.asyncio
-    async def test_virtual_exclude_tag_filters_source_channel(
-        self, db_session_factory
-    ):
+    async def test_virtual_exclude_tag_filters_source_channel(self, db_session_factory):
         """虚拟反选标签转换为源频道过滤，真实标签列表不被误用。"""
         from core.tag_cache_service import TagCacheService
         from dto.preferences import UserSearchPreferencesDTO

@@ -144,9 +144,7 @@ async def build_fts_conditions(
 
     # ============ 反选关键词：构建排除子查询 ============
     if exclude_keywords:
-        markers = (
-            exemption_markers if exemption_markers is not None else ["禁", "🈲"]
-        )
+        markers = exemption_markers if exemption_markers is not None else ["禁", "🈲"]
 
         exclude_keywords_list = [
             kw.strip()
@@ -175,9 +173,7 @@ async def build_fts_conditions(
             if markers:
                 # 构建豁免子句：token <4> marker（双向）
                 exemption_tsq = build_exemption_tsquery(tokens[0], markers)
-                all_exclude_tsqueries.append(
-                    f"({tsquery_and}) &! ({exemption_tsq})"
-                )
+                all_exclude_tsqueries.append(f"({tsquery_and}) &! ({exemption_tsq})")
             else:
                 all_exclude_tsqueries.append(f"({tsquery_and})")
 
@@ -193,9 +189,7 @@ async def build_fts_conditions(
     has_any_include = False
     if keywords:
         # 按逗号拆分为多个 AND 组，各关键词组之间取交集
-        keywords_str = (
-            keywords.replace("，", ",").replace("／", "/").replace("\\", "/")
-        )
+        keywords_str = keywords.replace("，", ",").replace("／", "/").replace("\\", "/")
         and_groups = [
             group.strip() for group in keywords_str.split(",") if group.strip()
         ]

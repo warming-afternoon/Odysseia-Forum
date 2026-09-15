@@ -40,9 +40,7 @@ async def _delayed_publish_sync(booklist_id: int, delay: float = 5.0) -> None:
             )
             await service.sync_published_booklist(booklist_id)
     except Exception:
-        logger.warning(
-            "延迟同步书单 %d 的发布内容失败", booklist_id, exc_info=True
-        )
+        logger.warning("延迟同步书单 %d 的发布内容失败", booklist_id, exc_info=True)
 
 
 class BooklistService:

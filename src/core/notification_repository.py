@@ -74,11 +74,13 @@ class NotificationRepository:
     async def mark_one_read(self, user_id: int, notification_id: int) -> int:
         """仅标记当前用户拥有的单条通知。"""
         result = await self.session.execute(
-            update(Notification).where(
+            update(Notification)
+            .where(
                 Notification.id == notification_id,
                 Notification.user_id == user_id,
                 Notification.read_at.is_(None),
-            ).values(read_at=utc_now())
+            )
+            .values(read_at=utc_now())
         )
         return int(result.rowcount or 0)
 

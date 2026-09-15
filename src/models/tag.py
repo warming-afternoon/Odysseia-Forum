@@ -53,10 +53,16 @@ class Tag(SQLModel, table=True):
     )
     """DC 原生标签的唯一 Discord ID，用于同步定位；转换标签保留原始 ID"""
 
-    discord_channel_id: int | None = Field(default=None, sa_column=Column(BigInteger, index=True), description="原始 DC 来源频道 ID，转换后保留用于溯源")
+    discord_channel_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, index=True),
+        description="原始 DC 来源频道 ID，转换后保留用于溯源",
+    )
     """标签来源频道；不因转为自定义实体而清空"""
 
-    discord_synced_at: datetime | None = Field(default=None, description="最近一次完整频道同步确认时间（UTC）")
+    discord_synced_at: datetime | None = Field(
+        default=None, description="最近一次完整频道同步确认时间（UTC）"
+    )
     """用于识别已完成同步及离线补偿的时间"""
 
     category: int | None = Field(

@@ -88,6 +88,7 @@ async def booklist(seeded_session: AsyncSession) -> Booklist:
     assert bl.id is not None
     # 添加一个帖子
     from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
+
     await repo.add_threads_to_booklist(
         bl.id, items=[BooklistItemAddData(thread_id=1001, comment="Nice thread")]
     )
@@ -367,9 +368,7 @@ async def test_delete_booklist_failure_skips_external_call(
     )
 
     with pytest.raises(booklists_router.HTTPException) as exc_info:
-        await booklists_router.delete_booklist(
-            booklist_id, current_user={"id": "123"}
-        )
+        await booklists_router.delete_booklist(booklist_id, current_user={"id": "123"})
 
     assert exc_info.value.status_code == 404
     schedule_unpublish.assert_not_called()
@@ -381,7 +380,9 @@ async def test_delete_booklist_failure_skips_external_call(
 
 
 @pytest.mark.asyncio
-async def test_publish_sets_pending_status(seeded_session: AsyncSession, booklist: Booklist):
+async def test_publish_sets_pending_status(
+    seeded_session: AsyncSession, booklist: Booklist
+):
     """测试 publish 将书单状态设为 PENDING"""
     assert booklist.id is not None
     booklist_id = booklist.id
@@ -403,16 +404,15 @@ async def test_publish_sets_pending_status(seeded_session: AsyncSession, booklis
 
 @pytest.mark.asyncio
 async def test_publish_raises_when_not_configured(
-    seeded_session: AsyncSession, booklist: Booklist,
+    seeded_session: AsyncSession,
+    booklist: Booklist,
 ):
     """测试 base_url 为空时 publish 抛出异常"""
     assert booklist.id is not None
     booklist_id = booklist.id
     svc = BooklistPublishService(seeded_session, base_url="", api_key="")
     with pytest.raises(ValueError, match="未配置"):
-        await svc.publish(
-            booklist_id, guild_id=100, thread_id=200, discord_user_id=999
-        )
+        await svc.publish(booklist_id, guild_id=100, thread_id=200, discord_user_id=999)
 
 
 @pytest.mark.asyncio
@@ -674,7 +674,8 @@ async def test_external_unpublish_failure_is_swallowed(
 
 @pytest.mark.asyncio
 async def test_sync_published_booklist_skips_when_not_published(
-    seeded_session: AsyncSession, booklist: Booklist,
+    seeded_session: AsyncSession,
+    booklist: Booklist,
 ):
     """测试未发布书单的 sync 直接跳过"""
     assert booklist.id is not None
@@ -774,7 +775,10 @@ def test_parse_thread_url_invalid(url):
 def test_booklist_detail_inherits_summary():
     """测试 BooklistDetail 继承 BooklistSummary"""
     from api.v1.schemas.booklist.booklist_summary import BooklistSummary
-    from api.v1.schemas.booklist.booklist_detail import BooklistDetail, BooklistPublishInfo
+    from api.v1.schemas.booklist.booklist_detail import (
+        BooklistDetail,
+        BooklistPublishInfo,
+    )
 
     assert issubclass(BooklistDetail, BooklistSummary)
 

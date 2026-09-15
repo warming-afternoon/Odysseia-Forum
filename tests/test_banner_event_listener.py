@@ -34,18 +34,24 @@ async def test_unindexed_channel_application(monkeypatch, entry, accessible):
     sync = AsyncMock(return_value=channel if accessible else None)
     monkeypatch.setattr(ChannelSyncService, "fetch_and_index", sync)
     application = BannerApplication(
-        id=1, thread_id=123, channel_id=123, applicant_id=789,
-        cover_image_url="https://example.com/cover.png", target_scope="global",
+        id=1,
+        thread_id=123,
+        channel_id=123,
+        applicant_id=789,
+        cover_image_url="https://example.com/cover.png",
+        target_scope="global",
         target_type=TargetType.CHANNEL.value,
     )
     create = AsyncMock(return_value=application)
     monkeypatch.setattr(BannerApplicationRepository, "create", create)
     monkeypatch.setattr(
-        BannerApplicationRepository, "get_history_by_thread_id",
+        BannerApplicationRepository,
+        "get_history_by_thread_id",
         AsyncMock(return_value=[]),
     )
     monkeypatch.setattr(
-        BannerApplicationRepository, "update_review_message_info",
+        BannerApplicationRepository,
+        "update_review_message_info",
         AsyncMock(return_value=True),
     )
     bot = MagicMock()

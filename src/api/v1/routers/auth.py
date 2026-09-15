@@ -216,7 +216,9 @@ async def _get_authorized_cached_member(user_id: str) -> Optional[dict]:
     return cached
 
 
-def _safe_discord_error(response: httpx.Response) -> tuple[Optional[str], Optional[str]]:
+def _safe_discord_error(
+    response: httpx.Response,
+) -> tuple[Optional[str], Optional[str]]:
     """从 Discord 响应中读取安全的错误字段。"""
     try:
         payload = response.json()
@@ -234,9 +236,7 @@ def _oauth_error_redirect(message: str, error_status: int) -> RedirectResponse:
     """携带安全错误参数直接跳回前端登录页。"""
     frontend_url = _AUTH_CONFIG["frontend_url"].rstrip("/")
     error_query = urlencode({"error": message, "status": error_status})
-    return RedirectResponse(
-        url=f"{frontend_url}/login?{error_query}", status_code=302
-    )
+    return RedirectResponse(url=f"{frontend_url}/login?{error_query}", status_code=302)
 
 
 def _log_oauth_failure(
@@ -293,6 +293,7 @@ async def _create_login_response(auth_state: dict) -> RedirectResponse:
         samesite="none",
     )
     return response
+
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -433,7 +434,9 @@ async def callback(code: Optional[str] = None):
                         status_code=token_response.status_code,
                         discord_error=error_description,
                     )
-                    return _oauth_error_redirect("Discord 没有返回访问凭证，请重新登录。", 502)
+                    return _oauth_error_redirect(
+                        "Discord 没有返回访问凭证，请重新登录。", 502
+                    )
 
                 user_response = await client.get(
                     "https://discord.com/api/users/@me",
@@ -513,7 +516,9 @@ async def callback(code: Optional[str] = None):
                         token_alias=verification.token_alias,
                     )
                     await _delete_cached_member(user["id"], "oauth_not_member")
-                    return _oauth_error_redirect("你的账号目前不在论坛 Discord 服务器中。", 403)
+                    return _oauth_error_redirect(
+                        "你的账号目前不在论坛 Discord 服务器中。", 403
+                    )
                 if verification.outcome == "unavailable":
                     _log_oauth_failure(
                         attempt_id,

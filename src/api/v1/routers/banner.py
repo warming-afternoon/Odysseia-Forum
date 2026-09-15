@@ -205,16 +205,14 @@ async def get_active_banners(
                 if tag_cache_service_instance is None:
                     raise RuntimeError("Banner TAG 缓存服务尚未初始化")
 
-                allowed_thread_guilds = (
-                    await BannerThreadVisibilityService(
-                        session=session,
-                        tag_cache_service=tag_cache_service_instance,
-                    ).get_visible_thread_guilds(
-                        thread_ids=thread_tids,
-                        prefs=prefs,
-                        channel_mappings_config=channel_mappings_config,
-                        redis_client=redis_client,
-                    )
+                allowed_thread_guilds = await BannerThreadVisibilityService(
+                    session=session,
+                    tag_cache_service=tag_cache_service_instance,
+                ).get_visible_thread_guilds(
+                    thread_ids=thread_tids,
+                    prefs=prefs,
+                    channel_mappings_config=channel_mappings_config,
+                    redis_client=redis_client,
                 )
                 guild_map.update(allowed_thread_guilds)
                 indexed_threads = await ThreadRepository(

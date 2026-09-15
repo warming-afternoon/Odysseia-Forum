@@ -48,9 +48,7 @@ class AuthorRepository:
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
 
-    async def get_open_graph_author(
-        self, author_id: int
-    ) -> AuthorShareQueryDTO | None:
+    async def get_open_graph_author(self, author_id: int) -> AuthorShareQueryDTO | None:
         """查询作者分享所需标量并在 Session 内转换为 DTO。"""
         statement = select(
             Author.display_name,

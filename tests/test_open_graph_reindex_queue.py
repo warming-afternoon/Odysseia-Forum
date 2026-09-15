@@ -128,9 +128,7 @@ async def test_failure_finish_does_not_set_cooldown():
 async def test_consumer_writes_success_only_after_sync_returns_success():
     """Bot 同步明确成功后才写成功结果。"""
     sync_service = MagicMock()
-    sync_service.sync_thread = AsyncMock(
-        return_value=ThreadSyncResult(success=True)
-    )
+    sync_service.sync_thread = AsyncMock(return_value=ThreadSyncResult(success=True))
     queue = MagicMock()
     queue.finish_success = AsyncMock()
     queue.finish_failure = AsyncMock()
@@ -148,9 +146,7 @@ async def test_consumer_publishes_sanitized_failure_code():
     """同步失败仅写入稳定失败码。"""
     sync_service = MagicMock()
     sync_service.sync_thread = AsyncMock(
-        return_value=ThreadSyncResult(
-            success=False, error_code="database_failed"
-        )
+        return_value=ThreadSyncResult(success=False, error_code="database_failed")
     )
     queue = MagicMock()
     queue.finish_success = AsyncMock()

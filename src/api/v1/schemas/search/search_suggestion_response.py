@@ -21,5 +21,7 @@ class SearchSuggestionResponse(BaseModel):
         default_factory=list, description="匹配的书单 (最多3个)"
     )
 
-    tags: list[TagResponse] = Field(default_factory=list, description="匹配标准名或别名的可用标签，始终展示标准名")
+    tags: list[TagResponse] = Field(
+        default_factory=list, description="匹配标准名或别名的可用标签，始终展示标准名"
+    )
     """标签联想结果，使用内部 ID 可精确检索"""

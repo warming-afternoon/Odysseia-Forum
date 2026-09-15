@@ -74,9 +74,7 @@ class DiscordMemberVerifier:
         if available:
             return available, None
 
-        remaining = [
-            max(0.0, deadline - now) for deadline in self._cooldowns.values()
-        ]
+        remaining = [max(0.0, deadline - now) for deadline in self._cooldowns.values()]
         return [], min(remaining) if remaining else None
 
     @staticmethod

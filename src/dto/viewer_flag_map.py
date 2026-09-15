@@ -12,4 +12,3 @@ class ViewerFlagMap:
         order = ("collected", "followed", "followed_author", "unread")
         flags = self.values.get(thread_id, set())
         return [flag for flag in order if flag in flags]
-

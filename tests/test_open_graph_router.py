@@ -43,26 +43,20 @@ async def test_three_resource_routes_return_service_dtos(monkeypatch):
     thread_metadata = ThreadShareMetadataDTO(
         title="帖子",
         author=OpenGraphAuthorDTO(display_name="作者"),
-        stats=ThreadShareStatsDTO(
-            reaction_count=1, reply_count=2, collection_count=3
-        ),
+        stats=ThreadShareStatsDTO(reaction_count=1, reply_count=2, collection_count=3),
         created_at=now,
         updated_at=now,
     )
     author_metadata = AuthorShareMetadataDTO(
         display_name="作者",
-        stats=AuthorShareStatsDTO(
-            thread_count=1, reaction_count=2, reply_count=3
-        ),
+        stats=AuthorShareStatsDTO(thread_count=1, reaction_count=2, reply_count=3),
         works=[],
         updated_at=now,
     )
     booklist_metadata = BooklistShareMetadataDTO(
         title="书单",
         works=[],
-        stats=BooklistShareStatsDTO(
-            item_count=0, collection_count=1, view_count=2
-        ),
+        stats=BooklistShareStatsDTO(item_count=0, collection_count=1, view_count=2),
         is_tournament=False,
         created_at=now,
         updated_at=now,

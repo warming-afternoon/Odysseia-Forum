@@ -10,9 +10,7 @@ class BooklistShareMetadataDTO(BaseModel):
 
     title: str = Field(description="书单或赛事标题")
     description: str | None = Field(default=None, description="书单或赛事简介")
-    cover_image_url: str | None = Field(
-        default=None, description="书单自定义封面 URL"
-    )
+    cover_image_url: str | None = Field(default=None, description="书单自定义封面 URL")
     author_name: str | None = Field(default=None, description="非匿名书单作者名")
     works: list[OpenGraphWorkDTO] = Field(description="最多五个带图代表作品")
     stats: BooklistShareStatsDTO = Field(description="书单公开统计")

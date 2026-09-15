@@ -37,8 +37,13 @@ def test_openapi_request_ids_and_structured_responses():
                 if parameter["name"] in {"include_tag_ids", "exclude_tag_ids"}:
                     array = parameter["schema"]
                     if "anyOf" in array:
-                        array = next(item for item in array["anyOf"] if item["type"] == "array")
-                    assert {item["type"] for item in array["items"]["anyOf"]} == {"string", "integer"}
+                        array = next(
+                            item for item in array["anyOf"] if item["type"] == "array"
+                        )
+                    assert {item["type"] for item in array["items"]["anyOf"]} == {
+                        "string",
+                        "integer",
+                    }
                     checked_queries += 1
     assert checked_paths > 10
     assert checked_queries == 4
@@ -53,7 +58,9 @@ def test_openapi_request_ids_and_structured_responses():
             prop = prop.get("items", prop)
             assert {item["type"] for item in prop["anyOf"]} == {"string", "integer"}
     for model in (ThreadDetail, BooklistSummary):
-        prop = model.model_json_schema(mode="serialization")["properties"]["custom_tags"]
+        prop = model.model_json_schema(mode="serialization")["properties"][
+            "custom_tags"
+        ]
         assert prop["items"]["$ref"].endswith("/CustomTagBindingResponse")
     binding = models["CustomTagBindingResponse"]
     assert binding["properties"]["id"]["type"] == "string"
@@ -72,7 +79,9 @@ def test_large_ids_are_normalized_without_precision_loss(value):
     assert search.exclude_tag_ids == [BIG_ID]
 
 
-@pytest.mark.parametrize("value", ["abc", "1.2", "1e3", "", None, True, 1.5, 0, -1, "0", "-1"])
+@pytest.mark.parametrize(
+    "value", ["abc", "1.2", "1e3", "", None, True, 1.5, 0, -1, "0", "-1"]
+)
 def test_proposal_rejects_invalid_ids(value):
     """非法输入和非正数 ID 不进入业务层。"""
     with pytest.raises(ValidationError):
@@ -85,22 +94,38 @@ async def test_http_path_and_body_ids_are_normalized(monkeypatch):
     application = FastAPI()
     application.include_router(tags.router, prefix="/v1")
     application.dependency_overrides[require_auth] = lambda: {"id": "123"}
-    dispatch = AsyncMock(return_value={
-        "id": str(BIG_ID), "tag_id": str(BIG_ID), "tag_name": "测试", "status": "pending",
-        "reason": None, "created_at": "2026-09-14T00:00:00Z",
-        "due_at": "2026-09-21T00:00:00Z", "resolved_at": None,
-    })
+    dispatch = AsyncMock(
+        return_value={
+            "id": str(BIG_ID),
+            "tag_id": str(BIG_ID),
+            "tag_name": "测试",
+            "status": "pending",
+            "reason": None,
+            "created_at": "2026-09-14T00:00:00Z",
+            "due_at": "2026-09-21T00:00:00Z",
+            "resolved_at": None,
+        }
+    )
     monkeypatch.setattr(tags, "dispatch", dispatch)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(application), base_url="http://test") as client:
-        response = await client.post(f"/v1/tags/thread/{BIG_ID}/proposals", json={"tag_id": str(BIG_ID)})
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(application), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/v1/tags/thread/{BIG_ID}/proposals", json={"tag_id": str(BIG_ID)}
+        )
         assert response.status_code == 200
         assert response.json()["id"] == str(BIG_ID)
         assert dispatch.call_args.kwargs["target_id"] == BIG_ID
         assert dispatch.call_args.kwargs["tag_id"] == BIG_ID
         dispatch.return_value = {
-            "id": str(BIG_ID), "name": "测试", "source": "custom",
-            "discord_tag_id": None, "category": 3, "category_name": "角色",
-            "enabled": False, "deleted_at": None,
+            "id": str(BIG_ID),
+            "name": "测试",
+            "source": "custom",
+            "discord_tag_id": None,
+            "category": 3,
+            "category_name": "角色",
+            "enabled": False,
+            "deleted_at": None,
         }
         response = await client.patch(f"/v1/tags/{BIG_ID}", json={"enabled": False})
         assert response.status_code == 200
@@ -109,7 +134,9 @@ async def test_http_path_and_body_ids_are_normalized(monkeypatch):
         for url in ["/v1/tags/thread/abc", "/v1/tags/thread/1.2"]:
             assert (await client.get(url)).status_code == 422
         for value in ["abc", "0", "-1"]:
-            assert (await client.patch(f"/v1/tags/{value}", json={"enabled": False})).status_code == 422
+            assert (
+                await client.patch(f"/v1/tags/{value}", json={"enabled": False})
+            ).status_code == 422
         dispatch.assert_not_awaited()
 
 
@@ -123,27 +150,47 @@ def test_update_schema_matches_validation():
         assert prop["type"] != "null"
     assert schema["properties"]["category"]["minimum"] == 1
     assert schema["properties"]["category"]["maximum"] == 7
-    for payload in [{}, {"name": None}, {"category": None}, {"enabled": None}, {"name": ""}, {"category": 8}]:
+    for payload in [
+        {},
+        {"name": None},
+        {"category": None},
+        {"enabled": None},
+        {"name": ""},
+        {"category": 8},
+    ]:
         with pytest.raises(ValidationError):
             TagUpdateRequest.model_validate(payload)
     for payload in [{"name": "爱丽丝"}, {"category": 3}, {"enabled": False}]:
-        assert TagUpdateRequest.model_validate(payload).model_dump(exclude_unset=True) == payload
+        assert (
+            TagUpdateRequest.model_validate(payload).model_dump(exclude_unset=True)
+            == payload
+        )
 
 
 @pytest.mark.asyncio
 async def test_custom_tags_are_assembled_as_typed_models():
     """批量装配生成共享 DTO，响应序列化保留完整字符串 ID。"""
     binding = SimpleNamespace(id=BIG_ID + 1, target_id=BIG_ID, upvotes=3, downvotes=1)
-    tag = SimpleNamespace(id=BIG_ID, name="爱丽丝(BA)", category=3, enabled=False, source="custom")
-    session = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [(binding, tag)])))
+    tag = SimpleNamespace(
+        id=BIG_ID, name="爱丽丝(BA)", category=3, enabled=False, source="custom"
+    )
+    session = SimpleNamespace(
+        execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [(binding, tag)]))
+    )
     result = await load_custom_tags(session, "thread", [BIG_ID])
     item = result[BIG_ID][0]
     assert isinstance(item, CustomTagBindingResponse)
     data = item.model_dump(mode="json")
     assert data == {
-        "id": str(BIG_ID), "name": "爱丽丝(BA)", "category": 3,
-        "category_name": "角色", "source": "custom", "enabled": False,
-        "binding_id": str(BIG_ID + 1), "upvotes": 3, "downvotes": 1,
+        "id": str(BIG_ID),
+        "name": "爱丽丝(BA)",
+        "category": 3,
+        "category_name": "角色",
+        "source": "custom",
+        "enabled": False,
+        "binding_id": str(BIG_ID + 1),
+        "upvotes": 3,
+        "downvotes": 1,
     }
     # 装配入口可能先构造响应后赋值，验证该路径不会遗留原始字典。
     for model in (ThreadDetail, BooklistSummary):

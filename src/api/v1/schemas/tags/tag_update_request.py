@@ -15,9 +15,11 @@ class TagUpdateRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", json_schema_extra=remove_null_defaults)
 
-    name: Annotated[str, Field(min_length=1, max_length=100)] | SkipJsonSchema[None] = Field(
-        default=None,
-        description="新的标签标准名，不含分类前缀；未传保持原值，不允许显式 null",
+    name: Annotated[str, Field(min_length=1, max_length=100)] | SkipJsonSchema[None] = (
+        Field(
+            default=None,
+            description="新的标签标准名，不含分类前缀；未传保持原值，不允许显式 null",
+        )
     )
     """新的标签标准名；未传保持原值，不允许显式 null"""
 

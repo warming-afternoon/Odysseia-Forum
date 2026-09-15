@@ -68,10 +68,7 @@ def cmd_reindex():
         result = run_psql(f"REINDEX INDEX CONCURRENTLY {idx}")
         print(result)
         if "ERROR" in result:
-            print(
-                f"  ⚠ REINDEX 失败，检查是否需要"
-                f" DROP INDEX CONCURRENTLY {idx}"
-            )
+            print(f"  ⚠ REINDEX 失败，检查是否需要 DROP INDEX CONCURRENTLY {idx}")
     print(f"[{datetime.now()}] REINDEX 完成")
 
 

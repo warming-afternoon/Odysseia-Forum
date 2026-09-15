@@ -1,7 +1,7 @@
 import logging
 from typing import List, Sequence, cast
 
-from sqlalchemy import ColumnElement
+from sqlalchemy import case, update, ColumnElement
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -17,7 +17,9 @@ class TagRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_or_create_tags(self, tags_data: dict[int, str], update_names: bool = True) -> List[Tag]:
+    async def get_or_create_tags(
+        self, tags_data: dict[int, str], update_names: bool = True
+    ) -> List[Tag]:
         """
         根据 Discord 标签 ID 和名称获取原生实体，返回内部 ID。
         """
@@ -25,27 +27,66 @@ class TagRepository:
             return []
 
         tag_ids = list(tags_data.keys())
-        values_to_insert = [
-            {"discord_tag_id": id, "name": name, "source": "discord", "enabled": True}
-            for id, name in tags_data.items()
-        ]
-
-        # 使用 INSERT ... ON CONFLICT DO UPDATE 一次性完成创建和更新
-        insert_stmt = pg_insert(Tag).values(values_to_insert)
-
-        # 构建 ON CONFLICT ... DO UPDATE 子句
-        # Discord ID 冲突只更新名称，不改变内部主键。
-        # 'excluded' 是一个特殊的对象，代表了在 INSERT 语句中试图插入的值
-        update_stmt = insert_stmt.on_conflict_do_update(
-            index_elements=[Tag.discord_tag_id], set_={"name": insert_stmt.excluded.name}, where=Tag.source == "discord"
+        # 批量读取已有实体，避免重复同步通过 INSERT 消耗内部 ID 序列。
+        existing_statement = (
+            select(Tag)
+            .where(cast(ColumnElement, Tag.discord_tag_id).in_(tag_ids))
+            .execution_options(populate_existing=True)
         )
+        existing = list((await self.session.execute(existing_statement)).scalars())
+        existing_ids = {tag.discord_tag_id for tag in existing}
 
-        if not update_names:
-            update_stmt = insert_stmt.on_conflict_do_nothing(index_elements=[Tag.discord_tag_id])
-        await self.session.execute(update_stmt)
+        # 仅更新仍为 DC 来源且名称有变化的实体，不覆盖已转换的自定义标签。
+        changed_names = {
+            tag.discord_tag_id: tags_data[tag.discord_tag_id]
+            for tag in existing
+            if update_names
+            and tag.source == "discord"
+            and tag.discord_tag_id is not None
+            and tag.name != tags_data[tag.discord_tag_id]
+        }
+        if changed_names:
+            await self.session.execute(
+                update(Tag)
+                .where(
+                    cast(ColumnElement, Tag.discord_tag_id).in_(changed_names),
+                    Tag.source == "discord",
+                )
+                .values(name=case(changed_names, value=Tag.discord_tag_id))
+                .execution_options(synchronize_session=False)
+            )
+
+        # 只插入缺失实体；保留唯一冲突处理，兼容并发首次发现同一 DC 标签。
+        values_to_insert = [
+            {
+                "discord_tag_id": tag_id,
+                "name": name,
+                "source": "discord",
+                "enabled": True,
+            }
+            for tag_id, name in tags_data.items()
+            if tag_id not in existing_ids
+        ]
+        if values_to_insert:
+            insert_stmt = pg_insert(Tag).values(values_to_insert)
+            if update_names:
+                write_stmt = insert_stmt.on_conflict_do_update(
+                    index_elements=[Tag.discord_tag_id],
+                    set_={"name": insert_stmt.excluded.name},
+                    where=Tag.source == "discord",
+                )
+            else:
+                write_stmt = insert_stmt.on_conflict_do_nothing(
+                    index_elements=[Tag.discord_tag_id]
+                )
+            await self.session.execute(write_stmt)
 
         # 查询所有相关的标签对象
-        final_statement = select(Tag).where(cast(ColumnElement, Tag.discord_tag_id).in_(tag_ids)).execution_options(populate_existing=True)
+        final_statement = (
+            select(Tag)
+            .where(cast(ColumnElement, Tag.discord_tag_id).in_(tag_ids))
+            .execution_options(populate_existing=True)
+        )
         result = await self.session.execute(final_statement)
         return list(result.scalars().all())
 

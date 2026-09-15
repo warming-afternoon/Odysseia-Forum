@@ -27,9 +27,7 @@ class BooklistPublishRepository:
     ) -> BooklistPublish:
         """按书单原子创建或更新唯一发布记录。"""
         # 事务锁负责串行化“查询后更新/替换”，唯一约束负责兜底数据不变量。
-        await self.session.execute(
-            select(func.pg_advisory_xact_lock(booklist_id))
-        )
+        await self.session.execute(select(func.pg_advisory_xact_lock(booklist_id)))
 
         record = await self.get_by_booklist(booklist_id)
         if record is None:
@@ -154,8 +152,12 @@ class BooklistPublishRepository:
 
     async def is_published(self, booklist_id: int) -> bool:
         """检查书单是否有任何发布记录"""
-        stmt = select(BooklistPublish.id).where(
-            BooklistPublish.booklist_id == booklist_id  # type: ignore
-        ).limit(1)
+        stmt = (
+            select(BooklistPublish.id)
+            .where(
+                BooklistPublish.booklist_id == booklist_id  # type: ignore
+            )
+            .limit(1)
+        )
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none() is not None

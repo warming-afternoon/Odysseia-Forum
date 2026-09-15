@@ -45,7 +45,8 @@ class Thread(SQLModel, table=True):
     """帖子标题"""
 
     native_tag_revision: int = Field(
-        default=0, description="原生标签集合每次变更时递增的修订号，参与标签编辑版本校验"
+        default=0,
+        description="原生标签集合每次变更时递增的修订号，参与标签编辑版本校验",
     )
     """原生标签变更修订号，用于识别同步导致的并发变更"""
 
@@ -131,7 +132,6 @@ class Thread(SQLModel, table=True):
     )
     """统一绑定中的全部有效标签，只读；写入由绑定仓储负责"""
 
-
     author: Optional["Author"] = Relationship(
         sa_relationship_kwargs={
             "primaryjoin": "Thread.author_id == Author.id",
@@ -176,6 +176,4 @@ def _on_thread_before_update(mapper, connection, target: Thread):
 @event.listens_for(Thread.__table__, "after_create")  # type: ignore[attr-defined]
 def _on_thread_after_create(target, connection, **kw):  # type: ignore[no-redef]
     if connection.dialect.name == "postgresql":
-        connection.execute(
-            text("ALTER TABLE thread SET (fillfactor = 90)")
-        )
+        connection.execute(text("ALTER TABLE thread SET (fillfactor = 90)"))

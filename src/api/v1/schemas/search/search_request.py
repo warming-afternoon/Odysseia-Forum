@@ -22,10 +22,18 @@ class SearchRequest(BaseModel):
     include_tags: List[str] = Field(
         default_factory=list, description="必须包含的标签名列表"
     )
-    include_tag_ids: list[RequestId] = Field(default_factory=list, max_length=100, description="包含的内部标签 ID，可混合原生与自定义标签")
+    include_tag_ids: list[RequestId] = Field(
+        default_factory=list,
+        max_length=100,
+        description="包含的内部标签 ID，可混合原生与自定义标签",
+    )
     """包含的内部标签 ID 列表，可混合原生与自定义标签，按 tag_logic 统一匹配"""
 
-    exclude_tag_ids: list[RequestId] = Field(default_factory=list, max_length=100, description="排除的内部标签 ID，可混合原生与自定义标签")
+    exclude_tag_ids: list[RequestId] = Field(
+        default_factory=list,
+        max_length=100,
+        description="排除的内部标签 ID，可混合原生与自定义标签",
+    )
     """排除的内部标签 ID 列表，命中任意标签即排除帖子"""
 
     exclude_tags: List[str] = Field(
@@ -121,7 +129,7 @@ class SearchRequest(BaseModel):
     offset: int = Field(
         default=0,
         ge=0,
-        description="结果的偏移数",
+        description="在筛选及排除条件生效后的结果中跳过的记录数，不是页码；默认 0。例如 limit=20 时前三页分别传 0、20、40，计算公式为（页码-1）×limit；若用 exclude_thread_ids 排除已加载帖子，通常保持 offset=0，避免重复跳过",
     )
 
     debug_timing: bool = Field(

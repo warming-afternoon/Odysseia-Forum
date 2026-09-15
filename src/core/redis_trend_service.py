@@ -18,9 +18,7 @@ class RedisTrendService:
         date_str = dt.strftime("%Y%m%d")
         return f"trend:{metric}:{date_str}"
 
-    def _get_channel_daily_key(
-        self, metric: str, dt: datetime, channel_id: int
-    ) -> str:
+    def _get_channel_daily_key(self, metric: str, dt: datetime, channel_id: int) -> str:
         """格式化频道日榜 Redis 键名。"""
         return f"{self._get_daily_key(metric, dt)}:channel:{channel_id}"
 
@@ -28,9 +26,7 @@ class RedisTrendService:
         """格式化全局趋势聚合缓存键名。"""
         return f"cache:surge:{metric}:{days}"
 
-    def _get_channel_cache_key(
-        self, metric: str, days: int, channel_id: int
-    ) -> str:
+    def _get_channel_cache_key(self, metric: str, days: int, channel_id: int) -> str:
         """格式化单频道跨天趋势聚合缓存键名。"""
         return f"cache:surge:{metric}:{days}:channel:{channel_id}"
 
@@ -93,13 +89,9 @@ class RedisTrendService:
             return []
 
         top_items = await redis.zrevrange(cache_key, offset, offset + limit - 1)
-        return [
-            int(item) for item in top_items if item != self.EMPTY_MEMBER
-        ]
+        return [int(item) for item in top_items if item != self.EMPTY_MEMBER]
 
-    async def _get_or_build_global_cache(
-        self, metric: str, days: int
-    ) -> Optional[str]:
+    async def _get_or_build_global_cache(self, metric: str, days: int) -> Optional[str]:
         """获取或构建指定指标的全局跨天趋势缓存。"""
         now = datetime.now(timezone.utc)
         source_keys = [
@@ -124,9 +116,7 @@ class RedisTrendService:
         if any(cache_key is None for cache_key in channel_cache_keys):
             return None
 
-        scope_cache_key = self._get_channel_scope_cache_key(
-            metric, days, channel_ids
-        )
+        scope_cache_key = self._get_channel_scope_cache_key(metric, days, channel_ids)
         return await self._get_or_build_aggregate_cache(
             scope_cache_key,
             [cache_key for cache_key in channel_cache_keys if cache_key],
@@ -139,9 +129,7 @@ class RedisTrendService:
         """获取或构建单频道跨天趋势缓存。"""
         now = datetime.now(timezone.utc)
         source_keys = [
-            self._get_channel_daily_key(
-                metric, now - timedelta(days=index), channel_id
-            )
+            self._get_channel_daily_key(metric, now - timedelta(days=index), channel_id)
             for index in range(days)
         ]
         cache_key = self._get_channel_cache_key(metric, days, channel_id)
@@ -166,9 +154,7 @@ class RedisTrendService:
         if acquired:
             try:
                 # 跨天聚合使用 SUM，多频道合并使用 MAX，避免异常重复成员翻倍。
-                await redis.zunionstore(
-                    cache_key, source_keys, aggregate=aggregate
-                )
+                await redis.zunionstore(cache_key, source_keys, aggregate=aggregate)
                 if await redis.zcard(cache_key) == 0:
                     await redis.zadd(cache_key, {self.EMPTY_MEMBER: 0})
                 await redis.expire(

@@ -30,9 +30,7 @@ class AuthorOpenGraphService:
         self.metadata_cache = metadata_cache
         self.excluded_channel_ids = excluded_channel_ids
 
-    async def get_share_metadata(
-        self, author_id: int
-    ) -> AuthorShareMetadataDTO | None:
+    async def get_share_metadata(self, author_id: int) -> AuthorShareMetadataDTO | None:
         """返回作者分享元数据，无公开作品时隐藏作者资源。"""
         # 主资源与公开作品统计先行复核，缓存不能让空作者继续暴露。
         async with self.session_factory() as session:
@@ -51,14 +49,12 @@ class AuthorOpenGraphService:
         if cached is not None:
             cached_metadata, source_thread_ids = cached
             async with self.session_factory() as session:
-                sources_valid = (
-                    await ThreadRepository(
-                        session
-                    ).are_open_graph_author_sources_valid(
-                        author_id,
-                        source_thread_ids,
-                        self.excluded_channel_ids,
-                    )
+                sources_valid = await ThreadRepository(
+                    session
+                ).are_open_graph_author_sources_valid(
+                    author_id,
+                    source_thread_ids,
+                    self.excluded_channel_ids,
                 )
             if sources_valid:
                 return cached_metadata

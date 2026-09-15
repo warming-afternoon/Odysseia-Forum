@@ -128,9 +128,7 @@ class ThreadUpdateService:
                 thread_statement = select(Thread).where(
                     Thread.thread_id == update_record.thread_id
                 )
-                thread = (
-                    await session.execute(thread_statement)
-                ).scalar_one_or_none()
+                thread = (await session.execute(thread_statement)).scalar_one_or_none()
                 if thread is not None and thread.latest_update_id == update_id:
                     previous = await repository.get_latest_for_thread(
                         update_record.thread_id
@@ -178,9 +176,9 @@ class ThreadUpdateService:
     ) -> ThreadUpdateDTO | None:
         """按概览消息 ID 获取更新数据。"""
         async with self.session_factory() as session:
-            record = await ThreadUpdateRepository(
-                session
-            ).get_by_overview_message_id(overview_message_id)
+            record = await ThreadUpdateRepository(session).get_by_overview_message_id(
+                overview_message_id
+            )
             return self._to_dto(record) if record else None
 
     @staticmethod

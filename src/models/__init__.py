@@ -29,7 +29,14 @@ from models.operation_log import OperationLog
 from models.tag_notification_task import TagNotificationTask
 
 __all__ = [
-    "TagAlias", "TagRelation", "TagBinding", "TagVote", "TagProposal", "TagProposalBlock", "OperationLog", "TagNotificationTask",
+    "TagAlias",
+    "TagRelation",
+    "TagBinding",
+    "TagVote",
+    "TagProposal",
+    "TagProposalBlock",
+    "OperationLog",
+    "TagNotificationTask",
     "ThreadTagLink",
     "Tag",
     "Thread",

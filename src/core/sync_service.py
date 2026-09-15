@@ -47,9 +47,13 @@ class SyncService:
         fresh = await self.bot.fetch_channel(channel.id)
         if not isinstance(fresh, discord.ForumChannel):
             return
-        await self.bot.event_mediator.publish(DiscordTagsSnapshot(
-            fresh.id, {tag.id: tag.name for tag in fresh.available_tags}, observed_at,
-        ))
+        await self.bot.event_mediator.publish(
+            DiscordTagsSnapshot(
+                fresh.id,
+                {tag.id: tag.name for tag in fresh.available_tags},
+                observed_at,
+            )
+        )
 
     async def _invalidate_similarity_cache(self, thread_id: int) -> None:
         """尽力失效源帖候选池，Redis 故障不影响同步主流程。"""
@@ -389,11 +393,21 @@ class SyncService:
         # 移除原生绑定前先确认源频道标签是否被删除，避免事件乱序丢失应转换的绑定。
         try:
             async with self.session_factory() as session:
-                existing = set((await session.execute(select(Tag.discord_tag_id)
-                    .join(TagBinding, TagBinding.tag_id == Tag.id)
-                    .join(Thread, Thread.id == TagBinding.target_id)
-                    .where(Thread.thread_id == thread.id, TagBinding.target_type == "thread",
-                           TagBinding.binding_source == "discord_sync", TagBinding.ended_at.is_(None)))).scalars())
+                existing = set(
+                    (
+                        await session.execute(
+                            select(Tag.discord_tag_id)
+                            .join(TagBinding, TagBinding.tag_id == Tag.id)
+                            .join(Thread, Thread.id == TagBinding.target_id)
+                            .where(
+                                Thread.thread_id == thread.id,
+                                TagBinding.target_type == "thread",
+                                TagBinding.binding_source == "discord_sync",
+                                TagBinding.ended_at.is_(None),
+                            )
+                        )
+                    ).scalars()
+                )
             if existing - set(tags_data):
                 await self.pre_sync_forum_tags(SimpleNamespace(id=thread.parent_id))
             async with self.session_factory() as session:
@@ -406,9 +420,7 @@ class SyncService:
                 )
                 if mutation.created:
                     # 在当前事务中直接从作者关注关系生成通知
-                    await NotificationFanoutService(
-                        session
-                    ).fanout_author_new_thread(
+                    await NotificationFanoutService(session).fanout_author_new_thread(
                         author_id=thread_data["author_id"],
                         event_source_id=thread.id,
                         thread_id=thread.id,

@@ -113,9 +113,17 @@ class SuggestionService:
 
         escaped = keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
-        tag_stmt = select(Tag).where(Tag.deleted_at.is_(None), Tag.enabled.is_(True),
-            or_(Tag.name.ilike(pattern), Tag.id.in_(select(TagAlias.tag_id).where(TagAlias.name.ilike(pattern)))))
-        tag_res = await self.session.execute(tag_stmt.order_by(Tag.name, Tag.category, Tag.id).limit(limit))
+        tag_stmt = select(Tag).where(
+            Tag.deleted_at.is_(None),
+            Tag.enabled.is_(True),
+            or_(
+                Tag.name.ilike(pattern),
+                Tag.id.in_(select(TagAlias.tag_id).where(TagAlias.name.ilike(pattern))),
+            ),
+        )
+        tag_res = await self.session.execute(
+            tag_stmt.order_by(Tag.name, Tag.category, Tag.id).limit(limit)
+        )
         author_res = await self.session.execute(author_stmt)
         thread_res = await self.session.execute(thread_stmt)
         booklist_res = await self.session.execute(booklist_stmt)

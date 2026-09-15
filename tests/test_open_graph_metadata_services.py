@@ -254,9 +254,7 @@ async def test_author_cache_source_must_still_belong_to_author(
 
     cached = AuthorShareMetadataDTO(
         display_name="过期缓存",
-        stats=AuthorShareStatsDTO(
-            thread_count=1, reaction_count=0, reply_count=0
-        ),
+        stats=AuthorShareStatsDTO(thread_count=1, reaction_count=0, reply_count=0),
         works=[],
         updated_at=base,
     )

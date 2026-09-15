@@ -19,7 +19,10 @@ class BooklistSummary(BaseModel):
     title: str = Field(description="书单标题")
     """书单标题"""
 
-    custom_tags: list[CustomTagBindingResponse] = Field(default_factory=list, description="书单自身当前生效的本地绑定标签列表（可包含 DC 标签实体），包含内部 ID、标准名、分类、绑定轮次及正负票数")
+    custom_tags: list[CustomTagBindingResponse] = Field(
+        default_factory=list,
+        description="书单自身当前生效的本地绑定标签列表（可包含 DC 标签实体），包含内部 ID、标准名、分类、绑定轮次及正负票数",
+    )
     """书单自身当前生效的自定义标签及票数，不继承单内帖子的标签"""
 
     description: Optional[str] = Field(None, description="书单简介")

@@ -6,6 +6,7 @@ Revision ID: add_booklist_search_vector
 Revises: drop_display_type
 Create Date: 2026-06-26
 """
+
 import logging
 from typing import Union
 
@@ -30,6 +31,7 @@ def upgrade() -> None:
     logger.info("预检查 rjieba 可用性...")
     try:
         from shared.text_utils import build_search_vector_text
+
         # 烟雾测试
         test_result = build_search_vector_text("测试书单", "这是一个测试")
         assert test_result and len(test_result) > 0, "rjieba 分词返回空结果"
@@ -51,9 +53,7 @@ def upgrade() -> None:
 
     # ── 2. 用 rjieba 分词分批回填 ──
     conn = op.get_bind()
-    rows = conn.execute(
-        text("SELECT id, title, description FROM booklist")
-    ).fetchall()
+    rows = conn.execute(text("SELECT id, title, description FROM booklist")).fetchall()
 
     total = len(rows)
     logger.info(f"booklist 表共 {total} 行，开始用 rjieba 分批回填 search_vector...")
@@ -97,7 +97,9 @@ def upgrade() -> None:
         text("SELECT COUNT(*) FROM booklist WHERE search_vector IS NULL")
     ).scalar()
     populated = total - (null_count or 0)
-    logger.info(f"回填验证: {populated}/{total} 行 search_vector 非空, {null_count} 行为 NULL")
+    logger.info(
+        f"回填验证: {populated}/{total} 行 search_vector 非空, {null_count} 行为 NULL"
+    )
 
     # ── 3. 创建 GIN 索引 ──
     logger.info("创建 GIN 索引 ix_booklist_search_vector...")

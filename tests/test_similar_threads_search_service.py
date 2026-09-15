@@ -90,7 +90,12 @@ async def test_candidate_pool_and_live_preference_ranking(
             9105: [8101, 8103],
         }
         session.add_all(
-            TagBinding(target_type="thread", binding_source="discord_sync", target_id=internal_ids[thread_id], tag_id=tag_id)
+            TagBinding(
+                target_type="thread",
+                binding_source="discord_sync",
+                target_id=internal_ids[thread_id],
+                tag_id=tag_id,
+            )
             for thread_id, tag_ids in links.items()
             for tag_id in tag_ids
         )

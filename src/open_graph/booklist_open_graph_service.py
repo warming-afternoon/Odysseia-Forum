@@ -33,9 +33,9 @@ class BooklistOpenGraphService:
         """返回公开书单元数据，空书单仍返回统计为零的成功响应。"""
         # 缓存命中前查询公开主资源，私有与不存在书单保持同一 404 语义。
         async with self.session_factory() as session:
-            booklist = await BooklistRepository(
-                session
-            ).get_open_graph_booklist(booklist_id)
+            booklist = await BooklistRepository(session).get_open_graph_booklist(
+                booklist_id
+            )
         if booklist is None:
             return None
 
@@ -45,14 +45,12 @@ class BooklistOpenGraphService:
         if cached is not None:
             cached_metadata, source_thread_ids = cached
             async with self.session_factory() as session:
-                sources_valid = (
-                    await BooklistItemRepository(
-                        session
-                    ).are_open_graph_sources_valid(
-                        booklist_id,
-                        source_thread_ids,
-                        self.excluded_channel_ids,
-                    )
+                sources_valid = await BooklistItemRepository(
+                    session
+                ).are_open_graph_sources_valid(
+                    booklist_id,
+                    source_thread_ids,
+                    self.excluded_channel_ids,
                 )
             if sources_valid:
                 return cached_metadata
@@ -72,9 +70,7 @@ class BooklistOpenGraphService:
 
         # 自定义封面只校验完整 HTTP(S)，不解析 Discord 签名且参与作品去重。
         cover_image_url = (
-            booklist.cover_image_url
-            if is_http_url(booklist.cover_image_url)
-            else None
+            booklist.cover_image_url if is_http_url(booklist.cover_image_url) else None
         )
         async with self.session_factory() as session:
             item_repository = BooklistItemRepository(session)

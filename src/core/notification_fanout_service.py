@@ -90,9 +90,7 @@ class NotificationFanoutService:
                 ],
                 notification_rows,
             )
-            .on_conflict_do_nothing(
-                constraint="uk_notification_user_event_source"
-            )
+            .on_conflict_do_nothing(constraint="uk_notification_user_event_source")
         )
         result = await self.session.execute(statement)
         return int(result.rowcount or 0)

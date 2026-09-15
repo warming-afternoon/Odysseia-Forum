@@ -162,6 +162,4 @@ def _on_booklist_before_update(mapper, connection, target: Booklist):
 @event.listens_for(Booklist.__table__, "after_create")  # type: ignore[attr-defined]
 def _on_booklist_after_create(target, connection, **kw):  # type: ignore[no-redef]
     if connection.dialect.name == "postgresql":
-        connection.execute(
-            text("ALTER TABLE booklist SET (fillfactor = 90)")
-        )
+        connection.execute(text("ALTER TABLE booklist SET (fillfactor = 90)"))

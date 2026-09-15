@@ -28,9 +28,7 @@ class CollectionRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def _record_thread_collection_trends(
-        self, thread_ids: Sequence[int]
-    ) -> None:
+    async def _record_thread_collection_trends(self, thread_ids: Sequence[int]) -> None:
         """为近期帖子记录用户维度去重后的收藏趋势。"""
         if not thread_ids:
             return

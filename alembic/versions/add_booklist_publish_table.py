@@ -31,7 +31,9 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("booklist_id", "thread_id", name="uq_booklist_publish_thread"),
+        sa.UniqueConstraint(
+            "booklist_id", "thread_id", name="uq_booklist_publish_thread"
+        ),
     )
     op.create_index(
         "ix_booklist_publish_booklist_id",

@@ -1,7 +1,7 @@
 import logging
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy import select
 
 from api.v1.dependencies.security import get_current_user, require_auth
@@ -39,12 +39,16 @@ async def list_notifications(
     user_id = int(current_user["id"])
     async with AsyncSessionFactory() as session:
         notification_repository = NotificationRepository(session)
-        notifications, total, unread_count = (
-            await notification_repository.list_for_user(
-                user_id, unread_only, limit, offset
-            )
+        (
+            notifications,
+            total,
+            unread_count,
+        ) = await notification_repository.list_for_user(
+            user_id, unread_only, limit, offset
         )
-        thread_ids = list({item.thread_id for item in notifications if item.thread_id is not None})
+        thread_ids = list(
+            {item.thread_id for item in notifications if item.thread_id is not None}
+        )
         threads = await ThreadRepository(session).get_threads_by_ids_with_tags(
             thread_ids
         )
@@ -62,20 +66,24 @@ async def list_notifications(
             statement = select(ThreadUpdate).where(ThreadUpdate.id.in_(update_ids))
             update_map = {
                 update.id: update
-                for update in (
-                    await session.execute(statement)
-                ).scalars().all()
+                for update in (await session.execute(statement)).scalars().all()
                 if update.id is not None
             }
 
         results: list[NotificationItem] = []
         for item in notifications:
             if item.event_type == "tag_review":
-                results.append(NotificationItem(
-                    id=item.id, type="tag_review", target_type=item.target_type,
-                    target_id=str(item.target_id), proposal_id=str(item.event_source_id),
-                    created_at=item.created_at, read_at=item.read_at,
-                ))
+                results.append(
+                    NotificationItem(
+                        id=item.id,
+                        type="tag_review",
+                        target_type=item.target_type,
+                        target_id=str(item.target_id),
+                        proposal_id=str(item.event_source_id),
+                        created_at=item.created_at,
+                        read_at=item.read_at,
+                    )
+                )
                 continue
             if item.id is None or (thread := thread_map.get(item.thread_id)) is None:
                 continue
@@ -170,11 +178,24 @@ async def mark_all_read(
     return MarkReadResponse(marked_read=count)
 
 
-@router.post("/{notification_id}/read", response_model=MarkReadResponse, summary="标记单条通知已读")
-async def mark_one_read(notification_id: int, current_user: dict[str, Any] = Depends(get_current_user)):
+@router.post(
+    "/{notification_id}/read",
+    response_model=MarkReadResponse,
+    summary="标记单条通知已读",
+)
+async def mark_one_read(
+    notification_id: Annotated[
+        int,
+        Path(
+            description="要标记已读的通知内部 ID，取自通知列表的 id；仅可操作当前用户自己的通知"
+        ),
+    ],
+    current_user: dict[str, Any] = Depends(get_current_user),
+):
     """读取书单审核等不关联作品的通知时可单独标记。"""
     async with AsyncSessionFactory() as session:
-        count = await NotificationRepository(session).mark_one_read(int(current_user["id"]), notification_id)
+        count = await NotificationRepository(session).mark_one_read(
+            int(current_user["id"]), notification_id
+        )
         await session.commit()
     return MarkReadResponse(marked_read=count)
-

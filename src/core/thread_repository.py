@@ -192,7 +192,9 @@ class ThreadRepository:
         self, thread_data: dict, tags: list[Tag]
     ) -> ThreadSyncMutationResult:
         """添加或更新帖子及标签并返回明确的变更结果。"""
-        await self.session.execute(text("SELECT pg_advisory_xact_lock_shared(73902141)"))
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock_shared(73902141)")
+        )
         # 查找现有帖子
         statement = (
             select(Thread)
@@ -215,7 +217,9 @@ class ThreadRepository:
             self.session.add(db_thread)
             created = True
         await self.session.flush()
-        tags_changed = await TagBindingRepository(self.session).sync_native(db_thread.id, tags)
+        tags_changed = await TagBindingRepository(self.session).sync_native(
+            db_thread.id, tags
+        )
         if tags_changed:
             db_thread.native_tag_revision += 1
         await self.session.flush()
@@ -230,7 +234,9 @@ class ThreadRepository:
         result = await self.session.execute(statement)
         db_thread = result.scalars().first()
         if db_thread:
-            await TagBindingRepository(self.session).delete_targets("thread", [db_thread.id])
+            await TagBindingRepository(self.session).delete_targets(
+                "thread", [db_thread.id]
+            )
             await self.session.delete(db_thread)
             await self.session.commit()
 
@@ -251,7 +257,9 @@ class ThreadRepository:
         discord_ids = [row[1] for row in rows]  # Discord 帖子 ID
 
         try:
-            await TagBindingRepository(self.session).delete_targets("thread", thread_ids)
+            await TagBindingRepository(self.session).delete_targets(
+                "thread", thread_ids
+            )
 
             # 删除 ThreadFollow 记录（依赖 Discord thread_id）
             delete_follows = delete(ThreadFollow).where(
@@ -326,7 +334,6 @@ class ThreadRepository:
         )
         result = await self.session.execute(stmt)
         return result.rowcount > 0
-
 
     async def batch_update_thread_activity(self, updates: dict[int, UpdateData]) -> int:
         """

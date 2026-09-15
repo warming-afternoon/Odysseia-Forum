@@ -104,7 +104,13 @@ def image_url_identity(url: str | None) -> str | None:
     host = (parsed.hostname or "").lower()
     port = f":{parsed.port}" if parsed.port else ""
     normalized_url = urlunsplit(
-        (parsed.scheme.lower(), f"{host}{port}", parsed.path, parsed.query, parsed.fragment)
+        (
+            parsed.scheme.lower(),
+            f"{host}{port}",
+            parsed.path,
+            parsed.query,
+            parsed.fragment,
+        )
     )
     return f"url:{normalized_url}"
 
@@ -151,9 +157,7 @@ def extract_message_image_urls(
             attachment_url = attachment.get("url")
             attachment_proxy_url = attachment.get("proxy_url")
         else:
-            content_type = str(
-                getattr(attachment, "content_type", None) or ""
-            ).lower()
+            content_type = str(getattr(attachment, "content_type", None) or "").lower()
             filename = str(getattr(attachment, "filename", None) or "").lower()
             attachment_url = getattr(attachment, "url", None)
             attachment_proxy_url = getattr(attachment, "proxy_url", None)

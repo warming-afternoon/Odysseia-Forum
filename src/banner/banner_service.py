@@ -393,9 +393,7 @@ class BannerService:
         if channel_id is not None:
             effective_channel_ids.append(channel_id)
         effective_channel_ids = list(dict.fromkeys(effective_channel_ids))
-        return await self.carousel_repo.get_active(
-            channel_ids=effective_channel_ids
-        )
+        return await self.carousel_repo.get_active(channel_ids=effective_channel_ids)
 
     async def update_review_message_info(
         self, application_id: int, review_message_id: int, review_thread_id: int

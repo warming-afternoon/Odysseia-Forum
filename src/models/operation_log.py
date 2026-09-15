@@ -10,10 +10,14 @@ class OperationLog(SQLModel, table=True):
     """保存管理与治理操作的审计快照，支持扩展其他操作类型。"""
 
     __tablename__ = "operation_log"
-    __table_args__ = (Index("ix_operation_log_target_history", "target_type", "target_id", "id"),)
+    __table_args__ = (
+        Index("ix_operation_log_target_history", "target_type", "target_id", "id"),
+    )
 
     id: int | None = Field(
-        default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True), description="操作日志的内部主键"
+        default=None,
+        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
+        description="操作日志的内部主键",
     )
     """操作日志的内部主键"""
 

@@ -32,7 +32,9 @@ class UpdateDetectorView(discord.ui.View):
     ) -> tuple[int, int, str] | None:
         """从实时消息恢复持久化按钮需要的业务上下文。"""
         if not isinstance(interaction.channel, discord.Thread):
-            await interaction.response.send_message("此操作只能在帖子中使用。", ephemeral=True)
+            await interaction.response.send_message(
+                "此操作只能在帖子中使用。", ephemeral=True
+            )
             return None
         thread_id = self.thread_id or interaction.channel.id
         author_id = self.author_id or await self.cog.get_index_author_id(thread_id)
@@ -52,13 +54,13 @@ class UpdateDetectorView(discord.ui.View):
             )
             return None
         if interaction.user.id != author_id:
-            await interaction.response.send_message("此操作仅帖子作者可用。", ephemeral=True)
+            await interaction.response.send_message(
+                "此操作仅帖子作者可用。", ephemeral=True
+            )
             return None
         return thread_id, author_id, message_link
 
-    async def _handle_interaction_check(
-        self, interaction: discord.Interaction
-    ) -> bool:
+    async def _handle_interaction_check(self, interaction: discord.Interaction) -> bool:
         """兼容旧调用并校验当前操作用户是否为作者。"""
         author_id = self.author_id
         if author_id is None and isinstance(interaction.channel, discord.Thread):

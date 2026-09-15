@@ -58,9 +58,7 @@ class AuthorFollowRepository:
             .offset(offset)
         )
         count_statement = (
-            select(func.count())
-            .select_from(AuthorFollow)
-            .where(*conditions)
+            select(func.count()).select_from(AuthorFollow).where(*conditions)
         )
         rows = list((await self.session.execute(statement)).all())
         total = int((await self.session.execute(count_statement)).scalar_one())

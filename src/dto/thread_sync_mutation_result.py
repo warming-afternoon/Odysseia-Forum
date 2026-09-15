@@ -7,4 +7,3 @@ class ThreadSyncMutationResult:
 
     created: bool
     tags_changed: bool
-

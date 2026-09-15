@@ -102,8 +102,13 @@ async def test_snapshot_preserves_native_and_custom_fields(
         binding_source="discord_sync",
     )
     custom = dict(
-        TAG, readonly=False,
-        binding_source="local", binding_id=BIG_ID, upvotes=3, downvotes=1, my_vote=-1
+        TAG,
+        readonly=False,
+        binding_source="local",
+        binding_id=BIG_ID,
+        upvotes=3,
+        downvotes=1,
+        my_vote=-1,
     )
     expected = {"version": "v", "tags": [native, custom]}
     mediator.request.return_value = expected

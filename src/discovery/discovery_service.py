@@ -147,9 +147,7 @@ class DiscoveryService:
     ) -> List[Thread]:
         """获取单条轨道数据，支持频道子榜 offset 分页和有限补偿。"""
         if rail_name == "latest":
-            return await self.repo.get_latest_threads(
-                limit, offset, prefs, channel_ids
-            )
+            return await self.repo.get_latest_threads(limit, offset, prefs, channel_ids)
 
         metric_map = {
             "reaction_surge": "reaction",

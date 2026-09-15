@@ -441,6 +441,7 @@ async def test_update_detector_view_has_no_timeout_or_auto_delete_footer():
     assert view.timeout is None
     assert embed.footer.text is None
 
+
 @pytest.mark.asyncio
 async def test_update_detector_view_rejects_non_author_interaction():
     """非帖子作者不能操作更新检测提醒。"""

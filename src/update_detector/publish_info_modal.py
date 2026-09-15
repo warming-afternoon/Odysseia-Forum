@@ -70,4 +70,3 @@ class PublishInfoModal(discord.ui.Modal):
             description,
             version,
         )
-

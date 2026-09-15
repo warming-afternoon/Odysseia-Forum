@@ -14,4 +14,3 @@ class DiscordMemberVerificationDto:
     token_alias: Optional[str] = None
     retry_after: Optional[float] = None
     discord_code: Optional[int] = None
-

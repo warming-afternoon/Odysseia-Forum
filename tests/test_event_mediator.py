@@ -28,4 +28,3 @@ async def test_request_requires_exactly_one_handler() -> None:
     mediator.register(ExampleRequest, lambda event: event.value)
     with pytest.raises(RuntimeError, match="当前为 2 个"):
         await mediator.request(ExampleRequest(1))
-

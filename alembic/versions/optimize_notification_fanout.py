@@ -13,9 +13,7 @@ from sqlalchemy.engine.mock import MockConnection
 
 
 revision: str = "optimize_notification_fanout"
-down_revision: Union[str, Sequence[str], None] = (
-    "add_content_update_notifications"
-)
+down_revision: Union[str, Sequence[str], None] = "add_content_update_notifications"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -31,8 +29,7 @@ def upgrade() -> None:
     if not _is_offline_mode():
         indexes = sa.inspect(op.get_bind()).get_indexes("thread_follow")
         index_exists = any(
-            index["name"] == "ix_thread_follow_thread_active_user"
-            for index in indexes
+            index["name"] == "ix_thread_follow_thread_active_user" for index in indexes
         )
     if not index_exists:
         op.create_index(
@@ -48,8 +45,7 @@ def downgrade() -> None:
     if not _is_offline_mode():
         indexes = sa.inspect(op.get_bind()).get_indexes("thread_follow")
         index_exists = any(
-            index["name"] == "ix_thread_follow_thread_active_user"
-            for index in indexes
+            index["name"] == "ix_thread_follow_thread_active_user" for index in indexes
         )
     if index_exists:
         op.drop_index(

@@ -36,10 +36,8 @@ async def batch_add_collections(
             collection_service = CollectionRepository(session)
             already_collected: set[int] = set()
             if target_type == CollectionType.THREAD.value:
-                already_collected = (
-                    await collection_service.get_collected_target_ids(
-                        user_id, CollectionType.THREAD, target_ids
-                    )
+                already_collected = await collection_service.get_collected_target_ids(
+                    user_id, CollectionType.THREAD, target_ids
                 )
             result = await collection_service.add_collections(
                 user_id, target_type, target_ids

@@ -55,4 +55,3 @@ class ThreadUpdateRepository:
             await self.session.execute(
                 delete(ThreadUpdate).where(ThreadUpdate.thread_id.in_(thread_ids))
             )
-

@@ -67,4 +67,6 @@ class TagVoteView(discord.ui.View):
 
     async def handle_vote(self, button, interaction):
         """历史原生投票消息不再允许修改数据。"""
-        await interaction.response.send_message("DC 原生标签为只读，不再支持投票。", ephemeral=True)
+        await interaction.response.send_message(
+            "DC 原生标签为只读，不再支持投票。", ephemeral=True
+        )

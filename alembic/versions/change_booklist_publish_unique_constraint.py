@@ -17,9 +17,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_constraint(
-        "uq_booklist_publish_thread", "booklist_publish", type_="unique"
-    )
+    op.drop_constraint("uq_booklist_publish_thread", "booklist_publish", type_="unique")
     op.create_unique_constraint(
         "uq_booklist_publish_booklist", "booklist_publish", ["booklist_id"]
     )

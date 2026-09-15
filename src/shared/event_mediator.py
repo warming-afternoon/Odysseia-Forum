@@ -38,4 +38,3 @@ class EventMediator:
         if inspect.isawaitable(result):
             result = await result
         return cast(ResultT, result)
-

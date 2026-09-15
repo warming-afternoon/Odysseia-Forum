@@ -10,10 +10,7 @@ from core.redis_trend_service import RedisTrendService
 
 async def _delete_metric_keys(redis_client, metric: str) -> None:
     """删除单个测试指标创建的全部 Redis 键。"""
-    keys = [
-        key
-        async for key in redis_client.scan_iter(match=f"*{metric}*", count=100)
-    ]
+    keys = [key async for key in redis_client.scan_iter(match=f"*{metric}*", count=100)]
     if keys:
         await redis_client.delete(*keys)
 

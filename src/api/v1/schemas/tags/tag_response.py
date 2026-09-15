@@ -27,7 +27,9 @@ class TagResponse(BaseModel):
     category: int | None = Field(description="分类枚举值 1–7；原生及未分类转换标签为空")
     """分类枚举值 1–7；原生及未分类转换标签为空"""
 
-    category_name: str | None = Field(description="分类中文名；原生及未分类转换标签为空")
+    category_name: str | None = Field(
+        description="分类中文名；原生及未分类转换标签为空"
+    )
     """分类中文名；原生及未分类转换标签为空"""
 
     enabled: bool = Field(description="标签是否启用")

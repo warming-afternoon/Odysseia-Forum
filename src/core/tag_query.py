@@ -34,7 +34,9 @@ def tag_filters(kind, target_column, included, excluded, logic="and"):
     return conditions
 
 
-async def load_custom_tags(session, kind, target_ids) -> dict[int, list[CustomTagBindingResponse]]:
+async def load_custom_tags(
+    session, kind, target_ids
+) -> dict[int, list[CustomTagBindingResponse]]:
     """批量读取标签展示数据，避免逐目标查询和缓存陈旧票数。"""
     if not target_ids:
         return {}

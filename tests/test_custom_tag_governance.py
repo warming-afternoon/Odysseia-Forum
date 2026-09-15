@@ -210,9 +210,7 @@ async def test_proposals_timeout_and_notifications(setup_tags):
     assert (await call("read", **payload))["tags"][0]["id"] == tag["id"]
     await worker.expire()
     async with factory() as session:
-        assert (
-            len((await session.execute(select(TagBinding))).scalars().all()) == 1
-        )
+        assert len((await session.execute(select(TagBinding))).scalars().all()) == 1
 
 
 @pytest.mark.asyncio
@@ -238,9 +236,7 @@ async def test_versions_permissions_and_search(setup_tags):
         await attach(call, [], actor=3)
     await call("manage", 99, operation="disable", tag_id=tag["id"])
     async with factory() as session:
-        query = select(Thread).where(
-            *tag_filters("thread", Thread.id, [tag["id"]], [])
-        )
+        query = select(Thread).where(*tag_filters("thread", Thread.id, [tag["id"]], []))
         assert (await session.execute(query)).scalar_one().thread_id == 100
     await call("manage", 99, operation="delete", tag_id=tag["id"])
     async with factory() as session:
@@ -446,7 +442,11 @@ async def test_legacy_migration_preserves_keys(setup_tags):
         await session.execute(
             text("CREATE TABLE tag (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL)")
         )
-        await session.execute(text("CREATE TABLE thread (id INTEGER PRIMARY KEY, channel_id BIGINT NOT NULL)"))
+        await session.execute(
+            text(
+                "CREATE TABLE thread (id INTEGER PRIMARY KEY, channel_id BIGINT NOT NULL)"
+            )
+        )
         await session.execute(
             text("CREATE TABLE thread_tag_link (thread_id INTEGER, tag_id BIGINT)")
         )
@@ -459,7 +459,9 @@ async def test_legacy_migration_preserves_keys(setup_tags):
             text("INSERT INTO tag VALUES (:id, '旧标签')"), {"id": old_id}
         )
         await session.execute(text("INSERT INTO thread VALUES (1, 20)"))
-        await session.execute(text("CREATE TABLE tag_vote (id SERIAL PRIMARY KEY, vote INTEGER)"))
+        await session.execute(
+            text("CREATE TABLE tag_vote (id SERIAL PRIMARY KEY, vote INTEGER)")
+        )
         await session.execute(text("INSERT INTO tag_vote (vote) VALUES (1)"))
         await session.execute(
             text("INSERT INTO thread_tag_link VALUES (1, :id)"), {"id": old_id}
@@ -484,11 +486,33 @@ async def test_legacy_migration_preserves_keys(setup_tags):
         assert (
             await session.execute(text("SELECT tag_id FROM thread_tag_link"))
         ).scalar_one() == old_id
-        binding = (await session.execute(text("SELECT target_id, tag_id, binding_source, upvotes, downvotes FROM tag_binding"))).one()
+        binding = (
+            await session.execute(
+                text(
+                    "SELECT target_id, tag_id, binding_source, upvotes, downvotes FROM tag_binding"
+                )
+            )
+        ).one()
         assert binding == (1, old_id, "discord_sync", 0, 0)
-        assert (await session.execute(text("SELECT count(*) FROM tag_vote"))).scalar_one() == 0
-        assert (await session.execute(text("SELECT data_type FROM information_schema.columns WHERE table_schema=:schema AND table_name='tag_binding' AND column_name='id'"), {"schema": schema})).scalar_one() == "bigint"
-        assert (await session.execute(text("SELECT count(*) FROM information_schema.table_constraints WHERE constraint_schema=:schema AND constraint_type='FOREIGN KEY'"), {"schema": schema})).scalar_one() == 0
+        assert (
+            await session.execute(text("SELECT count(*) FROM tag_vote"))
+        ).scalar_one() == 0
+        assert (
+            await session.execute(
+                text(
+                    "SELECT data_type FROM information_schema.columns WHERE table_schema=:schema AND table_name='tag_binding' AND column_name='id'"
+                ),
+                {"schema": schema},
+            )
+        ).scalar_one() == "bigint"
+        assert (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.table_constraints WHERE constraint_schema=:schema AND constraint_type='FOREIGN KEY'"
+                ),
+                {"schema": schema},
+            )
+        ).scalar_one() == 0
         await session.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
 
 

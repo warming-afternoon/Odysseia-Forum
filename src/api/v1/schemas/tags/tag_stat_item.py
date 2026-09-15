@@ -9,16 +9,22 @@ class TagStatItem(BaseModel):
     tag_name: str = Field(description="标签名称")
     """标签名称"""
 
-    source: str = Field(default="discord", description="统计分组来源：discord、custom 或 virtual")
+    source: str = Field(
+        default="discord", description="统计分组来源：discord、custom 或 virtual"
+    )
     """DC 按名称，自定义按分类和名称分组"""
 
-    category: int | None = Field(default=None, description="自定义分类；原生或未分类时为空")
+    category: int | None = Field(
+        default=None, description="自定义分类；原生或未分类时为空"
+    )
     """统计分组的标签分类"""
 
     category_name: str | None = Field(default=None, description="分类中文名")
     """分类名称"""
 
-    tag_ids: list[str] = Field(default_factory=list, description="本组实体内部 ID，均为字符串；虚拟标签为空")
+    tag_ids: list[str] = Field(
+        default_factory=list, description="本组实体内部 ID，均为字符串；虚拟标签为空"
+    )
     """本组全部具体标签 ID，与 tag_name 对应"""
 
     total_thread_count: int = Field(description="该标签下的总帖子数(跨频道累加)")

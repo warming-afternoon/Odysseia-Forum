@@ -91,4 +91,3 @@ async def list_author_follows(
         limit=limit,
         offset=offset,
     )
-

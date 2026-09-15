@@ -153,12 +153,12 @@ class ThreadManager(commands.Cog):
             if user and user.bot:
                 continue
 
-            await self.inactive_follow_buffer.add(
-                thread_id=thread_id, user_id=user_id
-            )
+            await self.inactive_follow_buffer.add(thread_id=thread_id, user_id=user_id)
 
     @commands.Cog.listener()
-    async def on_raw_thread_member_remove(self, payload: discord.RawThreadMembersUpdate):
+    async def on_raw_thread_member_remove(
+        self, payload: discord.RawThreadMembersUpdate
+    ):
         """成员被移出帖子时：将关注标记为过去关注（经 Redis 缓冲批量写入 DB）。
 
         使用 raw 事件而非高级事件 on_thread_member_remove：
@@ -368,4 +368,6 @@ class ThreadManager(commands.Cog):
     # )
     async def tag_rate(self, interaction: discord.Interaction):
         """旧标签评价入口已停用，不再写入原生投票。"""
-        await interaction.response.send_message("DC 原生标签为只读，不再支持投票。", ephemeral=True)
+        await interaction.response.send_message(
+            "DC 原生标签为只读，不再支持投票。", ephemeral=True
+        )

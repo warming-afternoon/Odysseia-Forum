@@ -33,9 +33,7 @@ class OpenGraphImageResolver:
         max_async_refresh_jobs: int,
     ):
         self.reindex_queue = reindex_queue
-        self.refresh_before_expiry_seconds = max(
-            0.0, refresh_before_expiry_seconds
-        )
+        self.refresh_before_expiry_seconds = max(0.0, refresh_before_expiry_seconds)
         self.sync_wait_timeout_seconds = max(0.0, sync_wait_timeout_seconds)
         self.max_async_refresh_jobs = max(0, max_async_refresh_jobs)
 
@@ -68,9 +66,7 @@ class OpenGraphImageResolver:
             else:
                 cache_ttl_limit = max(
                     0,
-                    math.floor(
-                        remaining_seconds - self.refresh_before_expiry_seconds
-                    ),
+                    math.floor(remaining_seconds - self.refresh_before_expiry_seconds),
                 )
             break
 
@@ -154,8 +150,7 @@ class OpenGraphImageResolver:
                     selected_ttl_limit = max(
                         0,
                         math.floor(
-                            remaining_seconds
-                            - self.refresh_before_expiry_seconds
+                            remaining_seconds - self.refresh_before_expiry_seconds
                         ),
                     )
                 break

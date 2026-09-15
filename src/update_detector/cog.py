@@ -133,8 +133,7 @@ class UpdateDetector(commands.Cog):
         """判断帖子是否仍处于发布后的首个自然 24 小时。"""
         created_at = getattr(thread, "created_at", None)
         return bool(
-            created_at
-            and discord.utils.utcnow() - created_at < timedelta(days=1)
+            created_at and discord.utils.utcnow() - created_at < timedelta(days=1)
         )
 
     @commands.Cog.listener()
@@ -302,9 +301,7 @@ class UpdateDetector(commands.Cog):
     @staticmethod
     def build_message_link(guild_id: int, thread_id: int, message_id: int) -> str:
         """构建 Discord 消息链接。"""
-        return ThreadUpdateService.build_message_link(
-            guild_id, thread_id, message_id
-        )
+        return ThreadUpdateService.build_message_link(guild_id, thread_id, message_id)
 
     async def get_index_author_id(self, thread_id: int) -> int | None:
         """获取索引中记录的作品作者 ID。"""
@@ -577,9 +574,7 @@ class UpdateDetector(commands.Cog):
             priority=1,
         )
 
-    @update_remind_group.command(
-        name="修改", description="修改当前帖子的更新提醒设置"
-    )
+    @update_remind_group.command(name="修改", description="修改当前帖子的更新提醒设置")
     @app_commands.describe(
         自动同步="是否自动同步更新到索引页（无需确认）",
         不再提醒="是否关闭此帖的更新检测提醒",

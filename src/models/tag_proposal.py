@@ -12,7 +12,9 @@ class TagProposal(SQLModel, table=True):
     __tablename__ = "tag_proposal"
 
     id: int | None = Field(
-        default=None, sa_column=Column(BigInteger, primary_key=True, autoincrement=True), description="标签添加申请的内部主键"
+        default=None,
+        sa_column=Column(BigInteger, primary_key=True, autoincrement=True),
+        description="标签添加申请的内部主键",
     )
     """标签添加申请的内部主键"""
 

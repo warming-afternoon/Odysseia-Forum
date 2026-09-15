@@ -46,4 +46,3 @@ class BooklistItemEnricher:
                 source_message_at=update.source_message_at,
                 published_at=update.published_at,
             )
-

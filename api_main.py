@@ -1,34 +1,25 @@
-import sys
-
-if sys.platform != "win32":
-    try:
-        import uvloop
-
-        uvloop.install()
-        print("uvloop 已启用。")
-    except ImportError:
-        print("未找到 uvloop，将使用默认的 asyncio 事件循环。")
-
-
+import asyncio
 import json
 import logging
 import os
+import sys
 from logging.handlers import TimedRotatingFileHandler
-import asyncio
+
 import uvicorn
 from dotenv import load_dotenv
 
-load_dotenv()
-
-from shared.database import AsyncSessionFactory, init_db, close_db
-from shared.redis_client import RedisManager
 import booklist.booklist_service as booklist_service_module
+from api.main import app as fastapi_app
+from api.v1.dependencies.rate_limit import initialize_rate_limit
+from api.v1.dependencies.security import initialize_api_security
 from core.api_cache_service import ApiCacheService
 from core.impression_cache_service import ImpressionCacheService
 from core.tag_cache_service import TagCacheService
-from tag.tag_runtime import create_tag_mediator
 from search.similar_threads_cache_service import SimilarThreadsCacheService
+from shared.database import AsyncSessionFactory, close_db, init_db
 from shared.enum import AbyssDefaults, SearchConfigDefaultsInt
+from shared.redis_client import RedisManager
+from tag.tag_runtime import create_tag_mediator
 from api.v1.routers import (
     preferences as preferences_api,
     search as search_api,
@@ -41,10 +32,18 @@ from api.v1.routers import (
     booklists as booklists_api,
     follows as follows_api,
 )
-from api.main import app as fastapi_app
-from api.v1.dependencies.security import initialize_api_security
-from api.v1.dependencies.rate_limit import initialize_rate_limit
 from api.v1.routers.auth import initialize_auth_config
+
+load_dotenv()
+
+if sys.platform != "win32":
+    try:
+        import uvloop
+
+        uvloop.install()
+        print("uvloop 已启用。")
+    except ImportError:
+        print("未找到 uvloop，将使用默认的 asyncio 事件循环。")
 
 logger = logging.getLogger(__name__)
 

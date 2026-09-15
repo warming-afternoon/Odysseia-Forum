@@ -232,7 +232,9 @@ class BooklistRepository:
         )
         await self.session.execute(statement_publish)
         # 删除书单
-        await TagBindingRepository(self.session).delete_targets("booklist", [booklist_id])
+        await TagBindingRepository(self.session).delete_targets(
+            "booklist", [booklist_id]
+        )
         statement = delete(Booklist).where(Booklist.id == booklist_id)  # type: ignore
         result = await self.session.execute(statement)
         await self.session.commit()
@@ -282,9 +284,15 @@ class BooklistRepository:
         分页搜索书单（支持 FTS 全文搜索）
         """
         query = select(Booklist)
-        query = query.where(*tag_filters(
-            "booklist", Booklist.id, include_tag_ids, exclude_tag_ids, tag_logic,
-        ))
+        query = query.where(
+            *tag_filters(
+                "booklist",
+                Booklist.id,
+                include_tag_ids,
+                exclude_tag_ids,
+                tag_logic,
+            )
+        )
 
         if owner_id is not None:
             query = query.where(Booklist.owner_id == owner_id)

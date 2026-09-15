@@ -39,9 +39,7 @@ class ThreadDeletionService:
 
     async def delete_stale(self, threshold: int) -> int:
         """删除连续拉取失败次数达到阈值的作品。"""
-        statement = select(Thread.thread_id).where(
-            Thread.not_found_count >= threshold
-        )
+        statement = select(Thread.thread_id).where(Thread.not_found_count >= threshold)
         thread_ids = list((await self.session.execute(statement)).scalars().all())
         return await self.delete_threads(thread_ids)
 
@@ -50,7 +48,9 @@ class ThreadDeletionService:
         unique_ids = sorted(set(thread_ids))
         if not unique_ids:
             return 0
-        internal_statement = select(Thread.id).where(Thread.thread_id.in_(unique_ids)).with_for_update()
+        internal_statement = (
+            select(Thread.id).where(Thread.thread_id.in_(unique_ids)).with_for_update()
+        )
         internal_ids = list(
             (await self.session.execute(internal_statement)).scalars().all()
         )
@@ -90,4 +90,3 @@ class ThreadDeletionService:
             delete(Thread).where(Thread.thread_id.in_(unique_ids))
         )
         return int(result.rowcount or 0)
-

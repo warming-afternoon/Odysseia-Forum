@@ -114,7 +114,9 @@ class TagWorker:
                 except Exception as exc:
                     task.attempts += 1
                     task.error = type(exc).__name__
-                    task.available_at = utc_now() + timedelta(seconds=min(3600, 30 * 2 ** min(task.attempts, 7)))
+                    task.available_at = utc_now() + timedelta(
+                        seconds=min(3600, 30 * 2 ** min(task.attempts, 7))
+                    )
                 return
             proposal = await session.get(TagProposal, task.proposal_id)
             if proposal is None or proposal.status != "pending":
@@ -127,8 +129,12 @@ class TagWorker:
                     task.status = "cancelled"
                     return
                 external_id = target.thread_id
-            notice = SimpleNamespace(id=proposal.id, owner_id=proposal.owner_id,
-                                     target_type=proposal.target_type, target_id=external_id)
+            notice = SimpleNamespace(
+                id=proposal.id,
+                owner_id=proposal.owner_id,
+                target_type=proposal.target_type,
+                target_id=external_id,
+            )
             task.attempts += 1
             try:
                 delivered = await send(notice)

@@ -72,7 +72,9 @@ class ThreadDetailBuilder:
             )
 
         return ThreadDetail(
-            custom_tags=presentation_context.custom_tags.get(thread.id, []) if presentation_context else [],
+            custom_tags=presentation_context.custom_tags.get(thread.id, [])
+            if presentation_context
+            else [],
             thread_id=thread.thread_id,
             guild_id=thread.guild_id,
             channel_id=thread.channel_id,

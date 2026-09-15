@@ -2,12 +2,12 @@
 标签仓库集成测试（PostgreSQL 后端）。
 
 覆盖 tags.py API 背后的 TagRepository 层：
-- get_or_create_tags（INSERT ON CONFLICT DO UPDATE）
+- get_or_create_tags（批量查询、按需更新和插入）
 - get_all_tags / get_tags_for_channels
 - update_tag_name
 - 跨表聚合查询（Tag → TagBinding → Thread）
 
-PG 关注点：pg_insert(Tag).on_conflict_do_update()
+PG 关注点：重复同步不消耗序列，缺失实体保留并发冲突保护。
 """
 
 import pytest
@@ -85,11 +85,36 @@ async def seeded_tag_session(tag_session: AsyncSession) -> AsyncSession:
     tag_ids = {t.discord_tag_id: t.id for t in await repo.get_all_tags()}
 
     links = [
-        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[101], tag_id=tag_ids[10]),
-        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[101], tag_id=tag_ids[20]),
-        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[102], tag_id=tag_ids[10]),
-        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[102], tag_id=tag_ids[30]),
-        TagBinding(target_type="thread", binding_source="discord_sync", target_id=id_map[201], tag_id=tag_ids[40]),
+        TagBinding(
+            target_type="thread",
+            binding_source="discord_sync",
+            target_id=id_map[101],
+            tag_id=tag_ids[10],
+        ),
+        TagBinding(
+            target_type="thread",
+            binding_source="discord_sync",
+            target_id=id_map[101],
+            tag_id=tag_ids[20],
+        ),
+        TagBinding(
+            target_type="thread",
+            binding_source="discord_sync",
+            target_id=id_map[102],
+            tag_id=tag_ids[10],
+        ),
+        TagBinding(
+            target_type="thread",
+            binding_source="discord_sync",
+            target_id=id_map[102],
+            tag_id=tag_ids[30],
+        ),
+        TagBinding(
+            target_type="thread",
+            binding_source="discord_sync",
+            target_id=id_map[201],
+            tag_id=tag_ids[40],
+        ),
     ]
     tag_session.add_all(links)
     await tag_session.commit()
@@ -269,3 +294,30 @@ class TestCrossTableAggregation:
         assert tag_counts["纯爱"] == 1
         assert tag_counts["后宫"] == 1
         assert tag_counts["异世界"] == 1
+
+
+@pytest.mark.asyncio
+async def test_existing_sync_does_not_consume_tag_ids(tag_session: AsyncSession):
+    """重复同步、改名和混合新增只为真正缺失的实体分配 ID。"""
+    repo = TagRepository(tag_session)
+    initial = await repo.get_or_create_tags({101: "原名", 102: "已转换"})
+    original_ids = {tag.discord_tag_id: tag.id for tag in initial}
+    converted = next(tag for tag in initial if tag.discord_tag_id == 102)
+    converted.source = "custom"
+    await tag_session.flush()
+
+    # 重复的帖子同步不改名，完整快照可以改名，但不能覆盖已转换实体。
+    for _ in range(3):
+        unchanged = await repo.get_or_create_tags(
+            {101: "缓存旧名", 102: "缓存旧名"}, update_names=False
+        )
+        assert {tag.name for tag in unchanged} == {"原名", "已转换"}
+    updated = await repo.get_or_create_tags({101: "新名", 102: "不应覆盖"})
+    assert {tag.name for tag in updated} == {"新名", "已转换"}
+    assert {tag.discord_tag_id: tag.id for tag in updated} == original_ids
+
+    # 在独立测试库中，下一条真实插入应紧接上次 ID，证明中间没有取号。
+    mixed = await repo.get_or_create_tags({101: "再次改名", 103: "新增"})
+    new_tag = next(tag for tag in mixed if tag.discord_tag_id == 103)
+    assert new_tag.id == max(original_ids.values()) + 1
+    assert next(tag for tag in mixed if tag.discord_tag_id == 101).name == "再次改名"

@@ -147,6 +147,8 @@ async def _process_single_item(
     response_item.thumbnail_urls = thumbnail_urls
     response_item.updated = await _persist_thumbnail(item.thread_id, thumbnail_urls)  # type: ignore
     return response_item
+
+
 async def _persist_thumbnail(thread_id: int, thumbnail_urls: List[str]) -> bool:
     assert _async_session_factory is not None  # 为类型检查器准备
     try:

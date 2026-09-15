@@ -52,9 +52,7 @@ def _has_unique_constraint(table_name: str, constraint_name: str) -> bool:
     if _is_offline_mode():
         return _offline_assume_exists
     constraints = sa.inspect(op.get_bind()).get_unique_constraints(table_name)
-    return any(
-        constraint["name"] == constraint_name for constraint in constraints
-    )
+    return any(constraint["name"] == constraint_name for constraint in constraints)
 
 
 def _has_check_constraint(table_name: str, constraint_name: str) -> bool:
@@ -62,9 +60,7 @@ def _has_check_constraint(table_name: str, constraint_name: str) -> bool:
     if _is_offline_mode():
         return _offline_assume_exists
     constraints = sa.inspect(op.get_bind()).get_check_constraints(table_name)
-    return any(
-        constraint["name"] == constraint_name for constraint in constraints
-    )
+    return any(constraint["name"] == constraint_name for constraint in constraints)
 
 
 def _column_is_nullable(table_name: str, column_name: str) -> bool:
@@ -121,17 +117,13 @@ def _ensure_author_follow_schema() -> None:
             existing_nullable=False,
             server_default=sa.true(),
         )
-        if not _has_unique_constraint(
-            "author_follow", "uk_author_follow_user_author"
-        ):
+        if not _has_unique_constraint("author_follow", "uk_author_follow_user_author"):
             op.create_unique_constraint(
                 "uk_author_follow_user_author",
                 "author_follow",
                 ["user_id", "author_id"],
             )
-        if not _has_check_constraint(
-            "author_follow", "ck_author_follow_not_self"
-        ):
+        if not _has_check_constraint("author_follow", "ck_author_follow_not_self"):
             op.create_check_constraint(
                 "ck_author_follow_not_self",
                 "author_follow",
@@ -179,9 +171,7 @@ def _ensure_thread_update_schema() -> None:
             ),
         )
     else:
-        if not _has_unique_constraint(
-            "thread_update", "uk_thread_update_message"
-        ):
+        if not _has_unique_constraint("thread_update", "uk_thread_update_message"):
             op.create_unique_constraint(
                 "uk_thread_update_message",
                 "thread_update",
@@ -256,9 +246,7 @@ def _ensure_notification_schema() -> None:
                 "notification",
                 ["user_id", "event_type", "event_source_id"],
             )
-        if not _has_check_constraint(
-            "notification", "ck_notification_event_type"
-        ):
+        if not _has_check_constraint("notification", "ck_notification_event_type"):
             op.create_check_constraint(
                 "ck_notification_event_type",
                 "notification",
@@ -328,9 +316,7 @@ def _ensure_banner_cover_schema() -> None:
 
 def _ensure_thread_follow_unique_constraint() -> None:
     """合并历史重复关注并补齐帖子关注唯一约束。"""
-    if _has_unique_constraint(
-        "thread_follow", "uk_thread_follow_user_thread"
-    ):
+    if _has_unique_constraint("thread_follow", "uk_thread_follow_user_thread"):
         return
 
     # 在添加唯一约束前合并可能存在的历史重复关注记录
@@ -421,9 +407,7 @@ def downgrade() -> None:
             "user_update_preference",
             type_="check",
         )
-    if _has_unique_constraint(
-        "thread_follow", "uk_thread_follow_user_thread"
-    ):
+    if _has_unique_constraint("thread_follow", "uk_thread_follow_user_thread"):
         op.drop_constraint(
             "uk_thread_follow_user_thread",
             "thread_follow",

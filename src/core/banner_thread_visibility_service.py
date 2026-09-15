@@ -87,4 +87,3 @@ class BannerThreadVisibilityService:
             if result.has_exclude:
                 filters.append(~result.exclude_condition)
         return filters
-

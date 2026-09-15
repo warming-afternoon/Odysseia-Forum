@@ -67,10 +67,7 @@ class ViewerFlagService:
             )
             .distinct()
         )
-        unread_ids = set(
-            (await self.session.execute(unread_statement)).scalars().all()
-        )
+        unread_ids = set((await self.session.execute(unread_statement)).scalars().all())
         for thread_id in unread_ids:
             values[int(thread_id)].add("unread")
         return ViewerFlagMap(values=values)
-

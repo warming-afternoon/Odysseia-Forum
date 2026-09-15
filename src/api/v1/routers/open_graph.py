@@ -48,9 +48,7 @@ def configure_open_graph_router(
     # 空令牌明确代表服务未配置，路由认证统一返回 503。
     raw_token = config.get("service_token")
     _service_token = (
-        raw_token.strip()
-        if isinstance(raw_token, str) and raw_token.strip()
-        else None
+        raw_token.strip() if isinstance(raw_token, str) and raw_token.strip() else None
     )
 
     # 数值配置在注入边界集中解析，非法值回退默认值而不拆分短辅助函数。

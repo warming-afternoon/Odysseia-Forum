@@ -30,7 +30,10 @@ def test_text_formatter_applies_placeholders_and_inclusive_ellipsis_limits():
         == "未命名"
     )
     assert OpenGraphTextFormatter.format("123456", limit=5, empty_value=None) == "1234…"
-    assert len(OpenGraphTextFormatter.format("x" * 201, limit=200, empty_value=None)) == 200
+    assert (
+        len(OpenGraphTextFormatter.format("x" * 201, limit=200, empty_value=None))
+        == 200
+    )
 
 
 @pytest.mark.asyncio
@@ -42,9 +45,7 @@ async def test_metadata_cache_clips_ttl_and_keeps_internal_sources_out_of_payloa
     metadata = ThreadShareMetadataDTO(
         title="帖子",
         author=OpenGraphAuthorDTO(display_name="作者"),
-        stats=ThreadShareStatsDTO(
-            reaction_count=1, reply_count=2, collection_count=3
-        ),
+        stats=ThreadShareStatsDTO(reaction_count=1, reply_count=2, collection_count=3),
         created_at=datetime(2026, 8, 8),
         updated_at=datetime(2026, 8, 8),
     )
@@ -100,17 +101,13 @@ async def test_metadata_cache_round_trip_with_real_redis(redis_client):
     metadata = ThreadShareMetadataDTO(
         title="Redis 帖子",
         author=OpenGraphAuthorDTO(display_name="作者"),
-        stats=ThreadShareStatsDTO(
-            reaction_count=1, reply_count=2, collection_count=3
-        ),
+        stats=ThreadShareStatsDTO(reaction_count=1, reply_count=2, collection_count=3),
         created_at=datetime(2026, 8, 8),
         updated_at=datetime(2026, 8, 8),
     )
 
     try:
-        await cache.set(
-            "thread", resource_id, metadata, [42], ttl_limit_seconds=5
-        )
+        await cache.set("thread", resource_id, metadata, [42], ttl_limit_seconds=5)
         first = await cache.get("thread", resource_id, ThreadShareMetadataDTO)
         second = await cache.get("thread", resource_id, ThreadShareMetadataDTO)
         ttl = await redis_client.ttl(cache_key)

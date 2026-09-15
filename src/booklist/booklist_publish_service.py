@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import logging
 from datetime import datetime
 
@@ -14,6 +14,7 @@ from shared.enum.booklist_publish_api_path import BooklistPublishApiPath
 from shared.enum.booklist_publish_status import BooklistPublishStatus
 
 logger = logging.getLogger(__name__)
+
 
 class BooklistPublishService:
     """书单发布业务逻辑服务层，负责协调发布记录与书单发布 BOT API 调用"""

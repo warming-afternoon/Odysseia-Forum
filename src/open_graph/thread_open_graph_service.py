@@ -29,9 +29,7 @@ class ThreadOpenGraphService:
         self.metadata_cache = metadata_cache
         self.excluded_channel_ids = excluded_channel_ids
 
-    async def get_share_metadata(
-        self, thread_id: int
-    ) -> ThreadShareMetadataDTO | None:
+    async def get_share_metadata(self, thread_id: int) -> ThreadShareMetadataDTO | None:
         """返回公开帖子元数据，并仅在没有当前有效图时等待重索引。"""
         # 缓存命中前仍查询主资源，统一隐藏删除、失效、深渊或不存在的帖子。
         async with self.session_factory() as session:

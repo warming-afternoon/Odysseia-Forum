@@ -73,7 +73,7 @@ class TagCog(commands.Cog):
         message = (
             f"你有一条待审核的标签提议（申请 {proposal.id}，"
             f"{'帖子' if proposal.target_type == 'thread' else '书单'} {proposal.target_id}）。"
-            f"请前往索引页审核；提交满 7 天后将自动尝试生效。 {frontend}"
+            f"请前往索引页审核；若未审核，将在提交满 7 天后将自动通过。 {frontend}"
         )
         try:
             user = self.bot.get_user(proposal.owner_id) or await self.bot.fetch_user(
@@ -114,10 +114,17 @@ class TagCog(commands.Cog):
                 observed_at = utc_now()
                 channel = await self.bot.fetch_channel(channel_id)
                 if isinstance(channel, discord.ForumChannel):
-                    await self.bot.event_mediator.publish(DiscordTagsSnapshot(
-                        channel.id, {t.id: t.name for t in channel.available_tags}, observed_at))
+                    await self.bot.event_mediator.publish(
+                        DiscordTagsSnapshot(
+                            channel.id,
+                            {t.id: t.name for t in channel.available_tags},
+                            observed_at,
+                        )
+                    )
             except Exception:
-                logger.exception("频道标签同步失败，保留已有数据 channel_id=%s", channel_id)
+                logger.exception(
+                    "频道标签同步失败，保留已有数据 channel_id=%s", channel_id
+                )
 
     @reconcile.before_loop
     async def before_reconcile(self):
@@ -133,14 +140,25 @@ class TagCog(commands.Cog):
             tag = await session.get(Tag, task.tag_id)
             if tag is None:
                 return
-            title = "DC 标签已转为自定义标签，等待分类" if task.kind == "converted" else "标签分类发生名称冲突，请手动检查数据库"
+            title = (
+                "DC 标签已转为自定义标签，等待分类"
+                if task.kind == "converted"
+                else "标签分类发生名称冲突，请手动检查数据库"
+            )
             message = f"{title}\n标签：{tag.name}（内部 ID：{tag.id}）\n来源频道：{tag.discord_channel_id}"
             view = None
-            if task.kind == "converted" and tag.source == "custom" and tag.category is None and tag.deleted_at is None:
+            if (
+                task.kind == "converted"
+                and tag.source == "custom"
+                and tag.category is None
+                and tag.deleted_at is None
+            ):
                 view = discord.ui.View(timeout=None)
                 view.add_item(TagCategorySelect(tag.id))
         channel = await self.bot.fetch_channel(int(channel_id))
-        await channel.send(message, view=view, allowed_mentions=discord.AllowedMentions.none())
+        await channel.send(
+            message, view=view, allowed_mentions=discord.AllowedMentions.none()
+        )
 
     @app_commands.command(
         name="tag_manage", description="BOT 管理员维护标签池，提交 JSON 管理命令"
