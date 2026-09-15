@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 from typing import TYPE_CHECKING
 
 import discord
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select as sm_select
 
 from banner.banner_service import BannerService
+from banner.channel_sync import ChannelSyncService
 from banner.views.channel_selection_view import ChannelSelectionView
 from banner.views.review_embed_builder import ReviewEmbedBuilder
 from banner.views.review_view import ReviewView
@@ -39,6 +41,9 @@ class BannerEventListener(commands.Cog):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
+        # 与 Bot 启动使用相同凭据，为未入库频道提供按需索引。
+        bot_token = os.environ.get("BOT_TOKEN", "").strip()
+        self.channel_sync = ChannelSyncService(bot_token) if bot_token else None
         logger.info("Banner事件监听器已加载")
 
     async def cog_load(self):
@@ -148,7 +153,7 @@ class BannerEventListener(commands.Cog):
         """处理 banner_form_submit 事件：预验证目标 → 展示 ChannelSelectionView。"""
         try:
             async with self.session_factory() as session:
-                service = BannerService(session)
+                service = BannerService(session, channel_sync=self.channel_sync)
                 validation = await service.validate_application_request(
                     target_id=target_id,
                     guild_id=guild_id,
@@ -217,7 +222,7 @@ class BannerEventListener(commands.Cog):
         """处理 banner_apply 事件：创建申请 → 发送审核消息 → 通知用户。"""
         try:
             async with self.session_factory() as session:
-                service = BannerService(session)
+                service = BannerService(session, channel_sync=self.channel_sync)
 
                 result = await service.validate_and_create_application(
                     target_id=thread_id,
