@@ -1,6 +1,7 @@
 from models.tag import Tag
 from models import Thread, Booklist, Notification
 from sqlalchemy import delete, select
+from sqlmodel import col
 
 from models.tag_binding import TagBinding
 from models.tag_vote import TagVote
@@ -23,9 +24,9 @@ class TagBindingRepository:
             (
                 await self.session.execute(
                     select(TagBinding).where(
-                        TagBinding.target_type == "thread",
-                        TagBinding.target_id == thread_id,
-                        TagBinding.ended_at.is_(None),
+                        col(TagBinding.target_type) == "thread",
+                        col(TagBinding.target_id) == thread_id,
+                        col(TagBinding.ended_at).is_(None),
                     )
                 )
             ).scalars()
@@ -35,10 +36,10 @@ class TagBindingRepository:
         desired = set(
             (
                 await self.session.execute(
-                    select(Tag.id).where(
-                        Tag.id.in_([t.id for t in tags]),
-                        Tag.source == "discord",
-                        Tag.deleted_at.is_(None),
+                    select(col(Tag.id)).where(
+                        col(Tag.id).in_([t.id for t in tags]),
+                        col(Tag.source) == "discord",
+                        col(Tag.deleted_at).is_(None),
                     )
                 )
             ).scalars()
@@ -66,29 +67,31 @@ class TagBindingRepository:
             return
         model = Thread if kind == "thread" else Booklist
         await self.session.execute(
-            select(model.id).where(model.id.in_(ids)).with_for_update()
+            select(col(model.id)).where(col(model.id).in_(ids)).with_for_update()
         )
-        bindings = select(TagBinding.id).where(
-            TagBinding.target_type == kind, TagBinding.target_id.in_(ids)
+        bindings = select(col(TagBinding.id)).where(
+            col(TagBinding.target_type) == kind, col(TagBinding.target_id).in_(ids)
         )
-        proposals = select(TagProposal.id).where(
-            TagProposal.target_type == kind, TagProposal.target_id.in_(ids)
+        proposals = select(col(TagProposal.id)).where(
+            col(TagProposal.target_type) == kind, col(TagProposal.target_id).in_(ids)
         )
         await self.session.execute(
-            delete(TagVote).where(TagVote.binding_id.in_(bindings))
+            delete(TagVote).where(col(TagVote.binding_id).in_(bindings))
         )
         await self.session.execute(
             delete(Notification).where(
-                Notification.event_type == "tag_review",
-                Notification.event_source_id.in_(proposals),
+                col(Notification.event_type) == "tag_review",
+                col(Notification.event_source_id).in_(proposals),
             )
         )
         await self.session.execute(
             delete(TagNotificationTask).where(
-                TagNotificationTask.proposal_id.in_(proposals)
+                col(TagNotificationTask.proposal_id).in_(proposals)
             )
         )
         for model in (TagBinding, TagProposal, TagProposalBlock):
             await self.session.execute(
-                delete(model).where(model.target_type == kind, model.target_id.in_(ids))
+                delete(model).where(
+                    col(model.target_type) == kind, col(model.target_id).in_(ids)
+                )
             )

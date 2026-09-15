@@ -1,5 +1,6 @@
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from models import ThreadUpdate
 
@@ -16,7 +17,7 @@ class ThreadUpdateRepository:
 
     async def get_by_message_id(self, message_id: int) -> ThreadUpdate | None:
         """按 Discord 来源消息 ID 获取更新。"""
-        statement = select(ThreadUpdate).where(ThreadUpdate.message_id == message_id)
+        statement = select(ThreadUpdate).where(col(ThreadUpdate.message_id) == message_id)
         return (await self.session.execute(statement)).scalar_one_or_none()
 
     async def get_by_overview_message_id(
@@ -24,7 +25,7 @@ class ThreadUpdateRepository:
     ) -> ThreadUpdate | None:
         """按 Discord 概览消息 ID 获取更新。"""
         statement = select(ThreadUpdate).where(
-            ThreadUpdate.overview_message_id == overview_message_id
+            col(ThreadUpdate.overview_message_id) == overview_message_id
         )
         return (await self.session.execute(statement)).scalar_one_or_none()
 
@@ -32,8 +33,8 @@ class ThreadUpdateRepository:
         """获取作品最新的正式更新。"""
         statement = (
             select(ThreadUpdate)
-            .where(ThreadUpdate.thread_id == thread_id)
-            .order_by(ThreadUpdate.published_at.desc(), ThreadUpdate.id.desc())
+            .where(col(ThreadUpdate.thread_id) == thread_id)
+            .order_by(col(ThreadUpdate.published_at).desc(), col(ThreadUpdate.id).desc())
             .limit(1)
         )
         return (await self.session.execute(statement)).scalar_one_or_none()
@@ -53,5 +54,5 @@ class ThreadUpdateRepository:
         """批量删除作品的全部更新。"""
         if thread_ids:
             await self.session.execute(
-                delete(ThreadUpdate).where(ThreadUpdate.thread_id.in_(thread_ids))
+                delete(ThreadUpdate).where(col(ThreadUpdate.thread_id).in_(thread_ids))
             )

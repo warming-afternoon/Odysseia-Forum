@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlmodel import col
 
 from core.notification_fanout_service import NotificationFanoutService
 from core.notification_repository import NotificationRepository
@@ -126,7 +127,7 @@ class ThreadUpdateService:
                 await repository.delete(update_record)
 
                 thread_statement = select(Thread).where(
-                    Thread.thread_id == update_record.thread_id
+                    col(Thread.thread_id) == update_record.thread_id
                 )
                 thread = (await session.execute(thread_statement)).scalar_one_or_none()
                 if thread is not None and thread.latest_update_id == update_id:
@@ -204,7 +205,7 @@ class ThreadUpdateService:
         session: AsyncSession, thread_id: int, publisher_id: int
     ) -> Thread:
         """获取可发布更新的索引作品并校验作者。"""
-        statement = select(Thread).where(Thread.thread_id == thread_id)
+        statement = select(Thread).where(col(Thread.thread_id) == thread_id)
         thread = (await session.execute(statement)).scalar_one_or_none()
         if thread is None or not thread.show_flag or thread.not_found_count > 0:
             raise ThreadUpdateError("当前帖子未索引或已不可见")

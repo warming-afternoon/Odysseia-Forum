@@ -4,7 +4,7 @@ from typing import List, Sequence, cast
 from sqlalchemy import case, update, ColumnElement
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
+from sqlmodel import col, select
 
 from models import Tag, Thread
 
@@ -50,9 +50,9 @@ class TagRepository:
                 update(Tag)
                 .where(
                     cast(ColumnElement, Tag.discord_tag_id).in_(changed_names),
-                    Tag.source == "discord",
+                    col(Tag.source) == "discord",
                 )
-                .values(name=case(changed_names, value=Tag.discord_tag_id))
+                .values(name=case(changed_names, value=col(Tag.discord_tag_id)))
                 .execution_options(synchronize_session=False)
             )
 
@@ -71,13 +71,13 @@ class TagRepository:
             insert_stmt = pg_insert(Tag).values(values_to_insert)
             if update_names:
                 write_stmt = insert_stmt.on_conflict_do_update(
-                    index_elements=[Tag.discord_tag_id],
+                    index_elements=["discord_tag_id"],
                     set_={"name": insert_stmt.excluded.name},
-                    where=Tag.source == "discord",
+                    where=col(Tag.source) == "discord",
                 )
             else:
                 write_stmt = insert_stmt.on_conflict_do_nothing(
-                    index_elements=[Tag.discord_tag_id]
+                    index_elements=["discord_tag_id"]
                 )
             await self.session.execute(write_stmt)
 
