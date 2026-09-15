@@ -19,6 +19,7 @@ from banner.banner_service import BannerService
 from banner.channel_sync import ChannelSyncService
 from core.tag_cache_service import TagCacheService
 from core.banner_thread_visibility_service import BannerThreadVisibilityService
+from core.banner_title_filter_repository import BannerTitleFilterRepository
 from core.thread_repository import ThreadRepository
 from models.channel import Channel
 from shared.enum import TargetType
@@ -155,7 +156,7 @@ async def apply_banner(
 async def get_active_banners(
     channel_ids: list[int | str] | None = Query(
         default=None,
-        description="频道ID列表，可重复传入；不传则仅获取全局Banner",
+        description="频道ID列表，可重复传入；优先于偏好频道。不传时使用偏好频道，偏好为空则返回全部；始终追加全局Banner",
     ),
     channel_id: int | str | None = Query(
         default=None,
@@ -175,10 +176,6 @@ async def get_active_banners(
     try:
         async with async_session_factory() as session:
             service = BannerService(session)
-            banners = await service.get_active_banners(
-                channel_ids=effective_channel_ids
-            )
-
             # 加载用户搜索偏好，失败时仅跳过偏好项。
             user_id = int(current_user.get("id", 0)) if current_user else 0
             prefs = None
@@ -191,6 +188,28 @@ async def get_active_banners(
                     )
                 except Exception:
                     logger.warning("读取用户偏好失败，跳过偏好筛选", exc_info=True)
+
+            # 显式参数优先；未传参数时使用偏好频道，均为空则查询全部。
+            if not effective_channel_ids and prefs and prefs.preferred_channels:
+                effective_channel_ids = list(dict.fromkeys(prefs.preferred_channels))
+            banners = await service.get_active_banners(
+                channel_ids=effective_channel_ids,
+                all_channels=not effective_channel_ids,
+            )
+
+            # 频道目标按轮播标题快照过滤，避免同目标不同范围的标题互相影响。
+            excluded_banner_ids: set[int] = set()
+            if prefs and prefs.exclude_keywords:
+                excluded_banner_ids = await BannerTitleFilterRepository(session).get_excluded_ids(
+                    titles={
+                        banner.id: banner.title for banner in banners
+                        if banner.target_type == TargetType.CHANNEL.value and banner.id is not None
+                    },
+                    exclude_keywords=prefs.exclude_keywords,
+                    exemption_markers=prefs.exclude_keyword_exemption_markers,
+                    redis_client=redis_client,
+                )
+            banners = [banner for banner in banners if banner.id not in excluded_banner_ids]
 
             # 批量筛选帖子 Banner，并同时取得其服务器 ID。
             thread_tids = [
@@ -239,7 +258,7 @@ async def get_active_banners(
                 )
                 guild_map.update({cid: gid for cid, gid in channel_rows.all()})
 
-            # 按原轮播顺序返回，频道 Banner 不参与用户偏好过滤。
+            # 按原轮播顺序返回，不从等待列表为偏好过滤补位。
             return [
                 BannerItem(
                     thread_id=banner.thread_id,

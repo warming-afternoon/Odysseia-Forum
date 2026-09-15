@@ -27,7 +27,7 @@ class BannerCarouselRepository:
         return list(result.scalars().all())
 
     async def get_active(
-        self, channel_ids: Optional[List[int]] = None
+        self, channel_ids: Optional[List[int]] = None, all_channels: bool = False
     ) -> List[BannerCarousel]:
         """批量获取指定频道及全局的有效轮播项。"""
         now = utc_now().replace(microsecond=0)
@@ -36,7 +36,7 @@ class BannerCarouselRepository:
         position_col = cast(ColumnElement, BannerCarousel.position)
         ordered_channel_ids = list(dict.fromkeys(channel_ids or []))
 
-        if not ordered_channel_ids:
+        if not ordered_channel_ids and not all_channels:
             result = await self.session.execute(
                 select(BannerCarousel)
                 .where(and_(channel_id_col.is_(None), end_time_col > now))
@@ -50,7 +50,7 @@ class BannerCarouselRepository:
             select(BannerCarousel)
             .where(
                 and_(
-                    channel_id_col.in_(ordered_channel_ids),
+                    channel_id_col.is_not(None) if all_channels else channel_id_col.in_(ordered_channel_ids),
                     end_time_col > now,
                 )
             )
@@ -61,8 +61,12 @@ class BannerCarouselRepository:
         }
         for banner in channel_result.scalars().all():
             banner_channel_id = banner.channel_id
-            if banner_channel_id is not None and banner_channel_id in grouped_banners:
-                grouped_banners[banner_channel_id].append(banner)
+            if banner_channel_id is not None:
+                grouped_banners.setdefault(banner_channel_id, []).append(banner)
+
+        # 全部模式直接从轮播记录发现频道，不依赖搜索目录或配置。
+        if all_channels:
+            ordered_channel_ids = sorted(grouped_banners)
 
         channel_banners = [
             banner
