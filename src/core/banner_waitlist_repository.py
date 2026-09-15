@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, cast
 
-from sqlalchemy import ColumnElement
+from sqlalchemy import ColumnElement, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import desc, select
 
@@ -13,6 +13,15 @@ class BannerWaitlistRepository:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def get_counts_by_scope(self) -> dict[int | None, int]:
+        """一次查询所有展示范围的已审核待展示数量。"""
+        # 按展示范围聚合，避免为每个频道单独查询。
+        channel_id_col = cast(ColumnElement, BannerWaitlist.channel_id)
+        result = await self.session.execute(
+            select(channel_id_col, func.count()).group_by(channel_id_col)
+        )
+        return {channel_id: count for channel_id, count in result.all()}
 
     async def get_by_thread(self, thread_id: int) -> List[BannerWaitlist]:
         """按帖子 ID 查询等待项。"""
