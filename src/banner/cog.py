@@ -11,8 +11,10 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from banner.banner_service import BannerService
 from banner.views.banner_application_button_view import BannerApplicationButtonView
 from banner.views.review_view import ReviewView
+from banner.views.banner_status_view import BannerStatusView
 from shared.permissions import is_admin_or_bot_admin
 from shared.safe_defer import safe_defer
+from shared.time_utils import utc_now
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -192,40 +194,24 @@ class BannerManagement(commands.Cog):
             async with self.session_factory() as session:
                 service = BannerService(session)
 
-                # 获取全频道banner
-                global_banners = await service.get_active_banners(channel_id=None)
+                # 所有查询和剩余时间计算共用同一 UTC 时刻。
+                now = utc_now()
+                names = {
+                    int(cid): name
+                    for cid, name in self.config.get("available_channels", {}).items()
+                }
+                scopes = await service.get_status(list(names), now)
 
-                # 构建状态消息
-                status_msg = "📊 **Banner系统状态**\n\n"
-                status_msg += (
-                    f"**全频道Banner**: {len(global_banners)}"
-                    f"/{service.GLOBAL_MAX_BANNERS}\n"
+            # 会话外只使用 DTO，未配置频道通过 Bot 缓存补充名称。
+            for scope in scopes:
+                cid = scope.channel_id
+                if cid is not None and cid not in names:
+                    channel = self.bot.get_channel(cid)
+                    names[cid] = channel.name if channel else str(cid)
+            for message in BannerStatusView.build_messages(scopes, names, now):
+                await interaction.followup.send(
+                    message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
                 )
-
-                if global_banners:
-                    for banner in global_banners:
-                        remaining = (banner.end_time - discord.utils.utcnow()).days
-                        status_msg += (
-                            f"  • 帖子 {banner.thread_id}: "
-                            f"{banner.title[:30]}... (剩余{remaining}天)\n"
-                        )
-
-                # 获取配置的频道（dict格式）
-                channels_dict = self.config.get("available_channels", {})
-
-                status_msg += "\n**频道Banner统计**:\n"
-                for idx, (ch_id, ch_name) in enumerate(channels_dict.items()):
-                    if idx >= 5:  # 只显示前5个
-                        break
-
-                    ch_banners = await service.get_active_banners(channel_id=int(ch_id))
-                    ch_specific = [b for b in ch_banners if b.channel_id is not None]
-                    status_msg += (
-                        f"  • {ch_name}: "
-                        f"{len(ch_specific)}/{service.CHANNEL_MAX_BANNERS}\n"
-                    )
-
-                await interaction.followup.send(status_msg, ephemeral=True)
 
         except Exception as e:
             logger.error(f"查看状态时出错: {e}", exc_info=True)

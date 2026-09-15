@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, desc, select
 
 from models import BannerCarousel
+from shared.time_utils import utc_now
 
 
 class BannerCarouselRepository:
@@ -14,11 +15,22 @@ class BannerCarouselRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def get_all_active_for_status(self, now: datetime) -> List[BannerCarousel]:
+        """批量获取所有未过期轮播，管理状态不截断超额记录。"""
+        # 使用调用方提供的时间，统一查询和展示的时间口径。
+        end_time_col = cast(ColumnElement, BannerCarousel.end_time)
+        result = await self.session.execute(
+            select(BannerCarousel)
+            .where(end_time_col > now)
+            .order_by(BannerCarousel.position, BannerCarousel.id)
+        )
+        return list(result.scalars().all())
+
     async def get_active(
         self, channel_ids: Optional[List[int]] = None
     ) -> List[BannerCarousel]:
         """批量获取指定频道及全局的有效轮播项。"""
-        now = datetime.now().replace(microsecond=0)
+        now = utc_now().replace(microsecond=0)
         channel_id_col = cast(ColumnElement, BannerCarousel.channel_id)
         end_time_col = cast(ColumnElement, BannerCarousel.end_time)
         position_col = cast(ColumnElement, BannerCarousel.position)
@@ -71,7 +83,7 @@ class BannerCarouselRepository:
 
     async def get_count(self, channel_id: Optional[int]) -> int:
         """统计指定频道的当前有效轮播数。"""
-        now = datetime.now().replace(microsecond=0)
+        now = utc_now().replace(microsecond=0)
         channel_id_col = cast(ColumnElement, BannerCarousel.channel_id)
         end_time_col = cast(ColumnElement, BannerCarousel.end_time)
 
@@ -84,7 +96,7 @@ class BannerCarouselRepository:
 
     async def get_expired(self) -> List[BannerCarousel]:
         """获取所有已过期的轮播项。"""
-        now = datetime.now().replace(microsecond=0)
+        now = utc_now().replace(microsecond=0)
         end_time_col = cast(ColumnElement, BannerCarousel.end_time)
 
         result = await self.session.execute(
@@ -109,7 +121,7 @@ class BannerCarouselRepository:
         target_type: int = 1,
     ) -> None:
         """插入一条轮播记录（含 position 计算）。"""
-        start_time = datetime.now().replace(microsecond=0)
+        start_time = utc_now().replace(microsecond=0)
         end_time = start_time + timedelta(days=duration_days)
         channel_id_col = cast(ColumnElement, BannerCarousel.channel_id)
         end_time_col = cast(ColumnElement, BannerCarousel.end_time)

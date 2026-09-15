@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from banner.channel_sync import ChannelSyncService
 from banner.dto.application_result import ApplicationResult
+from banner.dto.banner_scope_status import BannerScopeStatus
+from banner.dto.banner_status_item import BannerStatusItem
 from banner.dto.delete_banner_result import DeleteBannerResult
 from core.banner_application_repository import BannerApplicationRepository
 from core.banner_carousel_repository import BannerCarouselRepository
@@ -48,6 +50,42 @@ class BannerService:
         self.app_repo = BannerApplicationRepository(session)
         self.carousel_repo = BannerCarouselRepository(session)
         self.waitlist_repo = BannerWaitlistRepository(session)
+
+    async def get_status(
+        self, configured_channel_ids: list[int], now: datetime
+    ) -> list[BannerScopeStatus]:
+        """批量生成全频道及各频道的管理状态快照。"""
+        # 两次查询获取完整轮播和等待数量，并在会话内转换 DTO。
+        banners = await self.carousel_repo.get_all_active_for_status(now)
+        waiting_counts = await self.waitlist_repo.get_counts_by_scope()
+        grouped: dict[int | None, list[BannerStatusItem]] = {}
+        for banner in banners:
+            grouped.setdefault(banner.channel_id, []).append(
+                BannerStatusItem(
+                    target_id=banner.thread_id,
+                    target_type=banner.target_type,
+                    title=banner.title,
+                    end_time=banner.end_time,
+                )
+            )
+
+        # 配置频道保留顺序，补充仍有记录的未配置频道。
+        configured_ids = list(dict.fromkeys(configured_channel_ids))
+        configured_id_set = set(configured_ids)
+        recorded_ids = set(grouped) | set(waiting_counts)
+        extra_ids = sorted(
+            cid for cid in recorded_ids
+            if cid is not None and cid not in configured_id_set
+        )
+        return [
+            BannerScopeStatus(
+                channel_id=cid,
+                capacity=self.GLOBAL_MAX_BANNERS if cid is None else self.CHANNEL_MAX_BANNERS,
+                waiting_count=waiting_counts.get(cid, 0),
+                items=grouped.get(cid, []),
+            )
+            for cid in [None, *configured_ids, *extra_ids]
+        ]
 
     async def validate_application_request(
         self,
