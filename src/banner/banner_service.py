@@ -425,6 +425,7 @@ class BannerService:
         self,
         channel_id: Optional[int] = None,
         channel_ids: Optional[List[int]] = None,
+        all_channels: bool = False,
     ) -> List[BannerCarousel]:
         """兼容单频道调用并获取有序的多频道活跃 Banner。"""
         effective_channel_ids = list(channel_ids or [])
@@ -432,7 +433,7 @@ class BannerService:
             effective_channel_ids.append(channel_id)
         effective_channel_ids = list(dict.fromkeys(effective_channel_ids))
         return await self.carousel_repo.get_active(
-            channel_ids=effective_channel_ids
+            channel_ids=effective_channel_ids, all_channels=all_channels
         )
 
     async def update_review_message_info(
