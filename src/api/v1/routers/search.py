@@ -1,6 +1,7 @@
+from shared.tag_error import TagError
+from core.tag_presentation import load_discord_sources, tag_data
 from core.tag_repository import TagRepository
 from api.v1.schemas.tags.tag_response import TagResponse
-from shared.enum.tag_category import TagCategory
 import asyncio
 import logging
 import time
@@ -324,6 +325,8 @@ async def execute_search(
             status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="搜索请求超时，请尝试缩小搜索范围或稍后重试",
         )
+    except TagError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail) from e
     except Exception as e:
         logger.error(f"搜索时发生内部错误: {e}", exc_info=True)
         raise HTTPException(
@@ -616,24 +619,10 @@ async def get_search_suggestions(
                 timeout=SearchTimeout.SUGGESTION.value,
             )
 
+            sources = await load_discord_sources(session, [t.id for t in raw_data.tags])
             return SearchSuggestionResponse(
                 tags=[
-                    TagResponse.model_validate(
-                        {
-                            "id": str(t.id),
-                            "name": t.name,
-                            "source": t.source,
-                            "discord_tag_id": (
-                                str(t.discord_tag_id) if t.discord_tag_id else None
-                            ),
-                            "category": t.category,
-                            "category_name": (
-                                TagCategory(t.category).name if t.category else None
-                            ),
-                            "enabled": t.enabled,
-                            "deleted_at": t.deleted_at,
-                        }
-                    )
+                    TagResponse.model_validate(tag_data(t, sources))
                     for t in raw_data.tags
                 ],
                 authors=[

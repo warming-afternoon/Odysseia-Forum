@@ -2,11 +2,51 @@
 
 ## 部署
 
-禁止让旧 BOT/API 与迁移同时写入；先停止服务并备份完整数据库，再运行迁移、校验并统一启动新版本。已经执行旧版测试迁移的环境应重建明确指定的测试库/schema，再运行最终迁移，不能仅重复执行同名 Alembic revision。
+禁止让旧 BOT/API 与迁移同时写入；先停止服务并备份完整数据库，再运行迁移、校验并统一启动新版本。本次新增 `normalize_discord_tags`，接在已经上线的 `add_custom_tag_governance` 之后；已上线数据库直接升级，不需要删库，也不改写旧 revision。升级后旧版本代码不能继续使用该数据库。
 
-迁移保留原始 `thread_tag_link`（含旧票数）作为只读操作备份，表注释标记废弃；业务不再读写它。有效原生关系迁入 `tag_binding`，所有业务票数归零。旧 `tag_vote` 清空并重建为轮次投票表；最终不创建 `custom_tag_binding`、`custom_tag_vote`。备份表不含上线后的变更，不能代替完整回滚备份。
+首次统一绑定迁移 `add_custom_tag_governance` 保留原始 `thread_tag_link`（含旧票数）作为只读操作备份，清空旧投票并建立轮次投票表。本次归一迁移继续原样保留备份表和所有已有轮次投票，不再清空票数；被合并的旧轮次结束，目标已有轮次保留，新建轮次从零票开始。最终不创建 `custom_tag_binding`、`custom_tag_vote`。备份表不含上线后的变更，不能代替完整回滚备份。
 
 所有 TAG 表不使用数据库外键；引用检查、依赖清理在代码事务中执行。目标绑定、申请、重提限制和新操作日志的帖子目标使用内部 `Thread.id`；API、站内通知和网页链接继续使用 Discord 帖子 ID。日志 `detail.target_id_kind="internal"` 标明新记录语义，不改写既有审计事实。
+
+### 标准标签与 DC 来源
+
+| 表 | 职责及主要字段 |
+| --- | --- |
+| `tag` | 标准概念：`id`、`name`、`source`、`category`、`enabled`、`deleted_at`；`originated_from_discord` 标记是否允许转换后暂时未分类 |
+| `discord_tag_source` | DC 身份映射：BIGINT `id`、唯一 `discord_tag_id`、`channel_id`、标准 `tag_id`、原始 `name`、`synced_at`、`deleted_at` |
+| `discord_tag_sync_state` | 完整频道快照检查点：`channel_id`、`observed_at`，空标签列表也更新，拒绝较旧事件覆盖 |
+| `tag_binding` | 一轮绑定：BIGINT `id`、目标类型及内部 ID、标准 `tag_id`、`binding_source`、可空 `discord_source_id`、操作者、起止时间、结束原因及汇总票数 |
+
+不同频道中**名称完全相同**的 DC 标签映射到一个标准标签，不忽略大小写、空白，也不按别名归一。一个频道中的一个标准概念最多对应一个有效 DC 来源。搜索和书单挂标都使用标准 `tag.id`；搜索绑定无需联查来源表。现有别名、关系、申请、重提限制、投票、通知任务和审计表继续保留各自职责。
+
+DC 改名会将该来源映射到新名称的标准概念，并切换该来源对应的帖子绑定；其他频道和书单的旧概念绑定不变。确认 DC 来源删除后，其帖子绑定转为本地绑定。最后一个有效来源因删除或改名离开时，旧概念转为自定义来源；分类冲突则清空分类并通知 BOT 管理员，保留名称、ID 和绑定。以后 DC 再出现同名标签时建立 DC 概念，遇到同名自定义概念只提醒管理员，不自动合并。
+
+完整频道抓取失败、无权限不视为删除。启动及完整同步补偿离线变更。来源未知的历史记录允许 `channel_id=null`，成功获取频道快照后补齐。
+
+### 前端如何判断能否操作
+
+- `source` 表示**标准概念的当前来源**。帖子新增候选选 `source=custom`；书单不限制来源。
+- `binding_source` 表示**这个标签如何绑定到当前内容**。`discord_sync` 对应 `readonly=true`，不可编辑、删除或投票；`local` 对应 `readonly=false`，按作者、管理组和社区治理规则操作。
+- 书单绑定始终为 `local`。不能仅凭 `source=discord` 锁定书单标签。
+- 标签池、完整标签快照和标签建议的 `discord_sources` 返回有效来源数组，包含来源记录 `id`、`discord_tag_id`、可空 `channel_id` 和 `name`。原先单个 `discord_tag_id` 字段移入该数组；一个标准概念可以有多个 DC 来源。
+- DC 绑定另有 `discord_source_id`，指出当前帖子对应的来源记录。帖子、书单摘要的 `custom_tags` 仍表示本地绑定，包含 `binding_source=local` 和 `readonly=false`。
+- 快照新增 `over_limit` 和 `conflicting_pairs`（互斥标签 ID 对）。DC 同步可能留下超限或互斥状态，接口保留事实并提示；纯删除可执行，含新增的本地操作必须满足上限和互斥规则。
+
+DC 接管已有本地绑定时，旧轮次结束，新建零票 DC 轮次；以后从帖子上移除 DC 标签不会恢复旧本地轮次。
+
+### 同名标签合并
+
+仅 BOT 管理员可以执行，且两个标签的标准名必须完全相同。包含 DC 概念时保留 DC 概念。先调用 `GET /v1/tags/{旧标签ID}/merge-preview?target_tag_id={保留标签ID}`，获取影响数量、`can_merge`、`conflicts` 和 `version`；确认后调用 `POST /v1/tags/{旧标签ID}/merge`：
+
+```json
+{"target_tag_id":"456","version":"预检返回的版本"}
+```
+
+预检与执行之间相关数据发生变化时返回 409，要求重新预检；关系自环、包含循环等冲突会阻止整个合并。迁移别名、关系和来源映射，重复项去重。原目标上的永久禁止重提限制取并集；旧标签待审核申请标记 `failed/tag_merged`，取消待发送提醒，重新申请仍检查权限与限制。目标已有绑定保留票数，旧轮次和历史投票不改写。
+
+合并后的旧标签直接软删除，**没有 `merged_into_tag_id`，不自动重定向旧 ID**。前端提交失效 ID 收到 `409 / tags_changed` 后提示“标签已发生变化，请刷新后重试”，重新获取候选和目标快照，不自动重试。合并审计保存前后 ID 和轮次，沿用管理权限；已合并标签不能通过恢复接口复活。
+
+归一迁移会将现有同名 DC 实体以及同名未删除自定义实体并入 DC 概念，关系冲突时整个迁移回滚。维护窗口前应备份并核对这些同名实体。迁移不提供自动拆分降级，回滚使用维护窗口完整备份。
 
 
 ## 公共约定
@@ -48,7 +88,7 @@
 | 方法和路径 | 含义 |
 | --- | --- |
 | GET /categories | 分类值和中文名 |
-| GET / | 标签池，支持 q、category、selectable、include_deleted、offset |
+| GET / | 标签池，支持 q、source、category、selectable、include_deleted、offset |
 | GET /relations | 未删除标签之间的全部直接关系边 |
 | POST / | 创建标签，成功返回 201 |
 | PATCH /{tag_id} | 部分修改名称、分类、启用状态 |
@@ -58,7 +98,7 @@
 | POST /{tag_id}/relations | 添加关系 |
 | DELETE /{tag_id}/relations/{kind}/{target_tag_id} | 删除关系 |
 
-标签池同时返回 DC 和自定义实体，每页最多 100 条，按分类、名称和 ID 排序。默认 `selectable=true`，只列出启用且未删除标签；`selectable=false` 包括停用标签。查询已删除记录需 BOT 管理员，并设置 `include_deleted=true`。别名可同时命中多个标准标签。
+标签池省略 `source` 时同时返回 DC 和自定义实体；`source=custom` 仅返回自定义标签（包括 DC 删除后转换的标签），`source=discord` 仅返回 DC 原生标签。来源筛选在分页前生效，可与关键词、分类和状态条件组合，非法来源值返回 422。帖子挂标候选可请求 `GET /v1/tags?source=custom&selectable=true&offset=0`；书单挂标候选省略 `source` 即可。每页最多 100 条，按分类、名称和 ID 排序。默认 `selectable=true`，只列出启用且未删除标签；`selectable=false` 包括停用标签。查询已删除记录需 BOT 管理员，并设置 `include_deleted=true`。别名可同时命中多个标准标签。
 
 创建 `POST /v1/tags`，名称和分类必填，别名可选：
 
@@ -73,6 +113,8 @@
 ```
 
 `enabled=false` 为停用，`true` 为重新启用。停用保留现有展示和搜索。已软删除标签必须通过恢复接口恢复，不能通过 `enabled` 绕过。
+
+仍有有效 DC 来源的标准标签可以修改分类、别名、关系和启用状态；不能单独改名或软删除。停用不阻止 DC 同步。来源全部失效并转为自定义后，才适用普通自定义标签的改名与软删除规则。
 
 替换别名 `PUT /v1/tags/123/aliases`，空列表表示清空：
 
@@ -90,7 +132,7 @@
 
 `kind` 为 `implies` 或 `excludes`，删除上述关系使用 `DELETE /v1/tags/123/relations/implies/456`。包含关系禁止循环，互斥关系对称。前端自行计算层级与选择父标签，后端只校验最终选择的集合。
 
-标准名进行 NFC 规范化和首尾空白清理，不自动翻译或识别同义词。
+手动创建、修改的自定义标准名进行 NFC 规范化和首尾空白清理，不自动翻译或识别同义词。DC 标准名严格跟随原始名称，维护其他字段不会改变名称。
 
 BOT 的 `/tag_manage payload` 仍保留命令形式，与 HTTP 拆分互不影响。例如 `{"operation":"create","name":"爱丽丝(BA)","category":3}`。支持 create、update、disable、enable、delete、restore、add_relation、remove_relation；已有标签操作携带 tag_id，关系操作再携带 target_tag_id 和 kind。命令仅允许配置中的 BOT 管理员使用，不会发布公共消息。
 
@@ -210,7 +252,7 @@ BOT 的 `/tag_manage payload` 仍保留命令形式，与 HTTP 拆分互不影�
 
 公开和我的书单列表新增同名查询参数，以及 `tag_logic=and|or`；多个 ID 使用重复查询参数。帖子详情展示上下文、书单摘要和书单详情新增 `custom_tags`，包含标准名、分类、挂标轮次及正负票数。
 
-别名用于标签池候选检索，选择候选后以 ID 筛选内容；不沿关系扩大匹配。停用标签的现存绑定仍能筛选，软删除标签不再命中。
+别名既可用于标签池候选检索，也可直接通过帖子和书单的 `include_tags` / `exclude_tags` 筛选；不沿关系扩大匹配。停用标签的现存绑定仍能筛选，软删除标签不再命中。
 
 ## 后台任务与通知
 
@@ -220,3 +262,12 @@ BOT 每分钟处理到期申请，锁定目标后重新检查；容量、互斥�
 
 内部通知新增 `type=tag_review`，返回 `target_type`、字符串 `target_id` 和 `proposal_id`，`thread` 可为空。新增 `POST /v1/notifications/{notification_id}/read`，只标记当前用户拥有的通知。
 
+
+
+## 帖子与书单按别名筛选
+
+标签标准名为“测试”、别名为“试测”时，帖子搜索请求可直接传 `"include_tags": ["试测"]`，响应仍展示标准名“测试”。普通 `keywords` 不会自动转为标签筛选。标签池与搜索建议仍支持模糊匹配。
+
+书单公开列表 `GET /v1/booklist/list/page`、我的列表 `GET /v1/booklist/my/list/page` 支持重复查询参数，例如 `?include_tags=试测&include_tags=纯爱&tag_logic=and`。只匹配书单自身绑定，不继承单内帖子的标签。
+
+一个名称命中多个实体时组内 OR，不同名称组按 `tag_logic` 组合。AND 中有未知名称则无结果；OR 中未知名称不妨碍其他名称命中。排除名称命中任一实体即排除，未知排除名称不影响结果。名称与 ID 筛选同时传入时两组条件共同生效，ID 仍精确匹配。停用实体的已有绑定仍可搜索，软删除实体和结束绑定不参与匹配。

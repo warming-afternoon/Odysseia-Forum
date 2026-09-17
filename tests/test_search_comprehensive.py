@@ -23,7 +23,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 from sqlmodel import delete
 
-from models import Thread, Author, Tag, ThreadTagLink
+from models import Thread, Author, Tag, TagBinding
 from search.search_service import SearchService
 from search.qo.thread_search import ThreadSearchQuery
 from core.tag_cache_service import TagCacheService
@@ -41,7 +41,7 @@ async def empty_db_session(
     """无数据的干净会话。"""
     async with db_session_factory() as session:
         yield session
-        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(TagBinding))
         await session.execute(delete(Thread))
         await session.execute(delete(Author))
         await session.commit()
@@ -54,7 +54,7 @@ async def seeded_basic_session(
     """种子：5 条基础中文帖子（用于 FTS 排除/豁免测试）。"""
     async with db_session_factory() as session:
         # 预清理
-        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(TagBinding))
         await session.execute(delete(Thread))
         await session.commit()
 
@@ -110,7 +110,7 @@ async def seeded_fts_varied_session(
 ) -> AsyncGenerator[AsyncSession, None]:
     """种子：多种文本类型，用于 FTS 分词行为验证。"""
     async with db_session_factory() as session:
-        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(TagBinding))
         await session.execute(delete(Thread))
         await session.commit()
 
@@ -171,7 +171,7 @@ async def seeded_sorting_session(
 ) -> AsyncGenerator[AsyncSession, None]:
     """种子：用于排序算法测试的帖子。"""
     async with db_session_factory() as session:
-        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(TagBinding))
         await session.execute(delete(Thread))
         await session.commit()
 
@@ -253,7 +253,7 @@ async def seeded_filter_session(
     """种子：用于过滤器组合测试的帖子（频道、作者、标签、时间）。"""
     async with db_session_factory() as session:
         # 预清理
-        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(TagBinding))
         await session.execute(delete(Thread))
         await session.execute(delete(Tag))
         await session.execute(delete(Author))
@@ -357,12 +357,17 @@ async def seeded_filter_session(
             (404, 1002),
         ]:
             session.add(
-                ThreadTagLink(thread_id=id_map[tid_pair[0]], tag_id=tid_pair[1])
+                TagBinding(
+                    target_type="thread",
+                    binding_source="local",
+                    target_id=id_map[tid_pair[0]],
+                    tag_id=tid_pair[1],
+                )
             )
         await session.commit()
 
         yield session
-        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(TagBinding))
         await session.execute(delete(Thread))
         await session.execute(delete(Tag))
         await session.execute(delete(Author))

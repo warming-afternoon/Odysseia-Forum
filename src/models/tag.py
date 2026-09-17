@@ -21,8 +21,14 @@ class Tag(SQLModel, table=True):
             unique=True,
             postgresql_where=text("source = 'custom'"),
         ),
+        Index(
+            "uq_live_discord_tag_name",
+            "name",
+            unique=True,
+            postgresql_where=text("source = 'discord' AND deleted_at IS NULL"),
+        ),
         CheckConstraint(
-            "(source = 'custom' AND ((category BETWEEN 1 AND 7 AND category IS NOT NULL) OR (category IS NULL AND discord_tag_id IS NOT NULL))) OR (source = 'discord' AND category IS NULL AND discord_tag_id IS NOT NULL)",
+            "source IN ('custom', 'discord') AND (category BETWEEN 1 AND 7 OR category IS NULL) AND (source <> 'custom' OR category IS NOT NULL OR originated_from_discord)",
             name="ck_tag_source_category",
         ),
     )
@@ -42,34 +48,21 @@ class Tag(SQLModel, table=True):
     source: str = Field(
         default="discord",
         index=True,
-        description="标签来源：discord 为 DC 原生标签，custom 为自定义标签",
+        description="标签来源：discord 为有有效 DC 来源的标准概念，custom 为自定义标签",
     )
-    """标签来源：discord 为 DC 原生标签，custom 为自定义标签"""
+    """标签来源：discord 为有有效 DC 来源的标准概念，custom 为自定义标签"""
 
-    discord_tag_id: int | None = Field(
-        default=None,
-        sa_column=Column(BigInteger, unique=True),
-        description="DC 原生标签的唯一 Discord ID，用于同步定位；转换标签保留原始 ID",
+    originated_from_discord: bool = Field(
+        default=False,
+        description="是否具有 DC 来源历史；允许转换后的自定义概念暂未分类",
     )
-    """DC 原生标签的唯一 Discord ID，用于同步定位；转换标签保留原始 ID"""
-
-    discord_channel_id: int | None = Field(
-        default=None,
-        sa_column=Column(BigInteger, index=True),
-        description="原始 DC 来源频道 ID，转换后保留用于溯源",
-    )
-    """标签来源频道；不因转为自定义实体而清空"""
-
-    discord_synced_at: datetime | None = Field(
-        default=None, description="最近一次完整频道同步确认时间（UTC）"
-    )
-    """用于识别已完成同步及离线补偿的时间"""
+    """保留概念来源背景，不用于判断帖子绑定的操作权限"""
 
     category: int | None = Field(
         default=None,
-        description="自定义分类：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；原生及未分类转换标签为空",
+        description="自定义分类：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；DC 概念和未分类转换标签可为空",
     )
-    """自定义分类：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；原生及未分类转换标签为空"""
+    """自定义分类：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法；DC 概念和未分类转换标签可为空"""
 
     enabled: bool = Field(
         default=True,

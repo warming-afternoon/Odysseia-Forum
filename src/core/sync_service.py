@@ -1,5 +1,6 @@
+from models.discord_tag_source import DiscordTagSource
 from sqlalchemy import select
-from models import Thread, Tag, TagBinding
+from models import Thread, TagBinding
 from types import SimpleNamespace
 from dto.events.discord_tags_snapshot import DiscordTagsSnapshot
 from shared.time_utils import utc_now
@@ -396,8 +397,11 @@ class SyncService:
                 existing = set(
                     (
                         await session.execute(
-                            select(Tag.discord_tag_id)
-                            .join(TagBinding, TagBinding.tag_id == Tag.id)
+                            select(DiscordTagSource.discord_tag_id)
+                            .join(
+                                TagBinding,
+                                TagBinding.discord_source_id == DiscordTagSource.id,
+                            )
                             .join(Thread, Thread.id == TagBinding.target_id)
                             .where(
                                 Thread.thread_id == thread.id,
@@ -408,11 +412,30 @@ class SyncService:
                         )
                     ).scalars()
                 )
-            if existing - set(tags_data):
+                known = list(
+                    (
+                        await session.execute(
+                            select(DiscordTagSource).where(
+                                DiscordTagSource.discord_tag_id.in_(tags_data)
+                            )
+                        )
+                    ).scalars()
+                )
+                needs_refresh = set(tags_data) - {
+                    s.discord_tag_id for s in known
+                } or any(
+                    s.channel_id is None
+                    or s.name != tags_data[s.discord_tag_id]
+                    or s.deleted_at is not None
+                    for s in known
+                )
+            if existing - set(tags_data) or needs_refresh:
                 await self.pre_sync_forum_tags(SimpleNamespace(id=thread.parent_id))
             async with self.session_factory() as session:
                 tag_repo = TagRepository(session=session)
-                tags = await tag_repo.get_or_create_tags(tags_data, update_names=False)
+                tags = await tag_repo.get_or_create_tags(
+                    tags_data, update_names=False, channel_id=thread.parent_id
+                )
 
                 repo = ThreadRepository(session=session)
                 mutation = await repo.add_or_update_thread_with_tags(

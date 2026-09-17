@@ -8,7 +8,7 @@ from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import Float, and_, case, cast, func, select
 
 from core.tag_cache_service import TagCacheService
-from core.tag_query import tag_filters
+from core.tag_query import tag_filters, tag_name_filters, require_current_tag_ids
 from core.thread_repository import ThreadRepository
 from dto.preferences import UserSearchPreferencesDTO
 from dto.search import (
@@ -300,6 +300,9 @@ class SearchService:
                     )  # type: ignore
                 filters.append(and_(*conditions))
 
+            await require_current_tag_ids(
+                self.session, [*query.include_tag_ids, *query.exclude_tag_ids]
+            )
             # 标签过滤
             filters.extend(
                 tag_filters(
@@ -310,16 +313,16 @@ class SearchService:
                     query.tag_logic,
                 )
             )
-            if query.include_tags:
-                if query.tag_logic == "and":
-                    filters.extend(
-                        Thread.tags.any(Tag.name == name)
-                        for name in set(query.include_tags)
-                    )
-                else:
-                    filters.append(Thread.tags.any(Tag.name.in_(query.include_tags)))
-            if query.exclude_tags:
-                filters.append(~Thread.tags.any(Tag.name.in_(query.exclude_tags)))
+            filters.extend(
+                await tag_name_filters(
+                    self.session,
+                    "thread",
+                    Thread.id,
+                    query.include_tags,
+                    query.exclude_tags,
+                    query.tag_logic,
+                )
+            )
 
             # 关键词匹配过滤
             thread_repo = ThreadRepository(self.session)

@@ -18,3 +18,8 @@ class NativeTagSnapshotResponse(TagResponse):
 
     readonly: Literal[True] = Field(description="固定为 true，原生标签在本项目不可修改")
     """固定为 true，原生标签在本项目不可修改"""
+
+    discord_source_id: str = Field(
+        description="此帖子绑定所依据的 DC 来源记录 ID，可在 discord_sources 中定位"
+    )
+    """此绑定的具体 DC 来源"""

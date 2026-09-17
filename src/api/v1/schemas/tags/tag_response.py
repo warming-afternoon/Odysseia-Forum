@@ -1,3 +1,4 @@
+from api.v1.schemas.tags.discord_tag_source_response import DiscordTagSourceResponse
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -19,18 +20,19 @@ class TagResponse(BaseModel):
     )
     """来源：discord 为原生标签，custom 为自定义标签"""
 
-    discord_tag_id: str | None = Field(
-        description="Discord 原生标签 ID，以字符串返回；新建自定义标签为空，DC 转换标签保留原始 ID"
+    discord_sources: list[DiscordTagSourceResponse] = Field(
+        default_factory=list,
+        description="当前有效 DC 来源列表；标准概念可对应多个频道，不再提供单个 discord_tag_id",
     )
-    """Discord 原生标签 ID，以字符串返回；新建自定义标签为空，DC 转换标签保留原始 ID"""
+    """标准概念的有效来源列表"""
 
-    category: int | None = Field(description="分类枚举值 1–7；原生及未分类转换标签为空")
-    """分类枚举值 1–7；原生及未分类转换标签为空"""
-
-    category_name: str | None = Field(
-        description="分类中文名；原生及未分类转换标签为空"
+    category: int | None = Field(
+        description="分类枚举值 1–7；DC 概念和转换标签可暂未分类，为空时显示未分类"
     )
-    """分类中文名；原生及未分类转换标签为空"""
+    """分类枚举值 1–7；DC 概念和转换标签可暂未分类，为空时显示未分类"""
+
+    category_name: str | None = Field(description="分类中文名；未分类时为空")
+    """分类中文名；未分类时为空"""
 
     enabled: bool = Field(description="标签是否启用")
     """标签是否启用"""

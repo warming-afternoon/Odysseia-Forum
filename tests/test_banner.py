@@ -688,7 +688,7 @@ class TestBannerPreferenceFiltering:
         """作者、真实标签、关键词、豁免和可见性在一次查询中生效。"""
         from core.tag_cache_service import TagCacheService
         from dto.preferences import UserSearchPreferencesDTO
-        from models import Tag, Thread, ThreadTagLink
+        from models import Tag, Thread, TagBinding
         from search.search_service import SearchService
 
         blocked_tag = Tag(id=9001, name="屏蔽标签")
@@ -755,7 +755,12 @@ class TestBannerPreferenceFiltering:
                 thread for thread in threads if thread.thread_id == 102
             )
             session.add(
-                ThreadTagLink(thread_id=tagged_thread.id, tag_id=blocked_tag.id)
+                TagBinding(
+                    target_type="thread",
+                    binding_source="local",
+                    target_id=tagged_thread.id,
+                    tag_id=blocked_tag.id,
+                )
             )
             await session.commit()
 

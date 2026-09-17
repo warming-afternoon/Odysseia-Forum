@@ -41,6 +41,13 @@ class TagBinding(SQLModel, table=True):
     )
     """绑定来源决定治理权限，与标签实体来源独立"""
 
+    discord_source_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, index=True),
+        description="DC 同步绑定的来源记录 ID；本地绑定为空",
+    )
+    """同步绑定对应唯一来源，历史轮次保留来源引用"""
+
     actor_id: int | None = Field(
         sa_column=Column(BigInteger, nullable=True),
         default=None,
@@ -93,7 +100,7 @@ class TagBinding(SQLModel, table=True):
         ),
         Index("ix_tag_binding_history", "target_type", "target_id", "id"),
         CheckConstraint(
-            "target_type IN ('thread', 'booklist') AND binding_source IN ('discord_sync', 'local') AND (binding_source <> 'discord_sync' OR target_type = 'thread') AND upvotes >= 0 AND downvotes >= 0",
+            "target_type IN ('thread', 'booklist') AND binding_source IN ('discord_sync', 'local') AND (binding_source <> 'discord_sync' OR target_type = 'thread') AND (binding_source <> 'discord_sync' OR discord_source_id IS NOT NULL) AND (binding_source <> 'local' OR discord_source_id IS NULL) AND upvotes >= 0 AND downvotes >= 0",
             name="ck_tag_binding",
         ),
     )

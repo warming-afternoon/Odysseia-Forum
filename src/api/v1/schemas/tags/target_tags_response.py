@@ -23,3 +23,14 @@ class TargetTagsResponse(BaseModel):
         description="当前生效的原生和自定义标签；按 binding_source 区分结构，无标签时为空数组"
     )
     """原生标签只读；自定义标签包含当前轮次票数及本人投票"""
+
+    over_limit: bool = Field(
+        default=False,
+        description="当前标签总数是否超过 12；DC 同步允许保留超限状态，本地新增仍需校验",
+    )
+    """当前是否超限"""
+    conflicting_pairs: list[list[str]] = Field(
+        default_factory=list,
+        description="当前互斥标签内部 ID 对；存在历史冲突时允许删除，本地新增必须消除冲突",
+    )
+    """互斥冲突提示，不改变绑定事实"""

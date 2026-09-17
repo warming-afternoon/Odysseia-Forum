@@ -1,3 +1,5 @@
+from api.v1.schemas.tags.tag_merge_request import TagMergeRequest
+from api.v1.schemas.tags.tag_merge_preview_response import TagMergePreviewResponse
 import logging
 from typing import Annotated, Any, Dict, List, Literal, Optional
 
@@ -104,6 +106,10 @@ async def pool(
         max_length=200,
         description="标签搜索关键词：对标准名或别名进行不区分大小写的包含匹配；留空则不按名称筛选，返回标准名",
     ),
+    source: Literal["custom", "discord"] | None = Query(
+        default=None,
+        description="按标签实体当前来源筛选：custom=自定义标签（含 DC 删除后转换的标签），discord=DC 原生标签；省略则返回两种来源，筛选在分页前生效",
+    ),
     category: int | None = Query(
         default=None,
         ge=1,
@@ -130,6 +136,7 @@ async def pool(
         "pool",
         user,
         q=q,
+        source=source,
         category=category,
         selectable=selectable,
         include_deleted=include_deleted,
@@ -154,6 +161,37 @@ async def relations(user=Depends(require_auth)):
 async def create_tag(body: TagCreateRequest, user=Depends(require_auth)):
     """BOT 管理员创建一个标准标签。"""
     return await dispatch("manage", user, operation="create", **body.model_dump())
+
+
+@router.get(
+    "/{tag_id}/merge-preview",
+    response_model=TagMergePreviewResponse,
+    summary="预检标签合并",
+)
+async def merge_preview(
+    tag_id: Annotated[PositiveRequestId, Path(description="待软删除的旧标签内部 ID")],
+    target_tag_id: Annotated[
+        PositiveRequestId, Query(description="合并后保留的标签内部 ID")
+    ],
+    user=Depends(require_auth),
+):
+    """仅 BOT 管理员可预检，返回影响数量及冲突，不修改数据。"""
+    return await dispatch(
+        "merge", user, tag_id=tag_id, target_tag_id=target_tag_id, preview=True
+    )
+
+
+@router.post("/{tag_id}/merge", response_model=TagResponse, summary="合并同名标签")
+async def merge_tags(
+    tag_id: Annotated[
+        PositiveRequestId,
+        Path(description="合并后软删除的标签内部 ID，旧 ID 后续提示刷新"),
+    ],
+    body: TagMergeRequest,
+    user=Depends(require_auth),
+):
+    """仅 BOT 管理员可执行，重新检查版本及冲突，保留历史审计。"""
+    return await dispatch("merge", user, tag_id=tag_id, **body.model_dump())
 
 
 @router.patch("/{tag_id}", summary="修改标签", response_model=TagResponse)

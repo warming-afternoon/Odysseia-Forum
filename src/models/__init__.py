@@ -1,3 +1,5 @@
+from models.discord_tag_source import DiscordTagSource
+from models.discord_tag_sync_state import DiscordTagSyncState
 from models.author import Author
 from models.banner_application import BannerApplication
 from models.banner_carousel import BannerCarousel
@@ -29,6 +31,8 @@ from models.operation_log import OperationLog
 from models.tag_notification_task import TagNotificationTask
 
 __all__ = [
+    "DiscordTagSource",
+    "DiscordTagSyncState",
     "TagAlias",
     "TagRelation",
     "TagBinding",

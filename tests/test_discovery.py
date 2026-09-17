@@ -14,7 +14,7 @@ from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from models import Thread, Author, Tag, ThreadTagLink
+from models import Thread, Author, Tag, TagBinding
 from discovery.discovery_repository import DiscoveryRepository
 from core.thread_repository import ThreadRepository
 from shared.time_utils import utc_now
@@ -113,15 +113,30 @@ async def seeded_discovery_session(
     discovery_session.add_all(threads)
     await discovery_session.commit()
 
-    # 获取内部 ID → 直接创建 ThreadTagLink（ThreadTagLink.thread_id = Thread.id）
+    # 获取内部 ID → 直接创建 TagBinding（TagBinding.thread_id = Thread.id）
     for t in threads:
         await discovery_session.refresh(t)
     id_map = {t.thread_id: t.id for t in threads}
 
     links = [
-        ThreadTagLink(thread_id=id_map[101], tag_id=1),
-        ThreadTagLink(thread_id=id_map[101], tag_id=2),
-        ThreadTagLink(thread_id=id_map[201], tag_id=3),
+        TagBinding(
+            target_type="thread",
+            binding_source="local",
+            target_id=id_map[101],
+            tag_id=1,
+        ),
+        TagBinding(
+            target_type="thread",
+            binding_source="local",
+            target_id=id_map[101],
+            tag_id=2,
+        ),
+        TagBinding(
+            target_type="thread",
+            binding_source="local",
+            target_id=id_map[201],
+            tag_id=3,
+        ),
     ]
     discovery_session.add_all(links)
     await discovery_session.commit()

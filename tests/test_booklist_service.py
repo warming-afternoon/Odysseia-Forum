@@ -10,7 +10,7 @@ from models import Booklist
 from models import BooklistItem
 from models import Thread
 from models import Author
-from models import ThreadTagLink
+from models import TagBinding
 from models import ThreadFollow
 from booklist.booklist_service import BooklistService
 from core.booklist_repository import BooklistRepository
@@ -70,7 +70,7 @@ async def seeded_db_session(
         # 在每个测试结束后清理数据
         await session.execute(delete(BooklistItem))
         await session.execute(delete(Booklist))
-        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(TagBinding))
         await session.execute(delete(ThreadFollow))
         await session.execute(delete(Thread))
         await session.execute(delete(Author))
@@ -127,7 +127,7 @@ async def seeded_sort_data(
 
         await session.execute(delete(BooklistItem))
         await session.execute(delete(Booklist))
-        await session.execute(delete(ThreadTagLink))
+        await session.execute(delete(TagBinding))
         await session.execute(delete(ThreadFollow))
         await session.execute(delete(Thread))
         await session.execute(delete(Author))

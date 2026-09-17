@@ -20,7 +20,8 @@ class SearchRequest(BaseModel):
         default=None, description="要搜索的频道ID列表，为空则搜索所有频道"
     )
     include_tags: List[str] = Field(
-        default_factory=list, description="必须包含的标签名列表"
+        default_factory=list,
+        description="包含的标签标准名或别名；标准名完整匹配，别名完整匹配且忽略大小写；每个名称对应的实体组内任一命中，不同名称按 tag_logic 组合，与 ID 条件共同生效",
     )
     include_tag_ids: list[RequestId] = Field(
         default_factory=list,
@@ -37,7 +38,8 @@ class SearchRequest(BaseModel):
     """排除的内部标签 ID 列表，命中任意标签即排除帖子"""
 
     exclude_tags: List[str] = Field(
-        default_factory=list, description="必须排除的标签名列表"
+        default_factory=list,
+        description="排除的标签标准名或别名；别名完整匹配且忽略大小写，命中任一实体即排除",
     )
     tag_logic: str = Field(
         default="and",

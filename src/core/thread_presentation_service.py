@@ -6,7 +6,7 @@ from core.tag_query import load_custom_tags
 from core.viewer_flag_service import ViewerFlagService
 from dto.thread_presentation_context import ThreadPresentationContext
 from dto.thread_update_dto import ThreadUpdateDTO
-from models import ThreadUpdate
+from models import ThreadUpdate, TagBinding
 
 
 class ThreadPresentationService:
@@ -39,7 +39,22 @@ class ThreadPresentationService:
                 record.thread_id: ThreadUpdateService._to_dto(record)
                 for record in records
             }
+        native_tag_ids = {}
+        if threads:
+            bindings = (
+                await self.session.execute(
+                    select(TagBinding.target_id, TagBinding.tag_id).where(
+                        TagBinding.target_type == "thread",
+                        TagBinding.target_id.in_([getattr(t, "id") for t in threads]),
+                        TagBinding.ended_at.is_(None),
+                        TagBinding.binding_source == "discord_sync",
+                    )
+                )
+            ).all()
+            for target_id, tag_id in bindings:
+                native_tag_ids.setdefault(target_id, set()).add(tag_id)
         return ThreadPresentationContext(
+            native_tag_ids=native_tag_ids,
             viewer_flags=viewer_flags,
             latest_updates=latest_updates,
             custom_tags=await load_custom_tags(

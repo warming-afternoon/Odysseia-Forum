@@ -28,7 +28,7 @@ class TagNotificationTask(SQLModel, table=True):
 
     kind: str = Field(
         default="proposal",
-        description="通知类型：proposal 审核，converted 转换待分类，conflict 分类冲突",
+        description="通知类型：proposal 审核，converted 转换待分类，conflict 分类冲突，collision 同名概念待处理",
     )
     """持久化发送任务的业务类型"""
 

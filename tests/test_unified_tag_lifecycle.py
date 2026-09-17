@@ -14,6 +14,7 @@ from core.thread_repository import ThreadRepository
 from dto.events.discord_tags_snapshot import DiscordTagsSnapshot
 from models import (
     Tag,
+    DiscordTagSource,
     Thread,
     TagBinding,
     TagVote,
@@ -43,7 +44,11 @@ async def test_delete_convert_rename_recreate_and_stale_snapshot(setup_tags):
     await sync(factory, {12345: "原名"})
     async with factory() as session, session.begin():
         tag = (
-            await session.execute(select(Tag).where(Tag.discord_tag_id == 12345))
+            await session.execute(
+                select(Tag)
+                .join(DiscordTagSource, DiscordTagSource.tag_id == Tag.id)
+                .where(DiscordTagSource.discord_tag_id == 12345)
+            )
         ).scalar_one()
         tag_id = tag.id
         await ThreadRepository(session).add_or_update_thread_with_tags(
@@ -73,13 +78,13 @@ async def test_delete_convert_rename_recreate_and_stale_snapshot(setup_tags):
     await sync(factory, {12345: "新名"})
     assert (await call("read", target_type="booklist", target_id=1))["tags"][0][
         "name"
-    ] == "新名"
+    ] == "原名"
     older = utc_now() - timedelta(hours=1)
     await sync(factory, {})
     await sync(factory, {})
     await sync(factory, {12345: "旧快照"}, observed=older)
     converted = await call("read", target_type="thread", target_id=100)
-    assert converted["tags"][0]["id"] == str(tag_id)
+    assert converted["tags"][0]["id"] != str(tag_id)
     assert converted["tags"][0]["name"] == "新名"
     assert converted["tags"][0]["source"] == "custom"
     assert converted["tags"][0]["category"] is None
@@ -98,13 +103,13 @@ async def test_delete_convert_rename_recreate_and_stale_snapshot(setup_tags):
         )
         assert (
             len(list((await session.execute(select(TagNotificationTask))).scalars()))
-            == 1
+            == 2
         )
     assert (await call("read", target_type="thread", target_id=100))["tags"]
     await sync(factory, {67890: "新名"})
     async with factory() as session:
         tags = list((await session.execute(select(Tag))).scalars())
-        assert len(tags) == 2
+        assert len(tags) == 3
         assert {tag.id for tag in tags} != {tag_id}
 
 
@@ -117,7 +122,11 @@ async def test_classification_conflict_is_durable_and_admin_only(setup_tags):
     await sync(factory, {})
     async with factory() as session:
         tag_id = (
-            await session.execute(select(Tag.id).where(Tag.discord_tag_id == 1))
+            await session.execute(
+                select(DiscordTagSource.tag_id).where(
+                    DiscordTagSource.discord_tag_id == 1
+                )
+            )
         ).scalar_one()
     with pytest.raises(TagError) as forbidden:
         await call("manage", 2, operation="classify", tag_id=tag_id, category=3)
@@ -145,7 +154,8 @@ async def test_suggestions_name_search_statistics_and_cleanup(setup_tags):
     factory, _, call = setup_tags
     a = await create(call, name="同名")
     b = await call("manage", 99, operation="create", name="同名", category=4)
-    await sync(factory, {1: "同名", 2: "同名"})
+    await sync(factory, {1: "同名"})
+    await sync(factory, {2: "同名"}, channel_id=30)
     async with factory() as session, session.begin():
         native = list(
             (
@@ -185,7 +195,7 @@ async def test_suggestions_name_search_statistics_and_cleanup(setup_tags):
             ("custom", 3, 1),
             ("custom", 4, 1),
         }
-        assert len(next(i for i in stats.items if i.source == "discord").tag_ids) == 2
+        assert len(next(i for i in stats.items if i.source == "discord").tag_ids) == 1
     await call("manage", 99, operation="disable", tag_id=a["id"])
     async with factory() as session:
         assert not (await SuggestionService(session).get_suggestions("Alice")).tags

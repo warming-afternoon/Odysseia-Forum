@@ -1,5 +1,5 @@
 from models.tag import Tag
-from models import Thread, Booklist, Notification
+from models import Thread, Booklist, Notification, DiscordTagSource
 from sqlalchemy import delete, select
 from sqlmodel import col
 
@@ -19,46 +19,60 @@ class TagBindingRepository:
         self.session = session
 
     async def sync_native(self, thread_id, tags):
-        """只同步 DC 管理的有效绑定，不触碰本地绑定或迁移备份。"""
+        """按频道来源同步标准绑定，DC 接管本地时创建新的零票轮次。"""
+        thread = await self.session.get(Thread, thread_id)
+        sources = list(
+            (
+                await self.session.execute(
+                    select(DiscordTagSource)
+                    .join(Tag, Tag.id == DiscordTagSource.tag_id)
+                    .where(
+                        DiscordTagSource.tag_id.in_([t.id for t in tags]),
+                        DiscordTagSource.channel_id == thread.channel_id,
+                        DiscordTagSource.deleted_at.is_(None),
+                        Tag.deleted_at.is_(None),
+                        Tag.source == "discord",
+                    )
+                )
+            ).scalars()
+        )
+        desired = {source.tag_id: source.id for source in sources}
         rows = list(
             (
                 await self.session.execute(
                     select(TagBinding).where(
-                        col(TagBinding.target_type) == "thread",
-                        col(TagBinding.target_id) == thread_id,
-                        col(TagBinding.ended_at).is_(None),
+                        TagBinding.target_type == "thread",
+                        TagBinding.target_id == thread_id,
+                        TagBinding.ended_at.is_(None),
                     )
                 )
             ).scalars()
         )
-        current = {b.tag_id: b for b in rows if b.binding_source == "discord_sync"}
-        occupied = {b.tag_id for b in rows}
-        desired = set(
-            (
-                await self.session.execute(
-                    select(col(Tag.id)).where(
-                        col(Tag.id).in_([t.id for t in tags]),
-                        col(Tag.source) == "discord",
-                        col(Tag.deleted_at).is_(None),
-                    )
-                )
-            ).scalars()
-        )
+        current = {b.tag_id: b for b in rows}
         changed = False
-        for tag_id in set(current) - desired:
-            current[tag_id].ended_at = utc_now()
-            current[tag_id].end_reason = "discord_sync"
-            changed = True
-        for tag_id in desired - occupied:
-            self.session.add(
-                TagBinding(
-                    target_type="thread",
-                    target_id=thread_id,
-                    tag_id=tag_id,
-                    binding_source="discord_sync",
-                )
+        for binding in rows:
+            remove = binding.binding_source == "discord_sync" and (
+                desired.get(binding.tag_id) != binding.discord_source_id
             )
-            changed = True
+            takeover = binding.binding_source == "local" and binding.tag_id in desired
+            if remove or takeover:
+                binding.ended_at = utc_now()
+                binding.end_reason = "discord_takeover" if takeover else "discord_sync"
+                current.pop(binding.tag_id)
+                changed = True
+        await self.session.flush()
+        for tag_id, source_id in desired.items():
+            if tag_id not in current:
+                self.session.add(
+                    TagBinding(
+                        target_type="thread",
+                        target_id=thread_id,
+                        tag_id=tag_id,
+                        binding_source="discord_sync",
+                        discord_source_id=source_id,
+                    )
+                )
+                changed = True
         return changed
 
     async def delete_targets(self, kind, ids):

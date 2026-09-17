@@ -1,5 +1,7 @@
 """书单相关路由"""
 
+from shared.tag_error import TagError
+
 import logging
 from core.tag_query import load_custom_tags
 from typing import Literal, Any, Dict, List, Optional
@@ -256,6 +258,14 @@ async def create_booklist(
     response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_public_booklists(
+    include_tags: list[str] | None = Query(
+        default=None,
+        description="包含的标签标准名或别名；标准名完整匹配，别名完整匹配且忽略大小写；多个值使用重复参数，按 tag_logic 组合；与 ID 筛选共同生效",
+    ),
+    exclude_tags: list[str] | None = Query(
+        default=None,
+        description="排除的标签标准名或别名；别名完整匹配且忽略大小写，命中任一即排除；只匹配书单自身绑定",
+    ),
     include_tag_ids: list[RequestId] | None = Query(
         default=None,
         description="按书单自身绑定的标签内部 ID 筛选，不继承单内帖子的标签；多个值使用重复查询参数，接受十进制字符串或整数；按 tag_logic 组合",
@@ -266,7 +276,7 @@ async def list_public_booklists(
     ),
     tag_logic: Literal["and", "or"] = Query(
         default="and",
-        description="包含标签的组合逻辑：and 要求全部命中，or 要求至少命中一个；仅作用于 include_tag_ids，不改变排除条件",
+        description="包含标签的组合逻辑：and 要求全部命中，or 要求至少命中一个；分别作用于 include_tags 和 include_tag_ids，两组条件共同生效，不改变排除条件",
     ),
     owner_id: Optional[int] = Query(None, description="创建者用户ID"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
@@ -341,6 +351,8 @@ async def list_public_booklists(
 
             service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
+                include_tags=include_tags,
+                exclude_tags=exclude_tags,
                 include_tag_ids=include_tag_ids,
                 exclude_tag_ids=exclude_tag_ids,
                 tag_logic=tag_logic,
@@ -395,6 +407,8 @@ async def list_public_booklists(
             total=total, limit=limit, offset=offset, results=results
         )
 
+    except TagError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail) from e
     except Exception as e:
         logger.error(f"列出公开书单失败: {e}", exc_info=True)
         raise HTTPException(
@@ -408,6 +422,14 @@ async def list_public_booklists(
     response_model=PaginatedResponse[BooklistSummary],
 )
 async def list_my_booklists(
+    include_tags: list[str] | None = Query(
+        default=None,
+        description="包含的标签标准名或别名；标准名完整匹配，别名完整匹配且忽略大小写；多个值使用重复参数，按 tag_logic 组合；与 ID 筛选共同生效",
+    ),
+    exclude_tags: list[str] | None = Query(
+        default=None,
+        description="排除的标签标准名或别名；别名完整匹配且忽略大小写，命中任一即排除；只匹配书单自身绑定",
+    ),
     include_tag_ids: list[RequestId] | None = Query(
         default=None,
         description="按书单自身绑定的标签内部 ID 筛选，不继承单内帖子的标签；多个值使用重复查询参数，接受十进制字符串或整数；按 tag_logic 组合",
@@ -418,7 +440,7 @@ async def list_my_booklists(
     ),
     tag_logic: Literal["and", "or"] = Query(
         default="and",
-        description="包含标签的组合逻辑：and 要求全部命中，or 要求至少命中一个；仅作用于 include_tag_ids，不改变排除条件",
+        description="包含标签的组合逻辑：and 要求全部命中，or 要求至少命中一个；分别作用于 include_tags 和 include_tag_ids，两组条件共同生效，不改变排除条件",
     ),
     is_public: Optional[bool] = Query(None, description="筛选公开状态 (不传则不筛选)"),
     keywords: Optional[str] = Query(None, description="模糊搜索关键词，匹配标题和描述"),
@@ -496,6 +518,8 @@ async def list_my_booklists(
 
             service = BooklistRepository(session)
             booklists, total = await service.list_booklists(
+                include_tags=include_tags,
+                exclude_tags=exclude_tags,
                 include_tag_ids=include_tag_ids,
                 exclude_tag_ids=exclude_tag_ids,
                 tag_logic=tag_logic,
@@ -560,6 +584,8 @@ async def list_my_booklists(
         return PaginatedResponse(
             total=total, limit=limit, offset=offset, results=results
         )
+    except TagError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail) from e
     except Exception as e:
         logger.error(f"列出我的书单失败: {e}", exc_info=True)
         raise HTTPException(

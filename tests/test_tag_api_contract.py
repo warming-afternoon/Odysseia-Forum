@@ -65,7 +65,12 @@ def test_openapi_request_ids_and_structured_responses():
     binding = models["CustomTagBindingResponse"]
     assert binding["properties"]["id"]["type"] == "string"
     assert binding["properties"]["binding_id"]["type"] == "string"
-    assert set(binding["required"]) == set(binding["properties"])
+    assert set(binding["required"]) == set(binding["properties"]) - {
+        "binding_source",
+        "readonly",
+    }
+    assert binding["properties"]["binding_source"]["const"] == "local"
+    assert binding["properties"]["readonly"]["const"] is False
 
 
 @pytest.mark.parametrize("value", [BIG_ID, str(BIG_ID)])
@@ -121,7 +126,7 @@ async def test_http_path_and_body_ids_are_normalized(monkeypatch):
             "id": str(BIG_ID),
             "name": "测试",
             "source": "custom",
-            "discord_tag_id": None,
+            "discord_sources": [],
             "category": 3,
             "category_name": "角色",
             "enabled": False,
@@ -191,6 +196,8 @@ async def test_custom_tags_are_assembled_as_typed_models():
         "binding_id": str(BIG_ID + 1),
         "upvotes": 3,
         "downvotes": 1,
+        "binding_source": "local",
+        "readonly": False,
     }
     # 装配入口可能先构造响应后赋值，验证该路径不会遗留原始字典。
     for model in (ThreadDetail, BooklistSummary):

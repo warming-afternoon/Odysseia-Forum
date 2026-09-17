@@ -90,7 +90,12 @@ class ThreadDetailBuilder:
             display_count=thread.display_count,
             first_message_excerpt=thread.first_message_excerpt,
             thumbnail_urls=thread.thumbnail_urls or [],
-            tags=[tag.name for tag in thread.tags if tag.source == "discord"]
+            tags=[
+                tag.name
+                for tag in thread.tags
+                if presentation_context is not None
+                and tag.id in presentation_context.native_tag_ids.get(thread.id, set())
+            ]
             if getattr(thread, "tags", None)
             else [],
             virtual_tags=list(set(matched_virtual)),

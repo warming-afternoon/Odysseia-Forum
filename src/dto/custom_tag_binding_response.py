@@ -38,3 +38,13 @@ class CustomTagBindingResponse(BaseModel):
 
     downvotes: int = Field(description="当前绑定轮次的负向票数")
     """当前轮次负向票数"""
+
+    binding_source: Literal["local"] = Field(
+        default="local",
+        description="绑定来源固定为 local；即使标签来源为 DC，也按本地权限治理",
+    )
+    """本地绑定来源"""
+    readonly: Literal[False] = Field(
+        default=False, description="本地绑定不是 DC 只读绑定；仍需按当前用户权限操作"
+    )
+    """绑定是否只读"""

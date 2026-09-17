@@ -1,3 +1,5 @@
+from core.tag_merge_service import TagMergeService
+from core.tag_presentation import load_discord_sources, tag_data
 import hashlib
 import unicodedata
 from datetime import timedelta
@@ -15,7 +17,6 @@ from models.tag_notification_task import TagNotificationTask
 from models.tag_proposal import TagProposal
 from models.tag_proposal_block import TagProposalBlock
 from models.tag_relation import TagRelation
-from shared.enum.tag_category import TagCategory
 from shared.tag_error import TagError
 from shared.tag_rules import validate_graph, validate_selection
 from shared.time_utils import utc_now
@@ -28,30 +29,34 @@ class CustomTagService:
         self.session = session
         self.access = access or TagAccessService(config)
         self.tag_cache = {}
+        self.source_cache = {}
 
     def repo(self, model):
         """获取当前事务内的单表仓储。"""
         return TagDataRepository(self.session, model)
 
-    @staticmethod
-    def tag_data(tag):
-        """输出标准标签及前端安全的字符串 ID。"""
-        return {
-            "id": str(tag.id),
-            "name": tag.name,
-            "source": tag.source,
-            "discord_tag_id": str(tag.discord_tag_id) if tag.discord_tag_id else None,
-            "category": tag.category,
-            "category_name": TagCategory(tag.category).name if tag.category else None,
-            "enabled": tag.enabled,
-            "deleted_at": tag.deleted_at,
-        }
+    def tag_data(self, tag):
+        """返回已批量加载来源的标准概念。"""
+        return tag_data(tag, self.source_cache)
+
+    async def merge(self, actor, payload):
+        """仅 BOT 管理员预检或执行同名概念合并。"""
+        if not self.access.bot_admin(actor):
+            raise TagError("forbidden", "仅 BOT 管理员可合并标签", 403)
+        service = TagMergeService(self.session)
+        source_id, target_id = int(payload["tag_id"]), int(payload["target_tag_id"])
+        if payload.get("preview"):
+            return (await service.inspect(source_id, target_id))[0]
+        tag = await service.execute(source_id, target_id, payload["version"], actor)
+        self.source_cache.update(await load_discord_sources(self.session, [tag.id]))
+        return self.tag_data(tag)
 
     async def dispatch(self, command):
         """执行白名单事件命令，事务由入口统一提交。"""
         handlers = {
             "pool": self.pool,
             "manage": self.manage,
+            "merge": self.merge,
             "relations": self.relations,
             "read": self.read,
             "replace": self.replace,
@@ -64,7 +69,7 @@ class CustomTagService:
         if command.action not in handlers:
             raise TagError("unknown_command", "未知标签操作", 400)
         # 池维护与绑定写入互斥，防止软删除和新增绑定交错。
-        exclusive = command.action == "manage"
+        exclusive = command.action in ("manage", "merge")
         lock = "pg_advisory_xact_lock" if exclusive else "pg_advisory_xact_lock_shared"
         await self.session.execute(text(f"SELECT {lock}(73902141)"))
         return await handlers[command.action](command.actor_id, command.payload)
@@ -139,6 +144,16 @@ class CustomTagService:
         native = await self.native_tags(kind, target)
         tags = await self.repo(Tag).rows(Tag.id.in_(bindings), Tag.deleted_at.is_(None))
         self.tag_cache.update({tag.id: tag for tag in tags})
+        self.source_cache.update(
+            await load_discord_sources(self.session, [t.id for t in tags + native])
+        )
+        native_bindings = await self.repo(TagBinding).rows(
+            TagBinding.target_type == kind,
+            TagBinding.target_id == target_id,
+            TagBinding.binding_source == "discord_sync",
+            TagBinding.ended_at.is_(None),
+        )
+        native_source = {b.tag_id: str(b.discord_source_id) for b in native_bindings}
         votes = await self.repo(TagVote).rows(
             TagVote.binding_id.in_([b.id for b in bindings.values()]),
             TagVote.user_id == actor,
@@ -162,7 +177,12 @@ class CustomTagService:
         version_data.append(str(tuple(history)))
         version_data.append(str(getattr(target, "native_tag_revision", 0)))
         result = [
-            dict(self.tag_data(t), readonly=True, binding_source="discord_sync")
+            dict(
+                self.tag_data(t),
+                readonly=True,
+                binding_source="discord_sync",
+                discord_source_id=native_source[t.id],
+            )
             for t in native
         ]
         for tag in tags:
@@ -178,7 +198,17 @@ class CustomTagService:
                     my_vote=mine.get(binding.id, 0),
                 )
             )
+        all_ids = {t.id for t in tags + native}
+        conflicts = await self.repo(TagRelation).rows(
+            TagRelation.kind == "excludes",
+            TagRelation.source_id.in_(all_ids),
+            TagRelation.target_id.in_(all_ids),
+        )
         return {
+            "over_limit": len(all_ids) > 12,
+            "conflicting_pairs": [
+                [str(r.source_id), str(r.target_id)] for r in conflicts
+            ],
             "version": hashlib.sha256("|".join(version_data).encode()).hexdigest(),
             "tags": result,
         }
@@ -190,18 +220,36 @@ class CustomTagService:
 
     async def validate(self, kind, target, current, desired):
         """验证目标最终集合，不计算包含关系。"""
-        tags = await self.repo(Tag).rows(
-            Tag.id.in_(desired), *([Tag.source == "custom"] if kind == "thread" else [])
-        )
+        tags = await self.repo(Tag).rows(Tag.id.in_(desired))
+        if len(tags) != len(desired) or any(t.deleted_at for t in tags):
+            raise TagError("tags_changed", "标签已发生变化，请刷新后重试")
         self.tag_cache.update({tag.id: tag for tag in tags})
+        native = await self.native_tags(kind, target)
+        native_ids = {t.id for t in native}
+        if desired & native_ids:
+            raise TagError("readonly_tag", "DC 同步绑定不可通过索引页修改", 403)
         relations = await self.repo(TagRelation).rows(TagRelation.kind == "excludes")
+        eligible = {
+            t.id: t
+            for t in tags
+            if kind != "thread" or t.source == "custom" or t.id in current
+        }
         validate_selection(
             set(current),
             desired,
-            len(await self.native_tags(kind, target)),
-            {t.id: t for t in tags},
+            len(native),
+            eligible,
             [(r.source_id, r.target_id) for r in relations],
         )
+        if desired - set(current):
+            combined = desired | native_ids
+            pairs = [
+                [str(r.source_id), str(r.target_id)]
+                for r in relations
+                if r.source_id in combined and r.target_id in combined
+            ]
+            if pairs:
+                raise TagError("tag_conflict", "目标标签存在互斥关系", pairs=pairs)
 
     async def end(self, binding, actor, reason):
         """结束当前挂标轮次，保留投票明细和审计。"""
@@ -455,6 +503,9 @@ class CustomTagService:
     async def pool(self, actor, payload):
         """搜索标准名与别名，默认仅列出可选标签。"""
         conditions = []
+        # 按实体当前来源筛选后再分页，转换标签仍属于自定义标签。
+        if source := payload.get("source"):
+            conditions.append(Tag.source == source)
         if payload.get("include_deleted"):
             if not self.access.bot_admin(actor):
                 raise TagError("forbidden", "仅 BOT 管理员可查询已删除标签", 403)
@@ -480,6 +531,9 @@ class CustomTagService:
             .limit(100)
         )
         tags = list((await self.session.execute(statement)).scalars())
+        self.source_cache.update(
+            await load_discord_sources(self.session, [t.id for t in tags])
+        )
         aliases = await self.repo(TagAlias).rows(
             TagAlias.tag_id.in_([t.id for t in tags])
         )
@@ -492,7 +546,7 @@ class CustomTagService:
 
     async def relations(self, actor, payload):
         """返回未删除标签间的直接关系，不计算传递闭包。"""
-        active = select(Tag.id).where(Tag.source == "custom", Tag.deleted_at.is_(None))
+        active = select(Tag.id).where(Tag.deleted_at.is_(None))
         rows = await self.repo(TagRelation).rows(
             TagRelation.source_id.in_(active), TagRelation.target_id.in_(active)
         )
@@ -512,20 +566,37 @@ class CustomTagService:
         action = payload["operation"]
         tag = None
         if payload.get("tag_id"):
-            tag = await self.repo(Tag).one(
-                Tag.id == int(payload["tag_id"]), Tag.source == "custom", lock=True
-            )
+            tag = await self.repo(Tag).one(Tag.id == int(payload["tag_id"]), lock=True)
             if tag is None:
-                raise TagError("not_found", "自定义标签不存在", 404)
+                raise TagError("not_found", "标签不存在", 404)
         if action == "classify":
             if (
                 tag is None
-                or not tag.discord_tag_id
+                or not tag.originated_from_discord
                 or tag.category is not None
                 or tag.deleted_at
             ):
                 raise TagError("already_classified", "标签已分类或不可处理")
             action = "update"
+        if tag is not None and tag.deleted_at and action != "restore":
+            raise TagError("tags_changed", "标签已发生变化，请刷新后重试")
+        if tag is not None and action == "restore":
+            merged = await self.repo(OperationLog).one(
+                OperationLog.type == "tag.pool.merge", OperationLog.target_id == tag.id
+            )
+            if merged:
+                raise TagError(
+                    "tags_changed", "已合并标签不可恢复，请刷新后选择当前标签"
+                )
+        if tag is not None and tag.source == "discord":
+            if action in ("delete", "restore") or (
+                "name" in payload and payload["name"] != tag.name
+            ):
+                raise TagError(
+                    "dc_concept_readonly",
+                    "DC 标准概念不可改名或删除，可维护分类、别名、关系及启用状态",
+                    403,
+                )
         if tag is not None:
             self.tag_cache[tag.id] = tag
         before = (
@@ -544,13 +615,19 @@ class CustomTagService:
             name = unicodedata.normalize(
                 "NFC", payload.get("name", tag.name if tag else "")
             ).strip()
+            if tag is not None and tag.source == "discord":
+                name = tag.name
             category = payload.get("category", tag.category if tag else None)
             if (
                 not name
                 or len(name) > 100
                 or (
                     category not in range(1, 8)
-                    and not (tag and tag.discord_tag_id and category is None)
+                    and not (
+                        tag
+                        and (tag.originated_from_discord or tag.source == "discord")
+                        and category is None
+                    )
                 )
             ):
                 raise TagError(
@@ -560,7 +637,7 @@ class CustomTagService:
                 await self.repo(Tag).one(
                     Tag.source == "custom", Tag.name == name, Tag.category == category
                 )
-                if category is not None
+                if category is not None and (tag is None or tag.source == "custom")
                 else None
             )
             if (
@@ -572,7 +649,9 @@ class CustomTagService:
                     "deleted_tag_exists" if duplicate.deleted_at else "tag_exists",
                     "该标签已删除，可恢复" if duplicate.deleted_at else "标签已存在",
                     tag_id=str(duplicate.id),
-                    conflict_tag_id=str(tag.id) if tag and tag.discord_tag_id else None,
+                    conflict_tag_id=str(tag.id)
+                    if tag and (tag.originated_from_discord or tag.source == "discord")
+                    else None,
                 )
             if tag is None:
                 tag = await self.repo(Tag).add(
@@ -629,8 +708,8 @@ class CustomTagService:
             if tag is None or tag.deleted_at:
                 raise TagError("missing_tag", "关系源标签不可用", 422)
             other = await self.session.get(Tag, int(payload["target_tag_id"]))
-            if other is None or other.source != "custom" or other.deleted_at:
-                raise TagError("missing_tag", "关系目标标签不可用", 422)
+            if other is None or other.deleted_at:
+                raise TagError("tags_changed", "标签已发生变化，请刷新后重试")
             kind = payload["kind"]
             if kind not in ("implies", "excludes") or tag.id == other.id:
                 raise TagError("invalid_relation", "关系类型无效或存在自环", 422)
@@ -671,6 +750,7 @@ class CustomTagService:
             relation_kind=payload.get("kind"),
         )
         await self.session.flush()
+        self.source_cache.update(await load_discord_sources(self.session, [tag.id]))
         return self.tag_data(tag)
 
     async def audit(self, actor, payload):

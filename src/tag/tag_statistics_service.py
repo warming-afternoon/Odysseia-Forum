@@ -89,7 +89,7 @@ class TagStatisticsService:
         for name, source, category, channel_id, count, ids in real_tag_rows:
             if requested_channels is not None and channel_id not in requested_channels:
                 continue
-            key = (source, category, name)
+            key = (min(ids), source, category, name)
             bucket = tag_buckets[key]
             bucket["total"] += count
             bucket["ids"].update(ids)
@@ -131,7 +131,7 @@ class TagStatisticsService:
                 total_thread_count=data["total"],
                 channel_info=data["channels"],
             )
-            for (source, category, name), data in tag_buckets.items()
+            for (_, source, category, name), data in tag_buckets.items()
         ]
         items.extend(
             TagStatItem(
@@ -167,7 +167,7 @@ class TagStatisticsService:
                 Thread.not_found_count == 0,
                 Thread.show_flag.is_(True),
             )
-            .group_by(Tag.name, Tag.source, Tag.category, Thread.channel_id)
+            .group_by(Tag.id, Tag.name, Tag.source, Tag.category, Thread.channel_id)
         )
         if guild_id is not None:
             statement = statement.where(Thread.guild_id == guild_id)

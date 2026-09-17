@@ -16,7 +16,7 @@ TAG = {
     "id": BIG_ID,
     "name": "测试",
     "source": "custom",
-    "discord_tag_id": None,
+    "discord_sources": [],
     "category": 3,
     "category_name": "角色",
     "enabled": True,
@@ -95,7 +95,7 @@ async def test_snapshot_preserves_native_and_custom_fields(
     native = dict(
         TAG,
         source="discord",
-        discord_tag_id=BIG_ID,
+        discord_source_id=BIG_ID,
         category=None,
         category_name=None,
         readonly=True,
@@ -110,7 +110,12 @@ async def test_snapshot_preserves_native_and_custom_fields(
         downvotes=1,
         my_vote=-1,
     )
-    expected = {"version": "v", "tags": [native, custom]}
+    expected = {
+        "version": "v",
+        "tags": [native, custom],
+        "over_limit": False,
+        "conflicting_pairs": [],
+    }
     mediator.request.return_value = expected
     response = await client.request(method, "/v1/tags" + path, json=body)
     assert response.status_code == 200
@@ -120,6 +125,8 @@ async def test_snapshot_preserves_native_and_custom_fields(
     assert (await client.get("/v1/tags/thread/123")).json() == {
         "version": "v",
         "tags": [],
+        "over_limit": False,
+        "conflicting_pairs": [],
     }
 
 
@@ -189,3 +196,25 @@ async def test_lists_audit_details_and_permission_error(response_client):
     mediator.request.side_effect = TagError("forbidden", "无审计权限", 403)
     for path in ["/thread/123/audit", "/booklist/123/audit", "/tag/123/audit"]:
         assert (await client.get("/v1/tags" + path)).status_code == 403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", [None, "custom", "discord"])
+async def test_pool_source_parameter(response_client, source):
+    """来源筛选透传到领域事件，省略参数保持全部来源。"""
+    client, mediator = response_client
+    mediator.request.return_value = []
+    response = await client.get(
+        "/v1/tags", params={} if source is None else {"source": source}
+    )
+    assert response.status_code == 200
+    assert mediator.request.call_args.args[0].payload["source"] == source
+
+
+@pytest.mark.asyncio
+async def test_pool_rejects_invalid_source(response_client):
+    """非法来源由接口校验拒绝，不进入业务层。"""
+    client, mediator = response_client
+    response = await client.get("/v1/tags", params={"source": "invalid"})
+    assert response.status_code == 422
+    mediator.request.assert_not_called()

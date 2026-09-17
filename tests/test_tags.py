@@ -16,7 +16,10 @@ from typing import AsyncGenerator
 
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from models import Tag, Thread, TagBinding
+from models import Tag, Thread, TagBinding, DiscordTagSource
+from sqlalchemy import select
+from core.discord_tag_sync_service import DiscordTagSyncService
+from dto.events.discord_tags_snapshot import DiscordTagsSnapshot
 from core.tag_repository import TagRepository
 from shared.time_utils import utc_now
 
@@ -82,7 +85,9 @@ async def seeded_tag_session(tag_session: AsyncSession) -> AsyncSession:
     for t in threads:
         await tag_session.refresh(t)
     id_map = {t.thread_id: t.id for t in threads}
-    tag_ids = {t.discord_tag_id: t.id for t in await repo.get_all_tags()}
+    sources = list((await tag_session.execute(select(DiscordTagSource))).scalars())
+    tag_ids = {t.discord_tag_id: t.tag_id for t in sources}
+    source_ids = {t.discord_tag_id: t.id for t in sources}
 
     links = [
         TagBinding(
@@ -90,30 +95,35 @@ async def seeded_tag_session(tag_session: AsyncSession) -> AsyncSession:
             binding_source="discord_sync",
             target_id=id_map[101],
             tag_id=tag_ids[10],
+            discord_source_id=source_ids[10],
         ),
         TagBinding(
             target_type="thread",
             binding_source="discord_sync",
             target_id=id_map[101],
             tag_id=tag_ids[20],
+            discord_source_id=source_ids[20],
         ),
         TagBinding(
             target_type="thread",
             binding_source="discord_sync",
             target_id=id_map[102],
             tag_id=tag_ids[10],
+            discord_source_id=source_ids[10],
         ),
         TagBinding(
             target_type="thread",
             binding_source="discord_sync",
             target_id=id_map[102],
             tag_id=tag_ids[30],
+            discord_source_id=source_ids[30],
         ),
         TagBinding(
             target_type="thread",
             binding_source="discord_sync",
             target_id=id_map[201],
             tag_id=tag_ids[40],
+            discord_source_id=source_ids[40],
         ),
     ]
     tag_session.add_all(links)
@@ -131,7 +141,11 @@ class TestGetOrCreateTags:
         tags = await repo.get_or_create_tags({1: "百合", 2: "纯爱"})
         assert len(tags) == 2
         names = {t.name for t in tags}
-        ids = {t.discord_tag_id for t in tags}
+        ids = set(
+            (
+                await tag_session.execute(select(DiscordTagSource.discord_tag_id))
+            ).scalars()
+        )
         assert names == {"百合", "纯爱"}
         assert ids == {1, 2}
 
@@ -139,10 +153,12 @@ class TestGetOrCreateTags:
         """ON CONFLICT 更新已存在标签的名称"""
         repo = TagRepository(tag_session)
         await repo.get_or_create_tags({1: "旧名称"})
-        await repo.get_or_create_tags({1: "新名称"})
+        await DiscordTagSyncService(tag_session).apply(
+            DiscordTagsSnapshot(1, {1: "新名称"}, utc_now())
+        )
 
         tags = await repo.get_all_tags()
-        tag = next(t for t in tags if t.discord_tag_id == 1)
+        tag = next(t for t in tags if t.source == "discord")
         assert tag.name == "新名称"
 
     async def test_empty_tags_data(self, tag_session: AsyncSession):
@@ -158,7 +174,7 @@ class TestGetOrCreateTags:
         tags = await repo.get_or_create_tags({1: "updated", 2: "new_tag"})
         assert len(tags) == 2
         names = {t.name for t in tags}
-        assert names == {"updated", "new_tag"}
+        assert names == {"existing", "new_tag"}
 
 
 @pytest.mark.asyncio
@@ -250,11 +266,13 @@ class TestUpdateTagName:
     async def test_update_existing_tag(self, seeded_tag_session: AsyncSession):
         """更新已存在标签的名称"""
         repo = TagRepository(seeded_tag_session)
-        old = next(t for t in await repo.get_all_tags() if t.discord_tag_id == 10)
+        old = Tag(name="自定义", source="custom", category=3)
+        seeded_tag_session.add(old)
+        await seeded_tag_session.flush()
         await repo.update_tag_name(tag_id=old.id, new_name="百合破坏")
 
         all_tags = list(await repo.get_all_tags())
-        tag = next(t for t in all_tags if t.discord_tag_id == 10)
+        tag = next(t for t in all_tags if t.id == old.id)
         assert tag.name == "百合破坏"
 
     async def test_update_nonexistent_tag(self, seeded_tag_session: AsyncSession):
@@ -298,26 +316,14 @@ class TestCrossTableAggregation:
 
 @pytest.mark.asyncio
 async def test_existing_sync_does_not_consume_tag_ids(tag_session: AsyncSession):
-    """重复同步、改名和混合新增只为真正缺失的实体分配 ID。"""
+    """重复同步仅查询已有实体，只有新概念消耗标准标签序列。"""
     repo = TagRepository(tag_session)
-    initial = await repo.get_or_create_tags({101: "原名", 102: "已转换"})
-    original_ids = {tag.discord_tag_id: tag.id for tag in initial}
-    converted = next(tag for tag in initial if tag.discord_tag_id == 102)
-    converted.source = "custom"
-    await tag_session.flush()
-
-    # 重复的帖子同步不改名，完整快照可以改名，但不能覆盖已转换实体。
+    initial = await repo.get_or_create_tags({101: "原名", 102: "另一个"})
+    original_ids = {tag.id for tag in initial}
     for _ in range(3):
-        unchanged = await repo.get_or_create_tags(
-            {101: "缓存旧名", 102: "缓存旧名"}, update_names=False
-        )
-        assert {tag.name for tag in unchanged} == {"原名", "已转换"}
-    updated = await repo.get_or_create_tags({101: "新名", 102: "不应覆盖"})
-    assert {tag.name for tag in updated} == {"新名", "已转换"}
-    assert {tag.discord_tag_id: tag.id for tag in updated} == original_ids
-
-    # 在独立测试库中，下一条真实插入应紧接上次 ID，证明中间没有取号。
-    mixed = await repo.get_or_create_tags({101: "再次改名", 103: "新增"})
-    new_tag = next(tag for tag in mixed if tag.discord_tag_id == 103)
-    assert new_tag.id == max(original_ids.values()) + 1
-    assert next(tag for tag in mixed if tag.discord_tag_id == 101).name == "再次改名"
+        unchanged = await repo.get_or_create_tags({101: "缓存旧名", 102: "另一个"})
+        assert {tag.id for tag in unchanged} == original_ids
+        assert {tag.name for tag in unchanged} == {"原名", "另一个"}
+    mixed = await repo.get_or_create_tags({101: "缓存旧名", 103: "新增"})
+    new_tag = next(tag for tag in mixed if tag.name == "新增")
+    assert new_tag.id == max(original_ids) + 1

@@ -143,9 +143,9 @@ class TagCog(commands.Cog):
             title = (
                 "DC 标签已转为自定义标签，等待分类"
                 if task.kind == "converted"
-                else "标签分类发生名称冲突，请手动检查数据库"
+                else "标签同名或分类冲突，请通过标签合并预检处理"
             )
-            message = f"{title}\n标签：{tag.name}（内部 ID：{tag.id}）\n来源频道：{tag.discord_channel_id}"
+            message = f"{title}\n标签：{tag.name}（内部 ID：{tag.id}）"
             view = None
             if (
                 task.kind == "converted"

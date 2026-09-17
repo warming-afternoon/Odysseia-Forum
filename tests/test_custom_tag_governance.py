@@ -114,14 +114,14 @@ async def test_internal_id_and_alias_lifecycle(setup_tags):
     async with factory() as session, session.begin():
         native = (
             await TagRepository(session).get_or_create_tags(
-                {123456789012345678: "原生"}
+                {123456789012345678: "原生"}, channel_id=20
             )
         )[0]
         internal = native.id
-        assert internal > 0 and internal != native.discord_tag_id
+        assert internal > 0 and internal != 9007199254740993
         again = (
             await TagRepository(session).get_or_create_tags(
-                {123456789012345678: "改名"}
+                {123456789012345678: "改名"}, channel_id=20
             )
         )[0]
         assert again.id == internal
@@ -303,7 +303,7 @@ async def test_native_sync_overflow_and_relationships(setup_tags):
     await attach(call, ids[:11])
     async with factory() as session, session.begin():
         native = await TagRepository(session).get_or_create_tags(
-            {9001: "原生1", 9002: "原生2"}
+            {9001: "原生1", 9002: "原生2"}, channel_id=20
         )
         await ThreadRepository(session).add_or_update_thread_with_tags(
             {"thread_id": 100}, native
@@ -370,7 +370,7 @@ async def test_unified_tag_filter_mixed_sources(setup_tags):
     factory, _, call = setup_tags
     async with factory() as session, session.begin():
         native = await TagRepository(session).get_or_create_tags(
-            {987654321012345678: "原生筛选"}
+            {987654321012345678: "原生筛选"}, channel_id=20
         )
         native_id = native[0].id
         for tid in (100, 200, 300):
@@ -658,3 +658,37 @@ async def test_http_contract_and_notification_privacy(setup_tags, monkeypatch):
         current["id"] = "1"
         response = await client.post(f"/v1/notifications/{notice_id}/read")
         assert response.json()["marked_read"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pool_source_filter_before_pagination(setup_tags):
+    """不同来源同名、转换实体及超过一页数据均按来源筛选后分页。"""
+    from models import Tag
+
+    factory, _, call = setup_tags
+    async with factory() as session, session.begin():
+        session.add_all(
+            [Tag(name=f"候选{i:03}", source="custom", category=3) for i in range(101)]
+        )
+        session.add(
+            Tag(
+                name="候选000",
+                source="discord",
+            )
+        )
+        session.add(Tag(name="已转换", source="custom", originated_from_discord=True))
+        session.add(Tag(name="已停用", source="custom", category=3, enabled=False))
+
+    custom = await call("pool", source="custom", offset=100)
+    assert len(custom) == 2
+    assert all(tag["source"] == "custom" for tag in custom)
+    assert any(tag["name"] == "已转换" for tag in custom)
+    discord = await call("pool", source="discord")
+    assert len(discord) == 1 and discord[0]["name"] == "候选000"
+    assert await call("pool", source="discord", offset=1) == []
+    same_name = await call("pool", q="候选000")
+    assert {tag["source"] for tag in same_name} == {"custom", "discord"}
+    filtered = await call("pool", source="custom", q="候选000", category=3)
+    assert len(filtered) == 1 and filtered[0]["source"] == "custom"
+    assert await call("pool", source="custom", q="已停用") == []
+    assert len(await call("pool", source="custom", q="已停用", selectable=False)) == 1
