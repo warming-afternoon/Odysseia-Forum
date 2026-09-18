@@ -42,14 +42,16 @@ async def follow_author(
         relation = await AuthorFollowRepository(session).set_active(
             user_id, author_id, True
         )
-        await session.commit()
         if relation is None:
             raise RuntimeError("关注作者后未取得关系记录")
-        return AuthorFollowState(
+        # 提交会使 ORM 字段过期，先生成独立响应，避免返回时触发隐式异步查询。
+        result = AuthorFollowState(
             author_id=relation.author_id,
             followed_at=relation.followed_at,
             active=relation.active_flag,
         )
+        await session.commit()
+        return result
 
 
 @router.delete("/{author_id}", status_code=204, summary="取消关注作者")
