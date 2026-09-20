@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "batch": "community-tags-v1-example",
+  "tags": [
+    {"key": "uniform", "name": "制服", "category": 1, "aliases": []},
+    {"key": "maid-outfit", "name": "女仆装", "category": 1, "aliases": ["女佣装"], "origin": "百进制正常向TAG!21", "description": "以女仆制服为主要服饰特征。", "notes": "仅为格式示例，请勿作为正式征集清单导入"}
+  ],
+  "relations": [
+    {"source": "maid-outfit", "target": "uniform", "kind": "implies"}
+  ]
+}

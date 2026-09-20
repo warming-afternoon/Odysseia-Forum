@@ -15,6 +15,8 @@ BIG_ID = "9007199254740993"
 TAG = {
     "id": BIG_ID,
     "name": "测试",
+    "description": "用于测试的标签说明",
+    "is_abyss": False,
     "source": "custom",
     "discord_sources": [],
     "category": 3,
@@ -139,6 +141,7 @@ async def test_proposal_states_and_utc(response_client, state):
         "id": BIG_ID,
         "tag_id": BIG_ID,
         "tag_name": "测试",
+        "is_abyss": False,
         "status": state,
         "reason": None if state == "pending" else "review",
         "created_at": datetime(2026, 9, 14),

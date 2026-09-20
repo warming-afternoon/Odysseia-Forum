@@ -1,5 +1,15 @@
 # 自定义标签接口与部署
 
+社区征集数据的批量导入见 [批量导入自定义 TAG](custom-tags-import.md)，支持容器内只读预检、整批事务提交和重复执行检查。
+
+### 标签含义描述
+
+`add_tag_description` 接在 `normalize_discord_tags` 后，为 `tag` 新增 `description TEXT NOT NULL DEFAULT ''`。按现有维护流程备份数据库、完成迁移后再启动新代码；降级会删除全部描述内容。
+
+创建标签可传 `description`，省略默认为空字符串。PATCH 可单独提交 `{"description":"标签的含义说明"}`，未传保持原值，`{"description":""}` 清空，显式 `null` 拒绝。描述为最多 2000 字的纯文本，清理首尾空白、保留内部换行；BOT `/tag_manage` 的 create/update 支持相同字段与校验，仍仅 BOT 管理员可操作。
+
+标签实体、标签池及继承标签公共响应的绑定快照返回 `description`，无描述返回 `""`。描述不参与搜索。DC 标签描述允许人工维护，DC 同步不覆盖；合并保留目标描述，旧描述保留在软删除源实体中，不拼接。管理审计记录描述前后值。
+
 ## 部署
 
 禁止让旧 BOT/API 与迁移同时写入；先停止服务并备份完整数据库，再运行迁移、校验并统一启动新版本。本次新增 `normalize_discord_tags`，接在已经上线的 `add_custom_tag_governance` 之后；已上线数据库直接升级，不需要删库，也不改写旧 revision。升级后旧版本代码不能继续使用该数据库。
