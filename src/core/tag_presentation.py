@@ -38,6 +38,7 @@ def tag_data(tag, sources):
     return {
         "id": str(tag.id),
         "name": tag.name,
+        "description": tag.description,
         "source": tag.source,
         "discord_sources": sources.get(tag.id, []),
         "category": tag.category,

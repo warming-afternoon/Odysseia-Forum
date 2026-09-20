@@ -1,8 +1,8 @@
-from api.v1.schemas.tags.discord_tag_source_response import DiscordTagSourceResponse
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from api.v1.schemas.tags.discord_tag_source_response import DiscordTagSourceResponse
 from shared.utc_datetime import UTCDateTime
 
 
@@ -14,6 +14,11 @@ class TagResponse(BaseModel):
 
     name: str = Field(description="标准名，不含分类前缀")
     """标准名，不含分类前缀"""
+
+    description: str = Field(
+        default="", description="标签含义的纯文本说明；未填写时为空字符串"
+    )
+    """标签含义的纯文本说明；未填写时返回空字符串"""
 
     source: Literal["discord", "custom"] = Field(
         description="来源：discord 为原生标签，custom 为自定义标签"

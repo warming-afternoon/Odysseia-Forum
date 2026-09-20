@@ -2,6 +2,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from shared.tag_description import TagDescription
+
 
 class TagCreateRequest(BaseModel):
     """创建标准标签所需的完整参数。"""
@@ -14,6 +16,11 @@ class TagCreateRequest(BaseModel):
         description="标签标准名，不含分类前缀；同名概念使用括号后缀限定上下文",
     )
     """标签标准名，不含分类前缀；同名概念使用括号后缀消歧"""
+
+    description: TagDescription = Field(
+        default="", description="标签含义的纯文本说明，最多 2000 字；空字符串表示未填写"
+    )
+    """标签含义说明；清理首尾空白、保留内部换行，默认空字符串"""
 
     category: int = Field(
         ge=1,

@@ -1,9 +1,8 @@
 from datetime import datetime
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, CheckConstraint, Index, text
+from sqlalchemy import BigInteger, CheckConstraint, Index, Text, text
 from sqlmodel import Column, Field, Relationship, SQLModel
-
 
 if TYPE_CHECKING:
     from models import Thread
@@ -45,6 +44,13 @@ class Tag(SQLModel, table=True):
     )
     """标签名称；自定义标签保存不含分类前缀的标准名"""
 
+    description: str = Field(
+        default="",
+        sa_column=Column(Text, nullable=False, server_default=""),
+        description="标签含义的纯文本说明，最多 2000 字；空字符串表示未填写",
+    )
+    """标签含义的纯文本说明；未填写时为空字符串，DC 同步不覆盖人工描述"""
+
     source: str = Field(
         default="discord",
         index=True,
@@ -76,7 +82,7 @@ class Tag(SQLModel, table=True):
     )
     """软删除时间（UTC）；为空表示未删除，恢复实体时不恢复旧绑定"""
 
-    threads: List["Thread"] = Relationship(
+    threads: list["Thread"] = Relationship(
         sa_relationship_kwargs={
             "secondary": "tag_binding",
             "primaryjoin": "and_(Tag.id == foreign(TagBinding.tag_id), Tag.deleted_at.is_(None))",

@@ -3,6 +3,8 @@ from typing import Annotated, Any, Self
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, model_validator
 from pydantic.json_schema import SkipJsonSchema
 
+from shared.tag_description import TagDescription
+
 
 def remove_null_defaults(schema: dict[str, Any]) -> None:
     """移除仅用于内部缺省占位的 null 默认值。"""
@@ -11,7 +13,7 @@ def remove_null_defaults(schema: dict[str, Any]) -> None:
 
 
 class TagUpdateRequest(BaseModel):
-    """部分更新名称、分类或启用状态，禁止空更新与显式空值。"""
+    """部分更新名称、描述、分类或启用状态，禁止空更新与显式空值。"""
 
     model_config = ConfigDict(extra="forbid", json_schema_extra=remove_null_defaults)
 
@@ -34,6 +36,12 @@ class TagUpdateRequest(BaseModel):
         description="true=启用，false=停用；未传保持原值，不允许显式 null；恢复软删除标签需使用恢复接口",
     )
     """启用或停用标签；未传保持原值，不可替代软删除恢复操作"""
+
+    description: TagDescription | SkipJsonSchema[None] = Field(
+        default=None,
+        description="标签含义的纯文本说明，最多 2000 字；未传保持原值，空字符串清空，不允许 null",
+    )
+    """新的标签含义说明；未传保持原值，空字符串清空，不允许显式 null"""
 
     @model_validator(mode="after")
     def validate_changes(self) -> Self:

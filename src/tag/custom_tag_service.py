@@ -1,5 +1,3 @@
-from core.tag_merge_service import TagMergeService
-from core.tag_presentation import load_discord_sources, tag_data
 import hashlib
 import unicodedata
 from datetime import timedelta
@@ -8,15 +6,18 @@ from sqlalchemy import func, or_, select, text
 
 from core.tag_access_service import TagAccessService
 from core.tag_data_repository import TagDataRepository
+from core.tag_merge_service import TagMergeService
+from core.tag_presentation import load_discord_sources, tag_data
 from models import Booklist, Tag, Thread
-from models.tag_binding import TagBinding
-from models.tag_vote import TagVote
 from models.operation_log import OperationLog
 from models.tag_alias import TagAlias
+from models.tag_binding import TagBinding
 from models.tag_notification_task import TagNotificationTask
 from models.tag_proposal import TagProposal
 from models.tag_proposal_block import TagProposalBlock
 from models.tag_relation import TagRelation
+from models.tag_vote import TagVote
+from shared.tag_description import normalize_tag_description
 from shared.tag_error import TagError
 from shared.tag_rules import validate_graph, validate_selection
 from shared.time_utils import utc_now
@@ -602,6 +603,7 @@ class CustomTagService:
         before = (
             {
                 "name": tag.name,
+                "description": tag.description,
                 "category": tag.category,
                 "enabled": tag.enabled,
                 "deleted": bool(tag.deleted_at),
@@ -610,6 +612,9 @@ class CustomTagService:
             else None
         )
         if action in ("create", "update"):
+            description = normalize_tag_description(
+                payload.get("description", tag.description if tag else "")
+            )
             if action == "update" and tag is None:
                 raise TagError("missing_tag", "修改必须提供标签 ID", 422)
             name = unicodedata.normalize(
@@ -655,10 +660,14 @@ class CustomTagService:
                 )
             if tag is None:
                 tag = await self.repo(Tag).add(
-                    name=name, category=category, source="custom"
+                    name=name,
+                    category=category,
+                    source="custom",
+                    description=description,
                 )
             else:
                 tag.name, tag.category = name, category
+                tag.description = description
             if "enabled" in payload:
                 if not isinstance(payload["enabled"], bool):
                     raise TagError("invalid_enabled", "启用状态必须为布尔值", 422)
@@ -741,6 +750,7 @@ class CustomTagService:
             before=before,
             after={
                 "name": tag.name,
+                "description": tag.description,
                 "category": tag.category,
                 "enabled": tag.enabled,
                 "deleted": bool(tag.deleted_at),
