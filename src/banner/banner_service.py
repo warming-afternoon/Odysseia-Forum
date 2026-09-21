@@ -323,7 +323,7 @@ class BannerService:
         available_slots = max(0, self._get_scope_capacity(channel_id) - current_count)
         promoted_count = 0
 
-        # 补位次数受范围容量约束，避免过渡期超额记录继续维持旧容量。
+        # 补位次数受范围容量约束，达到或超过容量时不再补位。
         for _ in range(available_slots):
             waitlist_item = await self.waitlist_repo.pop(channel_id)
             if waitlist_item is None:

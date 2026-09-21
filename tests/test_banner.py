@@ -604,8 +604,8 @@ class TestActiveBannerChannelFilters:
         assert "invalid" in exc_info.value.detail
 
     @pytest.mark.asyncio
-    async def test_service_batches_channels_in_request_order(self, db_session_factory):
-        """全局 Banner 置顶，多频道仍按请求顺序各返回最多五个。"""
+    async def test_service_sorts_candidates_by_global_id(self, db_session_factory):
+        """各范围保留数量上限，合并结果按全局轮播记录 ID 排序。"""
         now = datetime.now()
         channel_10_banners = [
             BannerCarousel(
@@ -656,23 +656,23 @@ class TestActiveBannerChannelFilters:
             global_only_result = await service.get_active_banners()
 
         assert [banner.thread_id for banner in result] == [
-            3000,
-            3001,
-            3002,
-            2000,
-            2001,
             1000,
             1001,
             1002,
             1003,
             1004,
-        ]
-        assert [banner.thread_id for banner in legacy_result] == [
+            2000,
+            2001,
             3000,
             3001,
             3002,
+        ]
+        assert [banner.thread_id for banner in legacy_result] == [
             2000,
             2001,
+            3000,
+            3001,
+            3002,
         ]
         assert [banner.thread_id for banner in global_only_result] == [
             3000,
@@ -681,15 +681,15 @@ class TestActiveBannerChannelFilters:
         ]
 
 
-class TestBannerCapacityTransition:
-    """单频道容量从五个平滑收敛到三个。"""
+class TestBannerCapacity:
+    """单频道容量控制与候补补位测试。"""
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ("current_count", "entered_carousel"),
         [(2, True), (3, False)],
     )
-    async def test_approval_uses_new_channel_capacity(
+    async def test_approval_uses_channel_capacity(
         self, monkeypatch, current_count, entered_carousel
     ):
         """频道少于三个时直接展示，达到三个后进入等待队列。"""
@@ -733,10 +733,10 @@ class TestBannerCapacityTransition:
         ("active_count", "promoted"),
         [(4, False), (2, True)],
     )
-    async def test_cleanup_refills_only_below_new_capacity(
+    async def test_cleanup_refills_only_below_capacity(
         self, active_count, promoted
     ):
-        """过渡期到期后先自然降容，少于三个时才补位。"""
+        """活跃数量达到容量时不补位，少于容量时才补位。"""
         session = MagicMock()
         session.commit = AsyncMock()
         service = BannerService(session)
@@ -768,10 +768,10 @@ class TestBannerCapacityTransition:
         ("active_count", "promoted"),
         [(4, False), (2, True)],
     )
-    async def test_manual_delete_refills_only_below_new_capacity(
+    async def test_manual_delete_refills_only_below_capacity(
         self, active_count, promoted
     ):
-        """人工删除沿用平滑降容，并准确报告是否发生补位。"""
+        """人工删除后按容量补位，并准确报告是否发生晋升。"""
         session = MagicMock()
         session.commit = AsyncMock()
         service = BannerService(session)

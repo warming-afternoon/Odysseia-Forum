@@ -74,7 +74,7 @@ class BannerCarouselRepository:
             for banner in grouped_banners[channel_id][:5]
         ]
 
-        # 全局 Banner 只查询一次，并始终置于频道 Banner 之前。
+        # 全局 Banner 只查询一次，并与频道候选按轮播记录 ID 合并排序。
         global_result = await self.session.execute(
             select(BannerCarousel)
             .where(and_(channel_id_col.is_(None), end_time_col > now))
@@ -83,7 +83,10 @@ class BannerCarouselRepository:
         )
         global_banners = list(global_result.scalars().all())
 
-        return global_banners + channel_banners
+        return sorted(
+            [*global_banners, *channel_banners],
+            key=lambda banner: cast(int, banner.id),
+        )
 
     async def get_count(self, channel_id: Optional[int]) -> int:
         """统计指定频道的当前有效轮播数。"""

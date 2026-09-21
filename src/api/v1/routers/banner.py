@@ -156,7 +156,7 @@ async def apply_banner(
 async def get_active_banners(
     channel_ids: list[int | str] | None = Query(
         default=None,
-        description="频道ID列表，可重复传入；优先于偏好频道。不传时使用偏好频道，偏好为空则返回全部；始终追加全局Banner",
+        description="频道ID列表，可重复传入；优先于偏好频道。不传时使用偏好频道，偏好为空则返回全部；始终合并全局Banner",
     ),
     channel_id: int | str | None = Query(
         default=None,
@@ -258,7 +258,7 @@ async def get_active_banners(
                 )
                 guild_map.update({cid: gid for cid, gid in channel_rows.all()})
 
-            # 按原轮播顺序返回，不从等待列表为偏好过滤补位。
+            # 按轮播记录 ID 顺序返回，不从等待列表为偏好过滤补位。
             return [
                 BannerItem(
                     thread_id=banner.thread_id,

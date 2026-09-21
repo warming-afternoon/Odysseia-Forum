@@ -64,10 +64,12 @@ async def test_all_channels_order_limits_and_expiry(monkeypatch):
     BannerCarousel.__table__.create(engine)
     try:
         with Session(engine) as session:
+            scope_offsets = {20: 1, 10: 2, None: 3}
             for cid in [20, 10, None]:
                 for i in range(7):
                     session.add(
                         BannerCarousel(
+                            id=i * 3 + scope_offsets[cid],
                             thread_id=(cid or 30) * 100 + i,
                             channel_id=cid,
                             title="标题",
@@ -86,16 +88,36 @@ async def test_all_channels_order_limits_and_expiry(monkeypatch):
             service = BannerService(adapter)
             result = await service.get_active_banners(all_channels=True)
             assert [b.thread_id for b in result] == [
-                *range(3000, 3003),
-                *range(1000, 1005),
-                *range(2000, 2005),
+                2000,
+                1000,
+                3000,
+                2001,
+                1001,
+                3001,
+                2002,
+                1002,
+                3002,
+                2003,
+                1003,
+                2004,
+                1004,
             ]
             assert adapter.execute.await_count == 2
             result = await service.get_active_banners(channel_ids=[20, 10, 20])
             assert [b.thread_id for b in result] == [
-                *range(3000, 3003),
-                *range(2000, 2005),
-                *range(1000, 1005),
+                2000,
+                1000,
+                3000,
+                2001,
+                1001,
+                3001,
+                2002,
+                1002,
+                3002,
+                2003,
+                1003,
+                2004,
+                1004,
             ]
             assert len(await BannerCarouselRepository(adapter).get_active()) == 3
     finally:
