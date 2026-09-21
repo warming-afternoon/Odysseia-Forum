@@ -127,7 +127,8 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 范围优先级为：显式频道参数 → 用户偏好 `preferred_channels` → 全部频道。
 显式参数覆盖偏好频道，不取交集；未传参数且偏好未设置、为空或读取失败时返回全部频道。
 指定频道或使用偏好时按其列表顺序去重返回；全部模式按频道 ID 升序返回，
-包含未配置但仍有轮播的频道。每频道最多 **5 个**，最后追加全局 Banner（最多 **3 个**）一次。
+包含未配置但仍有轮播的频道。全局 Banner（最多 **3 个**）始终置于返回列表最前，
+之后是各频道 Banner。容量为 **3 个**；
 范围内按轮播位置、记录 ID 排序。仅返回未过期轮播，不读取等待列表或历史申请。
 
 帖子型 Banner 会自动应用当前用户的反选偏好：排除作者、真实/虚拟 TAG、
@@ -215,7 +216,7 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 | 常量 | 值 | 说明 |
 |------|-----|------|
 | `GLOBAL_MAX_BANNERS` | 3 | 全局 Banner 最多同时展示数 |
-| `CHANNEL_MAX_BANNERS` | 5 | 每个频道 Banner 最多同时展示数 |
+| `CHANNEL_MAX_BANNERS` | 3 | 每个频道 Banner 最多同时展示数 |
 | `BANNER_DURATION_DAYS` | 3 | 每个 Banner 展示天数 |
 
 ### 核心方法
@@ -285,7 +286,8 @@ class ApplicationResult:
 ├──────────────────────────────────────────────────────────────┤
 │  GET /v1/banner/active → BannerService.get_active_banners()  │
 │     → 查询 banner_carousel WHERE end_time > now               │
-│     → 按请求顺序聚合（每频道最多 5 + 全局最多 3）              │
+│     → 全局最多 3 个置顶，再按请求顺序聚合频道 Banner           │
+│       （频道容量 3，过渡期最多返回 5 个旧轮播项）              │
 │     → 帖子型 Banner 应用当前用户反选偏好                       │
 └──────────────────────────────────────────────────────────────┘
                               ↓
@@ -337,7 +339,7 @@ class ApplicationResult:
 
 ### 容量控制
 - **全局最多 3 个** Banner 同时展示
-- **每个频道最多 5 个** Banner 同时展示
+- **每个频道最多 3 个** Banner 同时展示
 - 超额申请进入 `banner_waitlist` 等待队列
 
 ### 时间管理

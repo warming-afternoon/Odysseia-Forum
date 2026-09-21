@@ -35,8 +35,8 @@ class BannerService:
 
     # 全频道最多3个banner
     GLOBAL_MAX_BANNERS = 3
-    # 每个频道最多5个banner
-    CHANNEL_MAX_BANNERS = 5
+    # 每个频道最多3个banner
+    CHANNEL_MAX_BANNERS = 3
     # Banner展示时长：3天
     BANNER_DURATION_DAYS = 3
 
@@ -309,30 +309,52 @@ class BannerService:
         await self.session.refresh(application)
         return application
 
+    def _get_scope_capacity(self, channel_id: Optional[int]) -> int:
+        """获取全频道或单频道范围的轮播容量。"""
+        return (
+            self.GLOBAL_MAX_BANNERS
+            if channel_id is None
+            else self.CHANNEL_MAX_BANNERS
+        )
+
+    async def _refill_scope_to_capacity(self, channel_id: Optional[int]) -> int:
+        """在轮播存在空位时按 FIFO 从等待队列补足。"""
+        current_count = await self.carousel_repo.get_count(channel_id)
+        available_slots = max(0, self._get_scope_capacity(channel_id) - current_count)
+        promoted_count = 0
+
+        # 补位次数受范围容量约束，避免过渡期超额记录继续维持旧容量。
+        for _ in range(available_slots):
+            waitlist_item = await self.waitlist_repo.pop(channel_id)
+            if waitlist_item is None:
+                break
+            await self.carousel_repo.add(
+                thread_id=waitlist_item.thread_id,
+                channel_id=waitlist_item.channel_id,
+                cover_image_url=waitlist_item.cover_image_url,
+                title=waitlist_item.title,
+                duration_days=self.BANNER_DURATION_DAYS,
+                target_type=waitlist_item.target_type,
+            )
+            promoted_count += 1
+
+        return promoted_count
+
     async def cleanup_expired_banners(self) -> int:
         """清理过期的banner并从等待列表补充。"""
         expired = await self.carousel_repo.get_expired()
 
-        cleaned_count = 0
+        affected_channel_ids: set[int | None] = set()
         for banner in expired:
-            channel_id = banner.channel_id
             await self.carousel_repo.delete(banner)
-            cleaned_count += 1
+            affected_channel_ids.add(banner.channel_id)
 
-            # 从等待队列晋升
-            waitlist_item = await self.waitlist_repo.pop(channel_id)
-            if waitlist_item:
-                await self.carousel_repo.add(
-                    thread_id=waitlist_item.thread_id,
-                    channel_id=waitlist_item.channel_id,
-                    cover_image_url=waitlist_item.cover_image_url,
-                    title=waitlist_item.title,
-                    duration_days=self.BANNER_DURATION_DAYS,
-                    target_type=waitlist_item.target_type,
-                )
+        # 每个受影响范围只计算一次空位，再按新容量补足。
+        for channel_id in affected_channel_ids:
+            await self._refill_scope_to_capacity(channel_id)
 
         await self.session.commit()
-        return cleaned_count
+        return len(expired)
 
     async def delete_banner_by_thread(self, thread_id: int) -> DeleteBannerResult:
         """根据 thread_id 从轮播或等待列表中删除 Banner。"""
@@ -369,21 +391,8 @@ class BannerService:
             title = banner.title
             scope_label = "全频道" if channel_id is None else f"频道 {channel_id}"
 
-            has_waiting = await self.waitlist_repo.has_item(channel_id)
-
             await self.carousel_repo.delete(banner)
-
-            if has_waiting:
-                waitlist_item = await self.waitlist_repo.pop(channel_id)
-                if waitlist_item:
-                    await self.carousel_repo.add(
-                        thread_id=waitlist_item.thread_id,
-                        channel_id=waitlist_item.channel_id,
-                        cover_image_url=waitlist_item.cover_image_url,
-                        title=waitlist_item.title,
-                        duration_days=self.BANNER_DURATION_DAYS,
-                        target_type=waitlist_item.target_type,
-                    )
+            promoted_count = await self._refill_scope_to_capacity(channel_id)
 
             await self.session.commit()
 
@@ -394,7 +403,7 @@ class BannerService:
                 thread_id=thread_id,
                 banner_title=title,
                 scope_label=scope_label,
-                promoted_from_waitlist=has_waiting,
+                promoted_from_waitlist=promoted_count > 0,
             )
 
         if waitlist_items:

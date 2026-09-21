@@ -86,16 +86,16 @@ async def test_all_channels_order_limits_and_expiry(monkeypatch):
             service = BannerService(adapter)
             result = await service.get_active_banners(all_channels=True)
             assert [b.thread_id for b in result] == [
+                *range(3000, 3003),
                 *range(1000, 1005),
                 *range(2000, 2005),
-                *range(3000, 3003),
             ]
             assert adapter.execute.await_count == 2
             result = await service.get_active_banners(channel_ids=[20, 10, 20])
             assert [b.thread_id for b in result] == [
+                *range(3000, 3003),
                 *range(2000, 2005),
                 *range(1000, 1005),
-                *range(3000, 3003),
             ]
             assert len(await BannerCarouselRepository(adapter).get_active()) == 3
     finally:

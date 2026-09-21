@@ -82,7 +82,9 @@ async def test_status_uses_two_queries_and_detached_dtos(configured_count):
         ]
         assert [i.target_id for i in scopes[0].items] == [103, 102, 101, 100]
         assert scopes[0].waiting_count == 2
+        assert scopes[0].capacity == 3
         assert scopes[1].waiting_count == 1
+        assert scopes[1].capacity == 3
         assert [i.target_id for i in scopes[1].items] == [200]
         assert scopes[-2].waiting_count == 1 and not scopes[-2].items
         assert scopes[-1].waiting_count == 0
@@ -102,7 +104,7 @@ def test_status_messages_keep_all_items_and_repeat_scope():
         scopes.append(
             BannerScopeStatus(
                 cid,
-                5,
+                3,
                 cid,
                 [
                     BannerStatusItem(
@@ -119,7 +121,7 @@ def test_status_messages_keep_all_items_and_repeat_scope():
         assert "：轮播" in message.splitlines()[2]
     text = "\n".join(messages)
     for cid in range(1, 10):
-        assert f"{cid}：轮播 20/5｜已审核待展示 {cid}" in text
+        assert f"{cid}：轮播 20/3｜已审核待展示 {cid}" in text
         for i in range(20):
             assert text.count(f"ID：{cid * 100 + i}｜") == 1
     assert "长" * 30 + "..." in text
@@ -135,7 +137,7 @@ async def test_command_resolves_extra_names_and_sends_private_messages(monkeypat
     scopes = [BannerScopeStatus(None, 3, 0, [])] + [
         BannerScopeStatus(
             cid,
-            5,
+            3,
             1,
             [
                 BannerStatusItem(cid * 100 + i, 2, "短标题", now + timedelta(hours=1))

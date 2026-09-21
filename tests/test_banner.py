@@ -6,6 +6,7 @@ BannerService 自动检测 target_type。"""
 import os
 import sys
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -604,7 +605,7 @@ class TestActiveBannerChannelFilters:
 
     @pytest.mark.asyncio
     async def test_service_batches_channels_in_request_order(self, db_session_factory):
-        """多频道每频道最多五个，并在末尾追加一次全局 Banner。"""
+        """全局 Banner 置顶，多频道仍按请求顺序各返回最多五个。"""
         now = datetime.now()
         channel_10_banners = [
             BannerCarousel(
@@ -655,6 +656,9 @@ class TestActiveBannerChannelFilters:
             global_only_result = await service.get_active_banners()
 
         assert [banner.thread_id for banner in result] == [
+            3000,
+            3001,
+            3002,
             2000,
             2001,
             1000,
@@ -662,22 +666,140 @@ class TestActiveBannerChannelFilters:
             1002,
             1003,
             1004,
-            3000,
-            3001,
-            3002,
         ]
         assert [banner.thread_id for banner in legacy_result] == [
-            2000,
-            2001,
             3000,
             3001,
             3002,
+            2000,
+            2001,
         ]
         assert [banner.thread_id for banner in global_only_result] == [
             3000,
             3001,
             3002,
         ]
+
+
+class TestBannerCapacityTransition:
+    """单频道容量从五个平滑收敛到三个。"""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("current_count", "entered_carousel"),
+        [(2, True), (3, False)],
+    )
+    async def test_approval_uses_new_channel_capacity(
+        self, monkeypatch, current_count, entered_carousel
+    ):
+        """频道少于三个时直接展示，达到三个后进入等待队列。"""
+        session = MagicMock()
+        session.commit = AsyncMock()
+        session.refresh = AsyncMock()
+        service = BannerService(session)
+        application = SimpleNamespace(
+            thread_id=100,
+            target_scope="10",
+            target_type=TargetType.THREAD.value,
+            cover_image_url=None,
+            status=ApplicationStatus.PENDING.value,
+            reviewed_at=None,
+            reviewer_id=None,
+        )
+        service.app_repo.get_by_id = AsyncMock(return_value=application)
+        service.carousel_repo.get_count = AsyncMock(return_value=current_count)
+        service.carousel_repo.add = AsyncMock()
+        service.waitlist_repo.add = AsyncMock()
+        thread_repo = MagicMock()
+        thread_repo.get_thread_with_tags = AsyncMock(
+            return_value=SimpleNamespace(title="测试帖子")
+        )
+        monkeypatch.setattr(
+            "banner.banner_service.ThreadRepository", lambda _: thread_repo
+        )
+
+        _, actual_entered = await service.approve_application(1, 2)
+
+        assert actual_entered is entered_carousel
+        if entered_carousel:
+            service.carousel_repo.add.assert_awaited_once()
+            service.waitlist_repo.add.assert_not_awaited()
+        else:
+            service.carousel_repo.add.assert_not_awaited()
+            service.waitlist_repo.add.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("active_count", "promoted"),
+        [(4, False), (2, True)],
+    )
+    async def test_cleanup_refills_only_below_new_capacity(
+        self, active_count, promoted
+    ):
+        """过渡期到期后先自然降容，少于三个时才补位。"""
+        session = MagicMock()
+        session.commit = AsyncMock()
+        service = BannerService(session)
+        expired = SimpleNamespace(channel_id=10)
+        waiting = SimpleNamespace(
+            thread_id=200,
+            channel_id=10,
+            cover_image_url=None,
+            title="等待项",
+            target_type=TargetType.THREAD.value,
+        )
+        service.carousel_repo.get_expired = AsyncMock(return_value=[expired])
+        service.carousel_repo.delete = AsyncMock()
+        service.carousel_repo.get_count = AsyncMock(return_value=active_count)
+        service.carousel_repo.add = AsyncMock()
+        service.waitlist_repo.pop = AsyncMock(return_value=waiting)
+
+        assert await service.cleanup_expired_banners() == 1
+
+        if promoted:
+            service.waitlist_repo.pop.assert_awaited_once_with(10)
+            service.carousel_repo.add.assert_awaited_once()
+        else:
+            service.waitlist_repo.pop.assert_not_awaited()
+            service.carousel_repo.add.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("active_count", "promoted"),
+        [(4, False), (2, True)],
+    )
+    async def test_manual_delete_refills_only_below_new_capacity(
+        self, active_count, promoted
+    ):
+        """人工删除沿用平滑降容，并准确报告是否发生补位。"""
+        session = MagicMock()
+        session.commit = AsyncMock()
+        service = BannerService(session)
+        banner = SimpleNamespace(thread_id=100, channel_id=10, title="展示项")
+        waiting = SimpleNamespace(
+            thread_id=200,
+            channel_id=10,
+            cover_image_url=None,
+            title="等待项",
+            target_type=TargetType.THREAD.value,
+        )
+        service.carousel_repo.get_by_thread = AsyncMock(return_value=[banner])
+        service.waitlist_repo.get_by_thread = AsyncMock(return_value=[])
+        service.carousel_repo.delete = AsyncMock()
+        service.carousel_repo.get_count = AsyncMock(return_value=active_count)
+        service.carousel_repo.add = AsyncMock()
+        service.waitlist_repo.pop = AsyncMock(return_value=waiting)
+
+        result = await service.delete_banner_by_thread(100)
+
+        assert result.success is True
+        assert result.promoted_from_waitlist is promoted
+        if promoted:
+            service.waitlist_repo.pop.assert_awaited_once_with(10)
+            service.carousel_repo.add.assert_awaited_once()
+        else:
+            service.waitlist_repo.pop.assert_not_awaited()
+            service.carousel_repo.add.assert_not_awaited()
 
 
 class TestBannerPreferenceFiltering:
