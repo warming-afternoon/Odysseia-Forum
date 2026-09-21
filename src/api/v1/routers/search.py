@@ -1,4 +1,5 @@
 from shared.tag_error import TagError
+from shared.abyss_tag_visibility import can_view_abyss_tags
 from core.tag_presentation import load_discord_sources, tag_data
 from core.tag_repository import TagRepository
 from api.v1.schemas.tags.tag_response import TagResponse
@@ -99,16 +100,16 @@ async def execute_search(
 
     # [深渊区权限判断] 读取用户身份组，判断是否需要屏蔽深渊区频道
     user_roles = current_user.get("roles", []) if current_user else []
+    can_view_abyss = can_view_abyss_tags(user_roles, abyss_config)
     exclude_channel_ids: list[int] = [
         int(cid) for cid in (request.exclude_channel_ids or [])
     ]
 
     if abyss_config:
-        required_role = str(abyss_config.get("required_role_id", ""))
         abyss_channels: list[int] = abyss_config.get("channel_ids", [])
 
         # 若用户未登录，或已登录但身份组列表中不包括深渊区查看需要的身份组
-        if not user_roles or required_role not in [str(r) for r in user_roles]:
+        if not can_view_abyss:
             exclude_channel_ids.extend(abyss_channels)
 
     # 去重
@@ -288,12 +289,16 @@ async def execute_search(
             )
 
             if request.channel_ids and len(request.channel_ids) == 1:
-                scoped_tags = await TagRepository(session).get_tags_for_channels(
-                    list(searched_channel_ids)
+                tag_repository = TagRepository(session)
+                visible_cached_names = await tag_repository.filter_candidate_names(
+                    set(available_tags) - set(virtual_tags),
+                    include_abyss=can_view_abyss,
+                )
+                scoped_tags = await tag_repository.get_tags_for_channels(
+                    list(searched_channel_ids), include_abyss=can_view_abyss
                 )
                 available_tags = list(virtual_tags) + sorted(
-                    (set(available_tags) | {tag.name for tag in scoped_tags})
-                    - set(virtual_tags)
+                    visible_cached_names | {tag.name for tag in scoped_tags}
                 )
 
             if request.debug_timing:
@@ -615,6 +620,9 @@ async def get_search_suggestions(
                     exclude_authors=exclude_authors,
                     exclude_keywords=exclude_keywords,
                     exclude_tags=exclude_tags,
+                    include_abyss_tags=can_view_abyss_tags(
+                        current_user.get("roles", []), abyss_config
+                    ),
                 ),
                 timeout=SearchTimeout.SUGGESTION.value,
             )

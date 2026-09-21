@@ -364,6 +364,7 @@ class CustomTagService:
             "id": str(proposal.id),
             "tag_name": tag.name if tag else "已删除标签",
             "tag_id": str(proposal.tag_id),
+            "is_abyss": tag.is_abyss if tag else False,
             "status": proposal.status,
             "reason": proposal.reason,
             "created_at": proposal.created_at,
@@ -504,6 +505,8 @@ class CustomTagService:
     async def pool(self, actor, payload):
         """搜索标准名与别名，默认仅列出可选标签。"""
         conditions = []
+        if not payload.get("_can_view_abyss", False):
+            conditions.append(Tag.is_abyss.is_(False))
         # 按实体当前来源筛选后再分页，转换标签仍属于自定义标签。
         if source := payload.get("source"):
             conditions.append(Tag.source == source)
@@ -547,7 +550,10 @@ class CustomTagService:
 
     async def relations(self, actor, payload):
         """返回未删除标签间的直接关系，不计算传递闭包。"""
-        active = select(Tag.id).where(Tag.deleted_at.is_(None))
+        active_conditions = [Tag.deleted_at.is_(None)]
+        if not payload.get("_can_view_abyss", False):
+            active_conditions.append(Tag.is_abyss.is_(False))
+        active = select(Tag.id).where(*active_conditions)
         rows = await self.repo(TagRelation).rows(
             TagRelation.source_id.in_(active), TagRelation.target_id.in_(active)
         )
@@ -604,6 +610,7 @@ class CustomTagService:
             {
                 "name": tag.name,
                 "description": tag.description,
+                "is_abyss": tag.is_abyss,
                 "category": tag.category,
                 "enabled": tag.enabled,
                 "deleted": bool(tag.deleted_at),
@@ -615,6 +622,11 @@ class CustomTagService:
             description = normalize_tag_description(
                 payload.get("description", tag.description if tag else "")
             )
+            is_abyss = payload.get("is_abyss", tag.is_abyss if tag else False)
+            if not isinstance(is_abyss, bool):
+                raise TagError(
+                    "invalid_is_abyss", "深渊向标识必须为布尔值", 422
+                )
             if action == "update" and tag is None:
                 raise TagError("missing_tag", "修改必须提供标签 ID", 422)
             name = unicodedata.normalize(
@@ -664,10 +676,13 @@ class CustomTagService:
                     category=category,
                     source="custom",
                     description=description,
+                    is_abyss=is_abyss,
                 )
             else:
                 tag.name, tag.category = name, category
                 tag.description = description
+                if "is_abyss" in payload:
+                    tag.is_abyss = is_abyss
             if "enabled" in payload:
                 if not isinstance(payload["enabled"], bool):
                     raise TagError("invalid_enabled", "启用状态必须为布尔值", 422)
@@ -751,6 +766,7 @@ class CustomTagService:
             after={
                 "name": tag.name,
                 "description": tag.description,
+                "is_abyss": tag.is_abyss,
                 "category": tag.category,
                 "enabled": tag.enabled,
                 "deleted": bool(tag.deleted_at),

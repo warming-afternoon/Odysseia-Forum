@@ -23,6 +23,7 @@ from dto.events.tag_command import TagCommand
 from shared.enum.tag_category import TagCategory
 from shared.tag_error import TagError
 from shared.request_id import PositiveRequestId, RequestId
+from shared.abyss_tag_visibility import can_view_abyss_tags
 
 from shared.event_mediator import EventMediator
 
@@ -41,6 +42,7 @@ channel_mappings_config: Dict[int, List[Dict]] = {}
 async_session_factory: async_sessionmaker | None = None
 cache_service_instance: Optional[CacheService] = None
 event_mediator: EventMediator | None = None
+abyss_config: dict[str, Any] = {}
 Target = Literal["thread", "booklist"]
 
 router = APIRouter(prefix="/tags", tags=["标签"], dependencies=[Depends(require_auth)])
@@ -70,7 +72,12 @@ async def stats_tags(
                 cache_service=cache_service_instance,
                 channel_mappings=channel_mappings_config,
             )
-            return await tag_service.aggregate_tag_stats(request)
+            return await tag_service.aggregate_tag_stats(
+                request,
+                can_view_abyss=can_view_abyss_tags(
+                    current_user.get("roles", []), abyss_config
+                ),
+            )
 
     except Exception as e:
         logger.error(f"执行标签聚合查询时出错: {e}", exc_info=True)
@@ -141,6 +148,7 @@ async def pool(
         selectable=selectable,
         include_deleted=include_deleted,
         offset=offset,
+        _can_view_abyss=can_view_abyss_tags(user.get("roles", []), abyss_config),
     )
 
 
@@ -149,7 +157,11 @@ async def pool(
 )
 async def relations(user=Depends(require_auth)):
     """提供全部直接关系边，层级由前端计算。"""
-    return await dispatch("relations", user)
+    return await dispatch(
+        "relations",
+        user,
+        _can_view_abyss=can_view_abyss_tags(user.get("roles", []), abyss_config),
+    )
 
 
 @router.post(

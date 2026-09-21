@@ -9,6 +9,7 @@ from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.preferences_repository import PreferencesRepository
+from core.tag_repository import TagRepository
 from dto import ThreadDTO
 from search.dto.search_state import SearchStateDTO
 from search.dto.separated_tags import SeparatedTagsDTO
@@ -26,6 +27,7 @@ from search.views import (
 )
 from shared.enum import SearchConfigDefaultsInt, SearchConfigType
 from shared.safe_defer import safe_defer
+from shared.abyss_tag_visibility import can_discord_user_view_abyss_tags
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -107,7 +109,18 @@ class Search(commands.Cog):
             )
             return int(SearchConfigDefaultsInt.MAIN_GUILD_ID.value)
 
-    def get_merged_tags_separated(self, channel_ids: list[int]) -> SeparatedTagsDTO:
+    def can_view_abyss_tags(self, user_id: int) -> bool:
+        """按主服务器身份组判断 BOT 候选中的深渊向 TAG 可见性。"""
+        return can_discord_user_view_abyss_tags(
+            self.bot,
+            user_id,
+            self._get_main_guild_id_from_config(),
+            self.config.get("abyss", {}),
+        )
+
+    async def get_merged_tags_separated(
+        self, channel_ids: list[int], *, include_abyss: bool
+    ) -> SeparatedTagsDTO:
         """获取分离的虚拟标签和所有可用标签，确保虚拟标签排在最前"""
         real_tags_set = set()
         virtual_tags_set = set()
@@ -117,7 +130,13 @@ class Search(commands.Cog):
             for mappings in self.channel_mappings_utils.channel_mappings.values():
                 for mapping in mappings:
                     virtual_tags_set.add(mapping["tag_name"])
-            real_tags_set = set(self.tag_service.get_global_merged_tags())
+            async with self.session_factory() as session:
+                tags = await TagRepository(
+                    session
+                ).get_all_unique_tags_from_indexed_threads(
+                    source="discord", include_abyss=include_abyss
+                )
+            real_tags_set = {tag.name for tag in tags}
         else:
             # 特定频道搜索：获取指定频道的虚拟标签和真实标签
             for channel_id in channel_ids:
@@ -130,6 +149,11 @@ class Search(commands.Cog):
                 )
                 for mapping in mappings:
                     virtual_tags_set.add(mapping["tag_name"])
+
+            async with self.session_factory() as session:
+                real_tags_set = await TagRepository(session).filter_candidate_names(
+                    real_tags_set, include_abyss=include_abyss
+                )
 
         # 分别排序，然后确保虚拟标签在前
         sorted_virtual = sorted(list(virtual_tags_set))
@@ -479,11 +503,20 @@ class Search(commands.Cog):
                 await safe_defer(interaction, ephemeral=True)
             await interaction.followup.send("❌ 启动收藏搜索失败。", ephemeral=True)
 
-    async def get_tags_for_author(self, author_id: int):
+    async def get_tags_for_author(
+        self, author_id: int, *, include_abyss: bool = True
+    ):
         """获取给定作者使用过的全部标签"""
         async with self.session_factory() as session:
             repo = SearchService(session, self.tag_service)
-            return await repo.get_tags_for_author(author_id)
+            return await repo.get_tags_for_author(
+                author_id, include_abyss=include_abyss
+            )
+
+    async def get_custom_tag_names(self, names: set[str]) -> set[str]:
+        """识别搜索状态中需静默保留的自定义 TAG 名称。"""
+        async with self.session_factory() as session:
+            return await TagRepository(session).custom_names(names)
 
     async def get_indexed_channel_ids(self) -> Sequence[int]:
         """获取索引过的频道id列表"""

@@ -29,6 +29,9 @@ class SearchStateDTO(BaseModel):
     virtual_tags: List[str] = []
     """所选频道映射生成的虚拟标签列表"""
 
+    can_view_abyss_tags: bool = False
+    """当前交互用户是否可在候选列表中看到深渊向 TAG"""
+
     keywords: str = ""
     """搜索包含的关键词文本"""
 

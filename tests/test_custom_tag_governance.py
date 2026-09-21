@@ -142,6 +142,43 @@ async def test_internal_id_and_alias_lifecycle(setup_tags):
 
 
 @pytest.mark.asyncio
+async def test_abyss_pool_relations_and_bound_snapshot(setup_tags):
+    """候选和关系按身份隐藏，既有绑定与方向切换不受影响。"""
+    _, _, call = setup_tags
+    normal = await create(call, name="正常")
+    abyss = await create(call, name="深渊", is_abyss=True)
+    await call(
+        "manage",
+        99,
+        operation="add_relation",
+        tag_id=normal["id"],
+        target_tag_id=abyss["id"],
+        kind="implies",
+    )
+
+    assert {item["name"] for item in await call("pool")} == {"正常"}
+    assert await call("relations") == []
+    visible = await call("pool", _can_view_abyss=True)
+    assert {item["name"] for item in visible} == {"正常", "深渊"}
+    assert len(await call("relations", _can_view_abyss=True)) == 1
+
+    result = await attach(call, [abyss["id"]])
+    assert result["tags"][0]["is_abyss"] is True
+    binding_id = result["tags"][0]["binding_id"]
+    updated = await call(
+        "manage",
+        99,
+        operation="update",
+        tag_id=abyss["id"],
+        is_abyss=False,
+    )
+    assert updated["is_abyss"] is False
+    after = await call("read", target_type="thread", target_id=100)
+    assert after["tags"][0]["binding_id"] == binding_id
+    assert after["tags"][0]["is_abyss"] is False
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("kind,tid", [("thread", 100), ("booklist", 1)])
 async def test_votes_rounds_and_proposal_block(setup_tags, kind, tid):
     """验证所有来源标签净负六票下标、重挂清票及永久重提限制。"""

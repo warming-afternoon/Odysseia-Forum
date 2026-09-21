@@ -31,7 +31,9 @@ class AuthorSearchStrategy(SearchStrategy):
         self, cog: "Search", state: "SearchStateDTO"
     ) -> List[str]:
         """从数据库获取该作者使用过的所有标签"""
-        tags = await cog.get_tags_for_author(self.author_id)
+        tags = await cog.get_tags_for_author(
+            self.author_id, include_abyss=state.can_view_abyss_tags
+        )
         return sorted([tag.name for tag in tags])
 
     def modify_query(self, query: "ThreadSearchQuery") -> "ThreadSearchQuery":

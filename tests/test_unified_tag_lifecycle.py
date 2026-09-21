@@ -222,6 +222,38 @@ async def test_suggestions_name_search_statistics_and_cleanup(setup_tags):
 
 
 @pytest.mark.asyncio
+async def test_abyss_suggestions_and_statistics_visibility(setup_tags):
+    """深渊向 TAG 仅在授权的发现型联想和统计中出现。"""
+    factory, _, call = setup_tags
+    abyss = await create(
+        call, name="深渊候选", aliases=["AbyssAlias"], is_abyss=True
+    )
+    await attach(call, [abyss["id"]])
+    async with factory() as session:
+        hidden = await SuggestionService(session).get_suggestions("AbyssAlias")
+        visible = await SuggestionService(session).get_suggestions(
+            "AbyssAlias", include_abyss_tags=True
+        )
+        assert hidden.tags == []
+        assert [tag.name for tag in visible.tags] == ["深渊候选"]
+
+        cache = SimpleNamespace(
+            indexed_channels={}, bot=SimpleNamespace(get_channel=lambda _: None)
+        )
+        hidden_stats = await TagStatisticsService(
+            session, cache, {}
+        ).aggregate_tag_stats(TagStatsRequest(include_virtual=False))
+        visible_stats = await TagStatisticsService(
+            session, cache, {}
+        ).aggregate_tag_stats(
+            TagStatsRequest(include_virtual=False), can_view_abyss=True
+        )
+        assert hidden_stats.items == []
+        assert len(visible_stats.items) == 1
+        assert visible_stats.items[0].is_abyss is True
+
+
+@pytest.mark.asyncio
 async def test_failed_fetch_is_not_deletion_and_message_routes(setup_tags):
     """读取失败不发布删除事件，作者私信链接直达详情。"""
     from core.sync_service import SyncService

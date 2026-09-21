@@ -1,8 +1,29 @@
 # 自定义标签接口与部署
 
+
+社区征集数据的批量导入见 [批量导入自定义 TAG](custom-tags-import.md)，支持容器内只读预检、整批事务提交和重复执行检查。
+
+### 深渊向标签
+
+`add_abyss_tag_flag` 接在 `add_tag_description` 后，为统一 `tag` 表新增 `is_abyss BOOLEAN NOT NULL DEFAULT FALSE`。该字段同时适用于 DC 与自定义概念，但 DC 同步不会根据频道自动修改；BOT 管理员可在创建或更新标签时显式维护。
+
+`is_abyss` 只控制候选发现，不改变既有绑定：无 `abyss.required_role_id` 的用户不会在标签池、关系、统计、搜索建议和搜索可用标签中看到深渊向实体，但帖子、书单、通知、搜索结果及目标标签快照仍按事实返回已绑定标签。已知名称或内部 ID 仍可用于筛选。作者审核、管理审计和 BOT 管理写入沿用各自原权限，不额外要求深渊身份组。
+
+所有标签实体响应及本地绑定响应返回 `is_abyss`。创建请求省略时默认为 `false`；PATCH 未传保持原值，显式 `null` 拒绝。切换方向不结束绑定或申请；合并方向不同的同名标签时沿用目标标签方向。
+
+Discord BOT 的全局搜索和搜索偏好下拉候选只列虚拟标签与有效 DC 标签，不列自定义标签；频道搜索仍使用频道原生标签。作者和收藏搜索继续按实际绑定提供候选。已保存的自定义标签偏好虽不作为全局/偏好下拉选项，仍显示为已选条件、继续参与查询，并在编辑其他选项时保留。结果页继续显示全部已绑定标签。
+
+### 标签含义描述
+
+`add_tag_description` 接在 `normalize_discord_tags` 后，为 `tag` 新增 `description TEXT NOT NULL DEFAULT ''`；其后再执行 `add_abyss_tag_flag`。按现有维护流程备份数据库、完成迁移后再启动新代码；相应降级会删除新增字段内容。
+
+创建标签可传 `description`，省略默认为空字符串。PATCH 可单独提交 `{"description":"标签的含义说明"}`，未传保持原值，`{"description":""}` 清空，显式 `null` 拒绝。描述为最多 2000 字的纯文本，清理首尾空白、保留内部换行；BOT `/tag_manage` 的 create/update 支持相同字段与校验，仍仅 BOT 管理员可操作。
+
+标签实体、标签池及继承标签公共响应的绑定快照返回 `description`，无描述返回 `""`。描述不参与搜索。DC 标签描述允许人工维护，DC 同步不覆盖；合并保留目标描述，旧描述保留在软删除源实体中，不拼接。管理审计记录描述前后值。
+
 ## 部署
 
-禁止让旧 BOT/API 与迁移同时写入；先停止服务并备份完整数据库，再运行迁移、校验并统一启动新版本。本次新增 `normalize_discord_tags`，接在已经上线的 `add_custom_tag_governance` 之后；已上线数据库直接升级，不需要删库，也不改写旧 revision。升级后旧版本代码不能继续使用该数据库。
+禁止让旧 BOT/API 与迁移同时写入；先停止服务并备份完整数据库，再运行迁移、校验并统一启动新版本。当前迁移链为 `add_custom_tag_governance` → `normalize_discord_tags` → `add_tag_description` → `add_abyss_tag_flag`；已上线数据库直接升级，不需要删库，也不改写旧 revision。升级后旧版本代码不能继续使用该数据库。
 
 首次统一绑定迁移 `add_custom_tag_governance` 保留原始 `thread_tag_link`（含旧票数）作为只读操作备份，清空旧投票并建立轮次投票表。本次归一迁移继续原样保留备份表和所有已有轮次投票，不再清空票数；被合并的旧轮次结束，目标已有轮次保留，新建轮次从零票开始。最终不创建 `custom_tag_binding`、`custom_tag_vote`。备份表不含上线后的变更，不能代替完整回滚备份。
 
@@ -12,7 +33,7 @@
 
 | 表 | 职责及主要字段 |
 | --- | --- |
-| `tag` | 标准概念：`id`、`name`、`source`、`category`、`enabled`、`deleted_at`；`originated_from_discord` 标记是否允许转换后暂时未分类 |
+| `tag` | 标准概念：`id`、`name`、`source`、`category`、`is_abyss`、`enabled`、`deleted_at`；`originated_from_discord` 标记是否允许转换后暂时未分类 |
 | `discord_tag_source` | DC 身份映射：BIGINT `id`、唯一 `discord_tag_id`、`channel_id`、标准 `tag_id`、原始 `name`、`synced_at`、`deleted_at` |
 | `discord_tag_sync_state` | 完整频道快照检查点：`channel_id`、`observed_at`，空标签列表也更新，拒绝较旧事件覆盖 |
 | `tag_binding` | 一轮绑定：BIGINT `id`、目标类型及内部 ID、标准 `tag_id`、`binding_source`、可空 `discord_source_id`、操作者、起止时间、结束原因及汇总票数 |

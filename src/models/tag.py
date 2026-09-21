@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, CheckConstraint, Index, Text, text
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Index, Text, false, text
 from sqlmodel import Column, Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
@@ -50,6 +50,17 @@ class Tag(SQLModel, table=True):
         description="标签含义的纯文本说明，最多 2000 字；空字符串表示未填写",
     )
     """标签含义的纯文本说明；未填写时为空字符串，DC 同步不覆盖人工描述"""
+
+    is_abyss: bool = Field(
+        default=False,
+        sa_column=Column(
+            Boolean,
+            nullable=False,
+            server_default=false(),
+        ),
+        description="是否为深渊向 TAG；仅控制候选发现可见性，不改变既有绑定展示",
+    )
+    """深渊向标识；已有绑定仍随内容正常展示"""
 
     source: str = Field(
         default="discord",

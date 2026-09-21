@@ -57,6 +57,42 @@ async def test_source_swap_and_raw_name_preservation(setup_tags):
 
 
 @pytest.mark.asyncio
+async def test_discord_tag_can_be_marked_abyss_without_sync_overwrite(setup_tags):
+    """DC 概念可手工切换方向，后续频道同步不会按频道自动覆盖。"""
+    factory, _, call = setup_tags
+    await sync(factory, 20, {11: "原生深渊"})
+    concept = (await call("pool", source="discord"))[0]
+
+    updated = await call(
+        "manage",
+        99,
+        operation="update",
+        tag_id=concept["id"],
+        is_abyss=True,
+    )
+    assert updated["source"] == "discord"
+    assert updated["is_abyss"] is True
+    assert await call("pool", source="discord") == []
+    assert (await call("pool", source="discord", _can_view_abyss=True))[0][
+        "is_abyss"
+    ] is True
+
+    await sync(factory, 20, {11: "原生深渊"})
+    async with factory() as session:
+        tag = (await session.execute(select(Tag))).scalar_one()
+        assert tag.is_abyss is True
+        log = (
+            await session.execute(
+                select(OperationLog)
+                .where(OperationLog.type == "tag.pool.update")
+                .order_by(OperationLog.id.desc())
+            )
+        ).scalars().first()
+        assert log.detail["before"]["is_abyss"] is False
+        assert log.detail["after"]["is_abyss"] is True
+
+
+@pytest.mark.asyncio
 async def test_normalized_http_snapshot_and_merge(setup_tags, monkeypatch):
     """真实事件链路的 HTTP 响应区分绑定权限，旧合并 ID 返回刷新错误。"""
     import httpx
@@ -66,7 +102,7 @@ async def test_normalized_http_snapshot_and_merge(setup_tags, monkeypatch):
     from tag.tag_runtime import create_tag_mediator
 
     factory, config, call = setup_tags
-    custom = await create(call, name="统一")
+    custom = await create(call, name="统一", is_abyss=True)
     await sync(factory, 20, {9007199254740993: "统一"})
     await sync(factory, 30, {9007199254740994: "统一"})
     concept = (await call("pool", source="discord"))[0]
@@ -93,11 +129,14 @@ async def test_normalized_http_snapshot_and_merge(setup_tags, monkeypatch):
             params={"target_tag_id": concept["id"]},
         )
         assert preview.status_code == 200
+        assert preview.json()["source_is_abyss"] is True
+        assert preview.json()["target_is_abyss"] is False
         response = await client.post(
             f"/v1/tags/{custom['id']}/merge",
             json={"target_tag_id": concept["id"], "version": preview.json()["version"]},
         )
         assert response.status_code == 200 and response.json()["id"] == concept["id"]
+        assert response.json()["is_abyss"] is False
         old = await client.post(f"/v1/tags/{custom['id']}/restore")
         assert old.status_code == 409 and old.json()["detail"]["code"] == "tags_changed"
 

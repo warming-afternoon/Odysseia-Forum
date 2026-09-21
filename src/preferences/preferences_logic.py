@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from core.cache_service import CacheService
 from core.tag_cache_service import TagCacheService
 from core.preferences_repository import PreferencesRepository
+from core.tag_repository import TagRepository
 from preferences.views.channel_preferences_view import ChannelPreferencesView
 from preferences.views.tag_preferences_view import TagPreferencesView
 from dto.preferences import UserSearchPreferencesDTO
@@ -17,6 +18,7 @@ from shared.safe_defer import safe_defer
 from shared.utils import process_string_to_set
 from shared.enum import SearchConfigDefaultsInt
 from shared.redis_client import RedisManager
+from shared.abyss_tag_visibility import can_discord_user_view_abyss_tags
 
 if TYPE_CHECKING:
     from preferences.views.preferences_view import PreferencesView
@@ -266,8 +268,16 @@ class PreferencesLogic:
                     session, redis_client=RedisManager.get_client()
                 )
 
-                # 获取所有可用标签
-                all_tags = self.tag_service.get_unique_tag_names()
+                # 偏好候选仅展示原生 TAG，已有自定义偏好仍由视图状态保留。
+                include_abyss = can_discord_user_view_abyss_tags(
+                    self.bot,
+                    interaction.user.id,
+                    self.main_guild_id,
+                    self.config.get("abyss", {}),
+                )
+                all_tags = await TagRepository(session).get_candidate_names(
+                    source="discord", include_abyss=include_abyss
+                )
 
                 # 获取用户当前偏好
                 prefs_dto = await repo.get_user_preferences(

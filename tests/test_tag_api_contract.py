@@ -104,6 +104,7 @@ async def test_http_path_and_body_ids_are_normalized(monkeypatch):
             "id": str(BIG_ID),
             "tag_id": str(BIG_ID),
             "tag_name": "测试",
+            "is_abyss": False,
             "status": "pending",
             "reason": None,
             "created_at": "2026-09-14T00:00:00Z",
@@ -125,6 +126,7 @@ async def test_http_path_and_body_ids_are_normalized(monkeypatch):
         dispatch.return_value = {
             "id": str(BIG_ID),
             "name": "测试",
+            "is_abyss": False,
             "source": "custom",
             "discord_sources": [],
             "category": 3,
@@ -160,12 +162,18 @@ def test_update_schema_matches_validation():
         {"name": None},
         {"category": None},
         {"enabled": None},
+        {"is_abyss": None},
         {"name": ""},
         {"category": 8},
     ]:
         with pytest.raises(ValidationError):
             TagUpdateRequest.model_validate(payload)
-    for payload in [{"name": "爱丽丝"}, {"category": 3}, {"enabled": False}]:
+    for payload in [
+        {"name": "爱丽丝"},
+        {"category": 3},
+        {"enabled": False},
+        {"is_abyss": True},
+    ]:
         assert (
             TagUpdateRequest.model_validate(payload).model_dump(exclude_unset=True)
             == payload
@@ -177,7 +185,12 @@ async def test_custom_tags_are_assembled_as_typed_models():
     """批量装配生成共享 DTO，响应序列化保留完整字符串 ID。"""
     binding = SimpleNamespace(id=BIG_ID + 1, target_id=BIG_ID, upvotes=3, downvotes=1)
     tag = SimpleNamespace(
-        id=BIG_ID, name="爱丽丝(BA)", category=3, enabled=False, source="custom"
+        id=BIG_ID,
+        name="爱丽丝(BA)",
+        is_abyss=True,
+        category=3,
+        enabled=False,
+        source="custom",
     )
     session = SimpleNamespace(
         execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [(binding, tag)]))
@@ -189,6 +202,7 @@ async def test_custom_tags_are_assembled_as_typed_models():
     assert data == {
         "id": str(BIG_ID),
         "name": "爱丽丝(BA)",
+        "is_abyss": True,
         "category": 3,
         "category_name": "角色",
         "source": "custom",

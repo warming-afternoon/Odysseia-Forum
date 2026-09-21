@@ -24,6 +24,7 @@ class SuggestionService:
         exclude_authors: Optional[List[int]] = None,
         exclude_keywords: Optional[str] = None,
         exclude_tags: Optional[List[str]] = None,
+        include_abyss_tags: bool = False,
     ) -> SuggestionResultDTO:
         keyword = keyword.strip()
         if not keyword:
@@ -121,6 +122,8 @@ class SuggestionService:
                 Tag.id.in_(select(TagAlias.tag_id).where(TagAlias.name.ilike(pattern))),
             ),
         )
+        if not include_abyss_tags:
+            tag_stmt = tag_stmt.where(Tag.is_abyss.is_(False))
         tag_res = await self.session.execute(
             tag_stmt.order_by(Tag.name, Tag.category, Tag.id).limit(limit)
         )

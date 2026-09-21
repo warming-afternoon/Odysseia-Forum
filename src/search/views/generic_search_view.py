@@ -52,6 +52,11 @@ class GenericSearchView(discord.ui.View):
             send_new_ephemeral (bool): 如果为 True，则发送一个新的私密消息，而不是编辑原始消息
         """
 
+        # 使用主服务器身份组刷新当前用户的深渊向候选权限。
+        self.search_state.can_view_abyss_tags = self.cog.can_view_abyss_tags(
+            self.last_interaction.user.id
+        )
+
         # 填充可用的标签列表
         self.search_state.all_available_tags = await self.strategy.get_available_tags(
             self.cog, self.search_state

@@ -20,6 +20,11 @@ class TagResponse(BaseModel):
     )
     """标签含义的纯文本说明；未填写时返回空字符串"""
 
+    is_abyss: bool = Field(
+        description="是否为深渊向 TAG；该标识不改变既有绑定的展示"
+    )
+    """是否为深渊向 TAG"""
+
     source: Literal["discord", "custom"] = Field(
         description="来源：discord 为原生标签，custom 为自定义标签"
     )

@@ -12,6 +12,60 @@ from test_custom_tag_governance import setup_tags  # noqa: F401
 
 
 @pytest.mark.asyncio
+async def test_abyss_flag_migration_defaults_backfills_and_downgrades(setup_tags):
+    """迁移为新旧 TAG 写入 false 默认值，并可安全降级移除字段。"""
+    factory, _, _ = setup_tags
+    schema = "test_abyss_flag_migration_" + uuid4().hex
+    path = Path(__file__).parents[1] / "alembic/versions/add_abyss_tag_flag.py"
+    spec = importlib.util.spec_from_file_location("abyss_flag_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    async with factory() as session, session.begin():
+        await session.execute(text(f'CREATE SCHEMA "{schema}"'))
+        await session.execute(text(f'SET LOCAL search_path TO "{schema}"'))
+        await session.execute(
+            text("CREATE TABLE tag (id BIGINT PRIMARY KEY, name VARCHAR NOT NULL)")
+        )
+        await session.execute(text("INSERT INTO tag VALUES (1, '旧标签')"))
+        connection = await session.connection()
+
+        def upgrade(conn):
+            """在隔离 schema 内执行升级。"""
+            with Operations.context(MigrationContext.configure(conn)):
+                migration.upgrade()
+
+        def downgrade(conn):
+            """在隔离 schema 内执行降级。"""
+            with Operations.context(MigrationContext.configure(conn)):
+                migration.downgrade()
+
+        await connection.run_sync(upgrade)
+        await session.execute(text("INSERT INTO tag (id, name) VALUES (2, '新标签')"))
+        assert (
+            await session.execute(text("SELECT id, is_abyss FROM tag ORDER BY id"))
+        ).all() == [(1, False), (2, False)]
+
+        await session.execute(text("UPDATE tag SET is_abyss = true WHERE id = 2"))
+        assert (
+            await session.execute(text("SELECT is_abyss FROM tag WHERE id = 2"))
+        ).scalar_one() is True
+
+        await connection.run_sync(downgrade)
+        assert (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM information_schema.columns "
+                    "WHERE table_schema=:schema AND table_name='tag' "
+                    "AND column_name='is_abyss'"
+                ),
+                {"schema": schema},
+            )
+        ).scalar_one() == 0
+        await session.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("conflict", [False, True])
 async def test_incremental_normalization_preserves_history(setup_tags, conflict):
     """增量迁移保留票和原始审计，冲突时整个归一事务可回滚。"""
