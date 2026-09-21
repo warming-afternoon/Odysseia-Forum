@@ -107,6 +107,8 @@ class TagMergeService:
             "target_tag_id": str(target_id),
             "source_name": source.name,
             "target_name": target.name,
+            "source_is_abyss": source.is_abyss,
+            "target_is_abyss": target.is_abyss,
             "version": version,
             "can_merge": not conflicts,
             "conflicts": sorted(set(conflicts)),

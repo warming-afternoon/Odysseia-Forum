@@ -37,6 +37,12 @@ class TagUpdateRequest(BaseModel):
     )
     """启用或停用标签；未传保持原值，不可替代软删除恢复操作"""
 
+    is_abyss: StrictBool | SkipJsonSchema[None] = Field(
+        default=None,
+        description="是否为深渊向 TAG；未传保持原值，不允许显式 null",
+    )
+    """深渊向标识；修改时不改变已有绑定"""
+
     description: TagDescription | SkipJsonSchema[None] = Field(
         default=None,
         description="标签含义的纯文本说明，最多 2000 字；未传保持原值，空字符串清空，不允许 null",

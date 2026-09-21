@@ -12,6 +12,9 @@ class CustomTagBindingResponse(BaseModel):
     name: str = Field(description="标签标准名，不含分类前缀")
     """标签标准名"""
 
+    is_abyss: bool = Field(description="是否为深渊向 TAG；既有绑定仍正常展示")
+    """是否为深渊向 TAG"""
+
     category: int | None = Field(
         description="分类枚举：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法"
     )

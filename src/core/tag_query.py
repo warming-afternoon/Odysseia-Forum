@@ -138,6 +138,7 @@ async def load_custom_tags(
             CustomTagBindingResponse(
                 id=str(tag.id),
                 name=tag.name,
+                is_abyss=getattr(tag, "is_abyss", False),
                 category=tag.category,
                 category_name=TagCategory(tag.category).name if tag.category else None,
                 source=tag.source,

@@ -1,6 +1,6 @@
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StringConstraints
 
 from shared.tag_description import TagDescription
 
@@ -28,6 +28,11 @@ class TagCreateRequest(BaseModel):
         description="分类枚举：1=癖好，2=作品，3=角色，4=特质，5=情节，6=背景，7=玩法",
     )
     """分类整数值：癖好、作品、角色、特质、情节、背景、玩法依次为 1 至 7"""
+
+    is_abyss: StrictBool = Field(
+        default=False, description="是否为深渊向 TAG；默认创建为正常向"
+    )
+    """是否为深渊向 TAG"""
 
     aliases: list[
         Annotated[

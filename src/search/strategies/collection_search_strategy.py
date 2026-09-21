@@ -37,7 +37,9 @@ class CollectionSearchStrategy(SearchStrategy):
     ) -> List[str]:
         async with cog.session_factory() as session:
             service = SearchService(session, cog.tag_service)
-            tags = await service.get_tags_for_collections(self.user_id)
+            tags = await service.get_tags_for_collections(
+                self.user_id, include_abyss=state.can_view_abyss_tags
+            )
         # 使用 set 去除重复的标签名，然后排序
         return sorted(list(set(tag.name for tag in tags)))
 

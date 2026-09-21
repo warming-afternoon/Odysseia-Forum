@@ -1,6 +1,6 @@
 from core.discord_tag_source_repository import DiscordTagSourceRepository
 import logging
-from typing import List, Sequence, cast
+from typing import Iterable, List, Sequence, cast
 
 from sqlalchemy import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,7 +34,9 @@ class TagRepository:
         )
         return list(result.scalars())
 
-    async def get_tags_for_channels(self, channel_ids: List[int]) -> Sequence[Tag]:
+    async def get_tags_for_channels(
+        self, channel_ids: List[int], *, include_abyss: bool = True
+    ) -> Sequence[Tag]:
         """获取指定频道列表内的所有唯一标签"""
         statement = (
             select(Tag)
@@ -42,6 +44,8 @@ class TagRepository:
             .where(cast(ColumnElement, Thread.channel_id).in_(channel_ids))
             .distinct()
         )
+        if not include_abyss:
+            statement = statement.where(Tag.is_abyss.is_(False))
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -51,11 +55,68 @@ class TagRepository:
         result = await self.session.execute(statement)
         return result.scalars().all()
 
-    async def get_all_unique_tags_from_indexed_threads(self) -> Sequence[Tag]:
+    async def get_all_unique_tags_from_indexed_threads(
+        self, *, source: str | None = None, include_abyss: bool = True
+    ) -> Sequence[Tag]:
         """获取所有已索引帖子中的唯一标签"""
         statement = select(Tag).join(Thread, Tag.threads).distinct()  # type: ignore
+        statement = statement.where(
+            Tag.deleted_at.is_(None), Tag.enabled.is_(True)
+        )
+        if source is not None:
+            statement = statement.where(Tag.source == source)
+        if not include_abyss:
+            statement = statement.where(Tag.is_abyss.is_(False))
         result = await self.session.execute(statement)
         return result.scalars().all()
+
+    async def get_candidate_names(
+        self, *, source: str, include_abyss: bool
+    ) -> list[str]:
+        """读取指定来源的有效候选名称。"""
+        statement = select(Tag.name).where(
+            Tag.source == source,
+            Tag.deleted_at.is_(None),
+            Tag.enabled.is_(True),
+        )
+        if not include_abyss:
+            statement = statement.where(Tag.is_abyss.is_(False))
+        return sorted(set((await self.session.execute(statement)).scalars()))
+
+    async def filter_candidate_names(
+        self, names: Iterable[str], *, include_abyss: bool
+    ) -> set[str]:
+        """隐藏仅对应深渊实体的已知名称，同时保留虚拟或未知名称。"""
+        names = set(names)
+        if include_abyss or not names:
+            return names
+        rows = (
+            await self.session.execute(
+                select(Tag.name, Tag.is_abyss).where(
+                    Tag.name.in_(names), Tag.deleted_at.is_(None)
+                )
+            )
+        ).all()
+        known = {name for name, _ in rows}
+        visible = {name for name, is_abyss in rows if not is_abyss}
+        return (names - known) | visible
+
+    async def custom_names(self, names: Iterable[str]) -> set[str]:
+        """返回输入中至少对应一个有效自定义实体的名称。"""
+        names = set(names)
+        if not names:
+            return set()
+        return set(
+            (
+                await self.session.execute(
+                    select(Tag.name).where(
+                        Tag.name.in_(names),
+                        Tag.source == "custom",
+                        Tag.deleted_at.is_(None),
+                    )
+                )
+            ).scalars()
+        )
 
     async def update_tag_name(self, tag_id: int, new_name: str):
         """更新指定ID的标签的名称。"""

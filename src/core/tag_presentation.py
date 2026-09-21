@@ -39,6 +39,7 @@ def tag_data(tag, sources):
         "id": str(tag.id),
         "name": tag.name,
         "description": tag.description,
+        "is_abyss": getattr(tag, "is_abyss", False),
         "source": tag.source,
         "discord_sources": sources.get(tag.id, []),
         "category": tag.category,

@@ -62,7 +62,9 @@ class TagStatisticsService:
 
         return 0, "未知服务器", "未知频道", None, None
 
-    async def aggregate_tag_stats(self, request: TagStatsRequest) -> TagStatsResponse:
+    async def aggregate_tag_stats(
+        self, request: TagStatsRequest, *, can_view_abyss: bool = False
+    ) -> TagStatsResponse:
         """聚合计算标签统计信息"""
         # 先确定请求中的目标频道范围
         requested_channels = set(request.channel_ids) if request.channel_ids else None
@@ -82,14 +84,14 @@ class TagStatisticsService:
 
         # 批量查询真实标签在各频道下的聚合结果
         real_tag_rows = await self._get_real_tag_rows(
-            request.guild_id, scoped_channel_ids
+            request.guild_id, scoped_channel_ids, can_view_abyss=can_view_abyss
         )
 
         tag_buckets = defaultdict(lambda: {"total": 0, "channels": [], "ids": set()})
-        for name, source, category, channel_id, count, ids in real_tag_rows:
+        for name, source, category, is_abyss, channel_id, count, ids in real_tag_rows:
             if requested_channels is not None and channel_id not in requested_channels:
                 continue
-            key = (min(ids), source, category, name)
+            key = (min(ids), source, category, is_abyss, name)
             bucket = tag_buckets[key]
             bucket["total"] += count
             bucket["ids"].update(ids)
@@ -124,6 +126,7 @@ class TagStatisticsService:
         items = [
             TagStatItem(
                 tag_name=name,
+                is_abyss=is_abyss,
                 source=source,
                 category=category,
                 category_name=TagCategory(category).name if category else None,
@@ -131,11 +134,12 @@ class TagStatisticsService:
                 total_thread_count=data["total"],
                 channel_info=data["channels"],
             )
-            for (_, source, category, name), data in tag_buckets.items()
+            for (_, source, category, is_abyss, name), data in tag_buckets.items()
         ]
         items.extend(
             TagStatItem(
                 tag_name=name,
+                is_abyss=False,
                 source="virtual",
                 total_thread_count=data["total"],
                 channel_info=data["channels"],
@@ -146,13 +150,16 @@ class TagStatisticsService:
         items.sort(key=lambda item: (-item.total_thread_count, item.tag_name))
         return TagStatsResponse(total_threads=total_threads, items=items)
 
-    async def _get_real_tag_rows(self, guild_id, channel_ids):
+    async def _get_real_tag_rows(
+        self, guild_id, channel_ids, *, can_view_abyss: bool
+    ):
         """按来源、分类、名称和频道聚合有效绑定，并对同组帖子去重。"""
         statement = (
             select(
                 Tag.name,
                 Tag.source,
                 Tag.category,
+                Tag.is_abyss,
                 Thread.channel_id,
                 func.count(func.distinct(Thread.id)),
                 func.array_agg(func.distinct(Tag.id)),
@@ -167,8 +174,17 @@ class TagStatisticsService:
                 Thread.not_found_count == 0,
                 Thread.show_flag.is_(True),
             )
-            .group_by(Tag.id, Tag.name, Tag.source, Tag.category, Thread.channel_id)
+            .group_by(
+                Tag.id,
+                Tag.name,
+                Tag.source,
+                Tag.category,
+                Tag.is_abyss,
+                Thread.channel_id,
+            )
         )
+        if not can_view_abyss:
+            statement = statement.where(Tag.is_abyss.is_(False))
         if guild_id is not None:
             statement = statement.where(Thread.guild_id == guild_id)
         if channel_ids:

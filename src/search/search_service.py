@@ -502,7 +502,9 @@ class SearchService:
             )
             raise
 
-    async def get_tags_for_author(self, author_id: int) -> Sequence[Tag]:
+    async def get_tags_for_author(
+        self, author_id: int, *, include_abyss: bool = True
+    ) -> Sequence[Tag]:
         """获取指定作者发布过的所有帖子的唯一标签列表"""
         statement = (
             select(Tag)
@@ -510,6 +512,8 @@ class SearchService:
             .where(Thread.author_id == author_id)  # type: ignore
             .distinct()
         )
+        if not include_abyss:
+            statement = statement.where(Tag.is_abyss.is_(False))
         result = await self.session.execute(statement)
         return result.scalars().all()
 
@@ -538,7 +542,9 @@ class SearchService:
         result = await self.session.execute(statement)
         return result.scalars().first()
 
-    async def get_tags_for_collections(self, user_id: int) -> Sequence[Tag]:
+    async def get_tags_for_collections(
+        self, user_id: int, *, include_abyss: bool = True
+    ) -> Sequence[Tag]:
         """获取指定用户收藏的所有帖子的唯一标签列表"""
 
         statement = (
@@ -557,6 +563,8 @@ class SearchService:
             )
             .distinct()
         )
+        if not include_abyss:
+            statement = statement.where(Tag.is_abyss.is_(False))
         result = await self.session.execute(statement)
         return result.scalars().all()
 

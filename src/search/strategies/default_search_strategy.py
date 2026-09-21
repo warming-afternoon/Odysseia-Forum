@@ -28,7 +28,9 @@ class DefaultSearchStrategy(SearchStrategy):
         self, cog: "Search", state: "SearchStateDTO"
     ) -> List[str]:
         """获取该策略下可用的标签，并将虚拟标签前置"""
-        separated_tags = cog.get_merged_tags_separated(state.channel_ids)
+        separated_tags = await cog.get_merged_tags_separated(
+            state.channel_ids, include_abyss=state.can_view_abyss_tags
+        )
         state.virtual_tags = separated_tags.virtual_tags
         return separated_tags.all_tags
 

@@ -9,6 +9,9 @@ class TagStatItem(BaseModel):
     tag_name: str = Field(description="标签名称")
     """标签名称"""
 
+    is_abyss: bool = Field(description="是否为深渊向 TAG")
+    """虚拟标签固定为 false"""
+
     source: str = Field(
         default="discord", description="统计分组来源：discord、custom 或 virtual"
     )

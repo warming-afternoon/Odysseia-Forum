@@ -12,6 +12,10 @@ class TagMergePreviewResponse(BaseModel):
     """旧标准名"""
     target_name: str = Field(description="保留标签标准名，必须与旧标签完全相同")
     """保留标准名"""
+    source_is_abyss: bool = Field(description="待合并旧标签是否为深渊向")
+    """旧标签的深渊向标识"""
+    target_is_abyss: bool = Field(description="保留标签是否为深渊向")
+    """目标标签的深渊向标识，合并结果沿用该值"""
     version: str = Field(description="预检版本，执行时原样传回")
     """预检版本"""
     can_merge: bool = Field(description="当前是否满足合并条件")

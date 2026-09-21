@@ -115,6 +115,7 @@ def _inject_api_dependencies(
     }
     search_api.abyss_config = abyss_config
     discovery_api.abyss_config = abyss_config
+    tags_api.abyss_config = abyss_config
 
     # 广场推荐忽略频道配置
     raw_discovery = config.get("discovery", {}) if isinstance(config, dict) else {}
