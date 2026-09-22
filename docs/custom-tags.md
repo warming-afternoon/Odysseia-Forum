@@ -109,7 +109,7 @@ DC 接管已有本地绑定时，旧轮次结束，新建零票 DC 轮次；以�
 | 方法和路径 | 含义 |
 | --- | --- |
 | GET /categories | 分类值和中文名 |
-| GET / | 标签池，支持 q、source、category、selectable、include_deleted、offset |
+| GET / | 完整标签池，支持 q、source、category、selectable、include_deleted |
 | GET /relations | 未删除标签之间的全部直接关系边 |
 | POST / | 创建标签，成功返回 201 |
 | PATCH /{tag_id} | 部分修改名称、分类、启用状态 |
@@ -119,7 +119,18 @@ DC 接管已有本地绑定时，旧轮次结束，新建零票 DC 轮次；以�
 | POST /{tag_id}/relations | 添加关系 |
 | DELETE /{tag_id}/relations/{kind}/{target_tag_id} | 删除关系 |
 
-标签池省略 `source` 时同时返回 DC 和自定义实体；`source=custom` 仅返回自定义标签（包括 DC 删除后转换的标签），`source=discord` 仅返回 DC 原生标签。来源筛选在分页前生效，可与关键词、分类和状态条件组合，非法来源值返回 422。帖子挂标候选可请求 `GET /v1/tags?source=custom&selectable=true&offset=0`；书单挂标候选省略 `source` 即可。每页最多 100 条，按分类、名称和 ID 排序。默认 `selectable=true`，只列出启用且未删除标签；`selectable=false` 包括停用标签。查询已删除记录需 BOT 管理员，并设置 `include_deleted=true`。别名可同时命中多个标准标签。
+标签池省略 `source` 时同时返回 DC 和自定义实体；`source=custom` 仅返回自定义标签（包括 DC 删除后转换的标签），`source=discord` 仅返回 DC 原生标签。来源筛选可与关键词、分类和状态条件组合，非法来源值返回 422。帖子挂标候选可请求 `GET /v1/tags?source=custom&selectable=true`；书单挂标候选省略 `source` 即可。接口不分页，一次按分类、名称和 ID 排序返回当前权限与筛选条件下的全部匹配项。默认 `selectable=true`，只列出启用且未删除标签；`selectable=false` 包括停用标签。查询已删除记录需 BOT 管理员，并设置 `include_deleted=true`。别名可同时命中多个标准标签。
+
+标签池响应使用统一包装，`total` 直接取完整 `results` 的长度，不执行额外计数查询，因此两者数量始终相等：
+
+```json
+{
+  "results": [],
+  "total": 0
+}
+```
+
+服务端仅缓存无关键词、无分类且不包含已删除记录的书单候选、帖子自定义候选和管理池；缓存按深渊标签可见权限隔离，标签实体或 Discord 来源实际变化后失效。其他筛选直接查询数据库，Redis 不可用时也会自动回源数据库。
 
 创建 `POST /v1/tags`，名称和分类必填，别名可选：
 

@@ -17,11 +17,11 @@ class DiscordTagSyncService:
         self.session = session
 
     async def apply(self, event):
-        """空快照同样推进检查点；失败抓取不应调用此入口。"""
+        """应用完整快照，并返回标签池公开内容是否发生变化。"""
         await self.session.execute(text("SELECT pg_advisory_xact_lock(73902141)"))
         state = await self.session.get(DiscordTagSyncState, event.channel_id)
         if state and state.observed_at >= event.observed_at:
-            return
+            return False
         if len(event.tags.values()) != len(set(event.tags.values())):
             raise TagError("duplicate_channel_name", "频道存在同名标签，无法自动归一")
         sources = list(
@@ -38,6 +38,10 @@ class DiscordTagSyncService:
             raise TagError("source_channel_conflict", "DC 来源频道不一致")
         old_tags = {s.tag_id for s in sources}
         original = {s.id: (s.tag_id, s.deleted_at) for s in sources}
+        # 同步时间不进入公开响应，只比较会改变标签池投影的来源字段。
+        pool_original = {
+            s.id: (s.tag_id, s.channel_id, s.name, s.deleted_at) for s in sources
+        }
         # 暂时释放本频道有效来源唯一键，支持一次快照内多标签改名和名称交换。
         for source in sources:
             source.deleted_at = event.observed_at
@@ -234,3 +238,7 @@ class DiscordTagSyncService:
                 )
             )
         await self.session.flush()
+        pool_current = {
+            s.id: (s.tag_id, s.channel_id, s.name, s.deleted_at) for s in sources
+        }
+        return pool_current != pool_original

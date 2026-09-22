@@ -38,6 +38,25 @@ async def sync(factory, values, channel_id=20, observed=None):
 
 
 @pytest.mark.asyncio
+async def test_discord_sync_reports_only_public_pool_changes(setup_tags):
+    """相同来源的周期对账不失效缓存，新增与改名会报告标签池变化。"""
+    factory, _, _ = setup_tags
+    first = utc_now()
+    async with factory() as session, session.begin():
+        assert await DiscordTagSyncService(session).apply(
+            DiscordTagsSnapshot(20, {12345: "原名"}, first)
+        )
+    async with factory() as session, session.begin():
+        assert not await DiscordTagSyncService(session).apply(
+            DiscordTagsSnapshot(20, {12345: "原名"}, first + timedelta(seconds=1))
+        )
+    async with factory() as session, session.begin():
+        assert await DiscordTagSyncService(session).apply(
+            DiscordTagsSnapshot(20, {12345: "新名"}, first + timedelta(seconds=2))
+        )
+
+
+@pytest.mark.asyncio
 async def test_delete_convert_rename_recreate_and_stale_snapshot(setup_tags):
     """删除保留实体和绑定，旧快照不复活实体，同名重建使用新身份。"""
     factory, _, call = setup_tags

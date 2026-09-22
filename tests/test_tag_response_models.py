@@ -15,6 +15,8 @@ BIG_ID = "9007199254740993"
 TAG = {
     "id": BIG_ID,
     "name": "测试",
+    "description": "",
+    "is_abyss": False,
     "source": "custom",
     "discord_sources": [],
     "category": 3,
@@ -139,6 +141,7 @@ async def test_proposal_states_and_utc(response_client, state):
         "id": BIG_ID,
         "tag_id": BIG_ID,
         "tag_name": "测试",
+        "is_abyss": False,
         "status": state,
         "reason": None if state == "pending" else "review",
         "created_at": datetime(2026, 9, 14),
@@ -169,12 +172,17 @@ async def test_proposal_states_and_utc(response_client, state):
 
 @pytest.mark.asyncio
 async def test_lists_audit_details_and_permission_error(response_client):
-    """列表不增加包装，审计扩展详情不丢失，领域拒绝仍返回 403。"""
+    """标签池返回统计包装，其余列表与审计错误契约保持不变。"""
     client, mediator = response_client
     response = await client.get("/v1/tags/categories")
     assert len(response.json()) == 7
+    pool_item = dict(TAG, aliases=["Alice"])
+    mediator.request.return_value = [pool_item]
+    assert (await client.get("/v1/tags")).json() == {
+        "results": [pool_item],
+        "total": 1,
+    }
     for path, value in [
-        ("", dict(TAG, aliases=["Alice"])),
         ("/relations", {"source_id": BIG_ID, "target_id": "123", "kind": "implies"}),
         (
             "/tag/123/audit",
@@ -190,7 +198,9 @@ async def test_lists_audit_details_and_permission_error(response_client):
     ]:
         mediator.request.return_value = [value]
         assert (await client.get("/v1/tags" + path)).json() == [value]
-    for path in ["", "/relations", "/thread/123/proposals", "/thread/123/audit"]:
+    mediator.request.return_value = []
+    assert (await client.get("/v1/tags")).json() == {"results": [], "total": 0}
+    for path in ["/relations", "/thread/123/proposals", "/thread/123/audit"]:
         mediator.request.return_value = []
         assert (await client.get("/v1/tags" + path)).json() == []
     mediator.request.side_effect = TagError("forbidden", "无审计权限", 403)
@@ -208,7 +218,22 @@ async def test_pool_source_parameter(response_client, source):
         "/v1/tags", params={} if source is None else {"source": source}
     )
     assert response.status_code == 200
+    assert response.json() == {"results": [], "total": 0}
     assert mediator.request.call_args.args[0].payload["source"] == source
+
+
+def test_pool_openapi_has_non_paginated_response():
+    """标签池契约使用 results 与 total，并移除 offset 查询参数。"""
+    operation = app.openapi()["paths"]["/v1/tags"]["get"]
+    assert {parameter["name"] for parameter in operation["parameters"]} == {
+        "q",
+        "source",
+        "category",
+        "selectable",
+        "include_deleted",
+    }
+    schema = app.openapi()["components"]["schemas"]["TagPoolResponse"]
+    assert schema["required"] == ["results", "total"]
 
 
 @pytest.mark.asyncio

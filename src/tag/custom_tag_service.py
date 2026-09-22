@@ -531,8 +531,6 @@ class CustomTagService:
             select(Tag)
             .where(*conditions)
             .order_by(Tag.category, Tag.name, Tag.id)
-            .offset(payload.get("offset", 0))
-            .limit(100)
         )
         tags = list((await self.session.execute(statement)).scalars())
         self.source_cache.update(

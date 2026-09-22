@@ -29,7 +29,7 @@ from shared.event_mediator import EventMediator
 
 from api.v1.schemas.tags.tag_response import TagResponse
 from api.v1.schemas.tags.tag_category_response import TagCategoryResponse
-from api.v1.schemas.tags.tag_pool_item_response import TagPoolItemResponse
+from api.v1.schemas.tags.tag_pool_response import TagPoolResponse
 from api.v1.schemas.tags.tag_relation_response import TagRelationResponse
 from api.v1.schemas.tags.tag_proposal_response import TagProposalResponse
 from api.v1.schemas.tags.tag_audit_response import TagAuditResponse
@@ -106,7 +106,7 @@ async def categories(user=Depends(require_auth)):
     return [{"value": item.value, "name": item.name} for item in TagCategory]
 
 
-@router.get("", summary="搜索标签池", response_model=list[TagPoolItemResponse])
+@router.get("", summary="搜索标签池", response_model=TagPoolResponse)
 async def pool(
     q: str = Query(
         default="",
@@ -131,15 +131,10 @@ async def pool(
         default=False,
         description="是否包含软删除标签；默认不包含，传 true 仅限 BOT 管理员，仍受 selectable 等筛选条件约束",
     ),
-    offset: int = Query(
-        default=0,
-        ge=0,
-        description="分页跳过的记录数，不是页码；默认 0，每次最多返回 100 条，下一页可传 100、200 等",
-    ),
     user=Depends(require_auth),
 ):
-    """按标准名或别名分页搜索标签池。"""
-    return await dispatch(
+    """按标准名或别名搜索并返回完整标签池。"""
+    results = await dispatch(
         "pool",
         user,
         q=q,
@@ -147,9 +142,9 @@ async def pool(
         category=category,
         selectable=selectable,
         include_deleted=include_deleted,
-        offset=offset,
         _can_view_abyss=can_view_abyss_tags(user.get("roles", []), abyss_config),
     )
+    return {"results": results, "total": len(results)}
 
 
 @router.get(

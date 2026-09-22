@@ -58,7 +58,9 @@ def _inject_api_dependencies(
     """向 API 路由模块注入运行期依赖。"""
 
     main_guild_id = _get_main_guild_id_from_config(config)
-    tags_api.event_mediator = create_tag_mediator(AsyncSessionFactory, config)
+    tags_api.event_mediator = create_tag_mediator(
+        AsyncSessionFactory, config, RedisManager.get_client()
+    )
 
     preferences_api.async_session_factory = AsyncSessionFactory
     preferences_api.main_guild_id = main_guild_id

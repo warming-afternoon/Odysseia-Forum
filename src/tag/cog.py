@@ -12,6 +12,8 @@ from discord import app_commands
 from discord.ext import commands, tasks
 
 from dto.events.tag_command import TagCommand
+from core.tag_pool_cache_service import TagPoolCacheService
+from shared.redis_client import RedisManager
 from shared.tag_error import TagError
 from tag.tag_runtime import create_tag_mediator
 from tag.tag_worker import TagWorker
@@ -27,7 +29,13 @@ class TagCog(commands.Cog):
         self.bot = bot
         self.config = config
         self.worker = TagWorker(session_factory, config)
-        self.mediator = create_tag_mediator(session_factory, config)
+        # 独立测试或 Redis 尚未初始化时禁用缓存，标签主流程仍可访问数据库。
+        try:
+            redis = RedisManager.get_client()
+        except RuntimeError:
+            redis = None
+        self.pool_cache = TagPoolCacheService(redis)
+        self.mediator = create_tag_mediator(session_factory, config, redis)
 
     async def cog_load(self):
         """启动可恢复的审核和通知循环。"""
@@ -104,7 +112,9 @@ class TagCog(commands.Cog):
     async def sync_snapshot(self, event):
         """接收跨模块快照事件并持久化标签生命周期变化。"""
         async with self.session_factory() as session, session.begin():
-            await DiscordTagSyncService(session).apply(event)
+            pool_changed = await DiscordTagSyncService(session).apply(event)
+        if pool_changed:
+            await self.pool_cache.invalidate()
 
     @tasks.loop(minutes=10)
     async def reconcile(self):

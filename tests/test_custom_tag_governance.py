@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select, text
+from sqlalchemy import event, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
@@ -599,14 +599,15 @@ async def test_http_contract_and_notification_privacy(setup_tags, monkeypatch):
         response = await client.get(
             "/v1/tags", params={"q": "SearchAlias", "selectable": "false"}
         )
-        assert response.json()[0]["id"] == tag_id
+        assert response.json()["results"][0]["id"] == tag_id
+        assert response.json()["total"] == 1
         assert (
             await client.put(f"/v1/tags/{tag_id}/aliases", json={"aliases": []})
         ).status_code == 200
         response = await client.get(
             "/v1/tags", params={"q": "SearchAlias", "selectable": "false"}
         )
-        assert response.json() == []
+        assert response.json() == {"results": [], "total": 0}
         response = await client.post(
             f"/v1/tags/{tag_id}/relations",
             json={"target_tag_id": other_id, "kind": "implies"},
@@ -698,8 +699,8 @@ async def test_http_contract_and_notification_privacy(setup_tags, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_pool_source_filter_before_pagination(setup_tags):
-    """不同来源同名、转换实体及超过一页数据均按来源筛选后分页。"""
+async def test_pool_source_filter_returns_all_matches(setup_tags):
+    """不同来源同名、转换实体及超过百条数据均在筛选后完整返回。"""
     from models import Tag
 
     factory, _, call = setup_tags
@@ -716,13 +717,25 @@ async def test_pool_source_filter_before_pagination(setup_tags):
         session.add(Tag(name="已转换", source="custom", originated_from_discord=True))
         session.add(Tag(name="已停用", source="custom", category=3, enabled=False))
 
-    custom = await call("pool", source="custom", offset=100)
-    assert len(custom) == 2
+    statements = []
+
+    def record_statement(_conn, _cursor, statement, _parameters, _context, _many):
+        """记录一次完整池请求实际执行的 SQL。"""
+        statements.append(statement)
+
+    engine = factory.kw["bind"].sync_engine
+    event.listen(engine, "before_cursor_execute", record_statement)
+    try:
+        custom = await call("pool", source="custom")
+    finally:
+        event.remove(engine, "before_cursor_execute", record_statement)
+    assert len(custom) == 102
+    assert len(statements) == 4
+    assert not any("count(" in statement.lower() for statement in statements)
     assert all(tag["source"] == "custom" for tag in custom)
     assert any(tag["name"] == "已转换" for tag in custom)
     discord = await call("pool", source="discord")
     assert len(discord) == 1 and discord[0]["name"] == "候选000"
-    assert await call("pool", source="discord", offset=1) == []
     same_name = await call("pool", q="候选000")
     assert {tag["source"] for tag in same_name} == {"custom", "discord"}
     filtered = await call("pool", source="custom", q="候选000", category=3)
