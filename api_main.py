@@ -13,6 +13,7 @@ from api.main import app as fastapi_app
 from api.v1.dependencies.rate_limit import initialize_rate_limit
 from api.v1.dependencies.security import initialize_api_security
 from core.api_cache_service import ApiCacheService
+from core.redis_trend_service import RedisTrendService
 from core.impression_cache_service import ImpressionCacheService
 from core.tag_cache_service import TagCacheService
 from search.similar_threads_cache_service import SimilarThreadsCacheService
@@ -121,11 +122,9 @@ def _inject_api_dependencies(
 
     # 广场推荐忽略频道配置
     raw_discovery = config.get("discovery", {}) if isinstance(config, dict) else {}
-    discovery_ignore_channel_ids = [
-        int(cid)
-        for cid in raw_discovery.get("ignore_channel_ids", [])
-        if isinstance(cid, (int, str)) and str(cid).strip().lstrip("-").isdigit()
-    ]
+    discovery_ignore_channel_ids = RedisTrendService.configure_ignored_channels(
+        raw_discovery.get("ignore_channel_ids", [])
+    )
     discovery_api.discovery_ignore_channel_ids = discovery_ignore_channel_ids
 
     auth_section = config.get("auth", {}) if isinstance(config, dict) else {}

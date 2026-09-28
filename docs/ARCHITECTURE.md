@@ -21,15 +21,15 @@ src/
 ├── banner/                      # Banner 轮播申请与审核系统
 ├── booklist/                    # 书单创建与帖子批量管理
 ├── collection/                  # 帖子收藏 / 右键菜单
-├── config/                      # 运行时配置管理（UCB1 / 互斥标签）
-├── core/                        # 数据仓库层、同步服务、内存缓存
+├── config/                      # 运行时配置管理（UCB1 排序算法配置 / 互斥标签）
+├── core/                        # 数据仓库层、同步服务、缓存
 ├── discovery/                   # 首页广场多轨道推荐
 ├── dto/                         # 数据传输对象定义
 ├── indexer/                     # 论坛频道索引构建与实时更新
-├── meta/                        # 频道元数据
-├── models/                      # SQLModel 数据库实体定义
+├── meta/                        # 元数据(频道、用户身份组)
+├── models/                      # 数据库实体定义
 ├── preferences/                 # 用户搜索偏好管理
-├── search/                      # FTS5 全文搜索、标签过滤、UCB1 排序
+├── search/                      # 关键词搜索、标签过滤、排序
 ├── shared/                      # 公共基础设施（API 调度器、DB 引擎、工具类）
 ├── tag/                         # 标签服务
 ├── ThreadManager/               # 帖子生命周期管理、事件监听、互斥标签规则

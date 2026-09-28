@@ -7,14 +7,14 @@ Banner 系统是一个**「申请 → 审核 → 轮播展示」**的完整工�
 ## 1. 整体架构
 
 ```
-┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-│  FastAPI 接口  │────▶│  BannerService │────▶│   MySQL 数据库  │
-│  (REST API)   │     │  (业务逻辑)     │     │  (3 张表)      │
-└──────────────┘     └──────────────┘     └──────────────┘
+┌───────────────┐     ┌───────────────┐      ┌─────────────┐
+│  FastAPI 接口 │───▶│  BannerService │────▶│   数据库    │
+│  (REST API)   │     │  (业务逻辑)    │      │  (3 张表)   │
+└───────────────┘     └───────────────┘      └─────────────┘
                             ▲
-┌──────────────┐           │
-│  Discord Bot  │──────────┘
-│  (用户交互)    │
+┌──────────────┐            │
+│  Discord Bot │────────────┘
+│  (用户交互)   │
 └──────────────┘
 ```
 
@@ -31,56 +31,13 @@ Banner 系统是一个**「申请 → 审核 → 轮播展示」**的完整工�
 
 记录每一次 Banner 申请及其审核状态。
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | int (PK) | 自增主键 |
-| `thread_id` | BigInteger | 帖子 Discord ID |
-| `channel_id` | BigInteger | 帖子所在频道 |
-| `applicant_id` | BigInteger | 申请人 Discord ID |
-| `cover_image_url` | str | 封面图片 URL |
-| `target_scope` | str | `"global"`（全频道）或特定频道 ID |
-| `status` | str | `pending` / `approved` / `rejected` |
-| `applied_at` | datetime | 申请时间 |
-| `reviewed_at` | datetime (可空) | 审核时间 |
-| `reviewer_id` | BigInteger (可空) | 审核人 ID |
-| `reject_reason` | str (可空) | 拒绝理由 |
-| `review_message_id` | BigInteger (可空) | Discord 审核消息 ID |
-| `review_thread_id` | BigInteger (可空) | Discord 审核线程 ID |
-
-**文件：** [src/models/banner_application.py](../src/models/banner_application.py)
-
 ### `banner_carousel` — 轮播表
 
 记录当前正在展示的 Banner（已批准且未过期）。
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | int (PK) | 自增主键 |
-| `thread_id` | BigInteger | 帖子 ID |
-| `channel_id` | BigInteger (可空) | 所属频道（NULL = 全局） |
-| `cover_image_url` | str | 封面图片 URL |
-| `title` | str | 帖子标题 |
-| `start_time` | datetime | 展示开始时间 |
-| `end_time` | datetime | 展示结束时间（**3 天后**） |
-| `position` | int | 展示顺序 |
-
-**文件：** [src/models/banner_carousel.py](../src/models/banner_carousel.py)
-
 ### `banner_waitlist` — 等待队列表
 
 当轮播已满时，新批准的 Banner 会排入此队列，等待轮播有空位后被自动晋升。
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| `id` | int (PK) | 自增主键 |
-| `thread_id` | BigInteger | 帖子 ID |
-| `channel_id` | BigInteger (可空) | 所属频道 |
-| `cover_image_url` | str | 封面图片 URL |
-| `title` | str | 帖子标题 |
-| `queued_at` | datetime | 入队时间 |
-| `position` | int | 队列位置 |
-
-**文件：** [src/models/banner_waitlist.py](../src/models/banner_waitlist.py)
 
 ---
 
@@ -89,33 +46,6 @@ Banner 系统是一个**「申请 → 审核 → 轮播展示」**的完整工�
 REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)，前缀 `/v1/banner`，全部需要认证。
 
 ### `POST /v1/banner/apply` — 提交 Banner 申请
-
-**请求体：**
-```json
-{
-  "thread_id": "1234567890123456789",
-  "cover_image_url": "https://example.com/cover.png",
-  "target_scope": "global"
-}
-```
-
-- `thread_id`：纯数字字符串，长度 17-20
-- `cover_image_url`：封面图片 URL
-- `target_scope`：`"global"` 表示全频道，或填写具体频道 ID
-
-**处理流程：**
-1. 调用 `BannerService.validate_and_create_application()` 验证并写入数据库
-2. 将申请 ID 推送到 Redis 队列 `"banner:review:queue"`
-3. Bot 进程消费队列，发送审核消息到 Discord 审核频道
-
-**响应：**
-```json
-{
-  "success": true,
-  "message": "申请已提交",
-  "application_id": 42
-}
-```
 
 ### `GET /v1/banner/active` — 获取活跃 Banner
 
@@ -137,21 +67,6 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 全局 Banner 同样参与反选；正选作者、标签、关键词和时间偏好不限制结果。
 过滤后仍保持原轮播顺序，不从等待列表补位。偏好读取失败时跳过偏好过滤，
 但仍检查帖子公开状态；过滤查询失败返回接口错误。
-
-**响应示例：**
-```json
-[
-  {
-    "thread_id": "1234567890123456789",
-    "title": "帖子标题",
-    "cover_image_url": "https://example.com/cover.png",
-    "channel_id": "1374474903981527082",
-    "guild_id": "9876543210987654321"
-  }
-]
-```
-
-> **注意：** 所有 Discord ID（thread_id、channel_id、guild_id）序列化为**字符串**，避免 JavaScript 大整数精度丢失。`GET /v1/banner/active` 是唯一的 Banner 数据返回入口。
 
 ---
 
@@ -218,39 +133,6 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 | `GLOBAL_MAX_BANNERS` | 3 | 全局 Banner 最多同时展示数 |
 | `CHANNEL_MAX_BANNERS` | 3 | 每个频道 Banner 最多同时展示数 |
 | `BANNER_DURATION_DAYS` | 3 | 每个 Banner 展示天数 |
-
-### 核心方法
-
-| 方法 | 功能 |
-|------|------|
-| `validate_application_request()` | 验证申请：帖子存在性、作者匹配、URL 格式、scope 合法性 |
-| `validate_and_create_application()` | 验证 + 创建 PENDING 状态的申请记录 |
-| `create_application()` | 插入 `banner_application` 行 |
-| `approve_application()` | 批准申请：轮播未满加入 `banner_carousel`，已满加入 `banner_waitlist` |
-| `reject_application()` | 拒绝申请，记录审核人和理由 |
-| `get_active_banners()` | 查询 `end_time > now` 的轮播 Banner，支持新旧频道参数、多频道筛选及全局合并 |
-| `cleanup_expired_banners()` | 删除过期轮播项，从等待队列按 FIFO 晋升 |
-| `update_review_message_info()` | 更新申请记录的审核消息 ID（用于按钮回调关联） |
-| `get_application_by_review_message()` | 通过审核消息 ID 查找申请 |
-
-### 辅助模块函数
-
-`send_review_message()` — 由 Bot 端调用，负责：
-1. 获取配置的 `review_thread_id`
-2. 在 Discord 中构建嵌入式审核消息（申请人、范围、帖子链接、封面图片）
-3. 发送消息并附加 `ReviewView` 按钮
-4. 更新申请记录中的审核消息 ID
-
-### 辅助数据结构
-
-```python
-@dataclass
-class ApplicationResult:
-    success: bool
-    message: str
-    application: Optional[BannerApplication] = None
-    thread: Optional[ThreadDTO] = None
-```
 
 ---
 
@@ -353,7 +235,7 @@ class ApplicationResult:
 ### 持久化视图
 - 所有 Discord UI 组件使用持久化视图（`custom_id`），Bot 重启后按钮仍可响应
 
-### 优雅降级
+### 自动降级
 - 搜索接口获取 Banner 失败时返回空列表 `[]`，不影响搜索结果
 
 ---

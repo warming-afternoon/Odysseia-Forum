@@ -178,7 +178,9 @@ update_detector:token_stats:actual:deepseek-v4-flash:YYYYMMDD
 
 | 配置项 | 类型 | 说明 |
 |--------|------|------|
-| `discovery.ignore_channel_ids` | number[] | 不出现在推荐轨道中的频道 ID 列表 |
+| `discovery.ignore_channel_ids` | number[] | 不出现在探索推荐轨道及随机推荐中的频道 ID 列表；这些频道的帖子也不会新增写入 Redis 全局及频道趋势榜单，仍可正常索引和搜索 |
+
+修改此列表后需重启 Bot 和 API 才能生效。此前已写入的 Redis 趋势数据自然过期，探索接口仍会过滤这些频道的帖子。
 
 ---
 

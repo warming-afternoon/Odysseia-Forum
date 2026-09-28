@@ -200,7 +200,10 @@ async def get_random_threads(
         if not user_roles or required_role not in [str(r) for r in user_roles]:
             final_exclude_channels.extend(abyss_channels)
 
-    final_exclude_channels = list(set(final_exclude_channels))
+    # 探索屏蔽频道在随机推荐中始终排除，包括显式选中该频道时。
+    final_exclude_channels = list(
+        set(final_exclude_channels) | set(discovery_ignore_channel_ids)
+    )
 
     # [处理频道映射虚拟标签] 解析实际搜索的频道ID和标签
     all_indexed_channels = cache_service_instance.get_indexed_channel_ids_list()

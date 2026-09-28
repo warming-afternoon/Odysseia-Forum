@@ -1,7 +1,7 @@
 import asyncio
 import hashlib
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Iterable, Optional
 from uuid import uuid4
 
 from shared.enum import ConstantEnum
@@ -12,6 +12,18 @@ class RedisTrendService:
     """处理基于 Redis 的趋势记录、聚合缓存和频道范围查询。"""
 
     EMPTY_MEMBER = "-1"
+    _ignored_channel_ids: frozenset[int] = frozenset()
+
+    @classmethod
+    def configure_ignored_channels(cls, channel_ids: Iterable[int | str]) -> list[int]:
+        """设置本进程不参与趋势统计的频道并返回规范化列表。"""
+        cls._ignored_channel_ids = frozenset(
+            int(channel_id)
+            for channel_id in channel_ids
+            if isinstance(channel_id, (int, str))
+            and str(channel_id).strip().lstrip("-").isdigit()
+        )
+        return sorted(cls._ignored_channel_ids)
 
     def _get_daily_key(self, metric: str, dt: datetime) -> str:
         """格式化全局日榜 Redis 键名。"""
@@ -45,8 +57,8 @@ class RedisTrendService:
         channel_id: int,
         count: int = 1,
     ) -> None:
-        """同时记录全局和频道趋势增量，并将日榜保留九十天。"""
-        if count <= 0:
+        """为非屏蔽频道记录全局和频道趋势增量，并将日榜保留九十天。"""
+        if count <= 0 or channel_id in self._ignored_channel_ids:
             return
 
         redis = RedisManager.get_client()

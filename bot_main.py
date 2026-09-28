@@ -25,6 +25,7 @@ from shared.redis_client import RedisManager
 from ThreadManager.cog import ThreadManager
 from core.tag_cache_service import TagCacheService
 from core.cache_service import CacheService
+from core.redis_trend_service import RedisTrendService
 from core.sync_service import SyncService
 from open_graph.reindex_consumer import OpenGraphReindexConsumer
 from open_graph.reindex_queue import OpenGraphReindexQueue
@@ -429,6 +430,11 @@ async def main():
 
     with open("config.json", "r", encoding="utf-8") as f:
         config = json.load(f)
+
+    # 启动时统一配置探索频道屏蔽列表，覆盖所有趋势写入路径。
+    RedisTrendService.configure_ignored_channels(
+        config.get("discovery", {}).get("ignore_channel_ids", [])
+    )
 
     # 读取配置项并初始化全局Redis连接池
     redis_url = os.environ.get(

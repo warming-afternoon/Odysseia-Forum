@@ -209,6 +209,6 @@
   "discovery": {
     "_comment": "广场推荐配置",
     "ignore_channel_ids": [],
-    "_comment_ignore_channel_ids": "广场推荐忽略的频道ID列表，列表中的频道帖子不会出现在推荐轨道中，也不会写入Redis趋势数据"
+    "_comment_ignore_channel_ids": "探索屏蔽频道ID列表，频道帖子不会出现在推荐轨道和随机推荐中，也不会新增写入Redis趋势榜单；修改后需重启Bot和API"
   }
 }
