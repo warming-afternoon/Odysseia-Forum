@@ -26,7 +26,6 @@ from datetime import datetime
 from pathlib import Path
 
 import asyncpg
-import rjieba
 import sqlalchemy as sa
 
 # 确保 src/ 在 Python 路径中（本地运行时需要）
@@ -37,6 +36,7 @@ if str(_src) not in sys.path:
 from sqlalchemy.ext.asyncio import create_async_engine  # noqa: E402
 from sqlmodel import SQLModel  # noqa: E402
 import models  # noqa: E402, F401 — 注册所有表到 SQLModel.metadata
+from shared.text_utils import build_search_vector_text  # noqa: E402
 
 # ── 配置 ────────────────────────────────────────────
 
@@ -50,21 +50,8 @@ BATCH_SIZE = 500
 
 
 def _build_search_tokens(title: str | None, excerpt: str | None) -> str | None:
-    """用 rjieba 对 title + excerpt 分词，返回空格连接的 token 字符串。
-
-    配合 to_tsvector('simple', ...) 生成带顺序位置的 search_vector。
-    """
-    parts = []
-    if title:
-        parts.append(title)
-    if excerpt:
-        parts.append(excerpt)
-    if not parts:
-        return None
-    combined = " ".join(parts)
-    tokens = list(rjieba.cut(combined))
-    filtered = [t.lower().strip() for t in tokens if t.strip()]
-    return " ".join(filtered) if filtered else None
+    """复用在线索引的规范化和分词规则，避免迁移生成旧规则向量。"""
+    return build_search_vector_text(title, excerpt)
 
 
 def _convert_sqlite_value(val, col_name: str, col_type: str = ""):

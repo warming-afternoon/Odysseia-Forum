@@ -15,6 +15,7 @@ from dto.open_graph import BooklistShareQueryDTO
 from models import Booklist, BooklistItem, BooklistPublish, UserCollection
 from shared.enum import CollectionType
 from shared.fts_utils import build_fts_conditions
+from shared.time_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -197,16 +198,22 @@ class BooklistRepository:
             return await self.get_booklist(booklist_id)
 
         try:
+            # 锁定并刷新最新原文，ORM 编辑触发统一的搜索向量维护事件。
             statement = (
-                update(Booklist)
-                .where(Booklist.id == booklist_id)  # type: ignore
-                .values(**update_data)
+                select(Booklist)
+                .where(Booklist.id == booklist_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
             )
-            result = await self.session.execute(statement)
-
-            if result.rowcount == 0:
+            booklist = (await self.session.execute(statement)).scalar_one_or_none()
+            if booklist is None:
                 await self.session.rollback()
-                return None  # 书单不存在
+                return None
+            for field, value in update_data.items():
+                setattr(booklist, field, value)
+            # 保留原编辑入口每次有效调用均更新业务时间的行为。
+            booklist.updated_at = utc_now()
+            self.session.add(booklist)
 
             await self.session.commit()
             # logger.info(f"书单 {booklist_id} 已更新")
@@ -320,7 +327,7 @@ class BooklistRepository:
             query = query.where(Booklist.is_tournament == is_tournament)
         if tournament_channel_id is not None:
             query = query.where(Booklist.tournament_channel_id == tournament_channel_id)
-        if keywords:
+        if keywords or exclude_keywords:
             fts_result = await self.get_fts_matched_booklist_ids(
                 keywords=keywords,
                 exclude_keywords=exclude_keywords,

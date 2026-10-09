@@ -15,6 +15,10 @@ from sqlalchemy import literal_column
 
 from dto.search.fts_result_dto import FTSResultDTO
 from shared.enum import CacheKeys, SearchTimeout
+from shared.search_normalization import (
+    SEARCH_NORMALIZATION_VERSION,
+    normalize_search_text,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,15 +99,27 @@ async def build_fts_conditions(
     Returns:
         FTSResultDTO: 包含 include_conditions 和 exclude_condition
     """
+    # 在解析原有语法和分词前转换繁体搜索关键词为简体中文
+    keywords = normalize_search_text(keywords) if keywords else keywords
+    exclude_keywords = (
+        normalize_search_text(exclude_keywords)
+        if exclude_keywords
+        else exclude_keywords
+    )
+    markers = [
+        normalize_search_text(marker).lower()
+        for marker in (
+            exemption_markers if exemption_markers is not None else ["禁", "🈲"]
+        )
+    ]
+
     # ── 尝试从 Redis 缓存读取已构建的 tsquery 字符串 ──
     cache_key = None
     if redis_client and (keywords or exclude_keywords):
-        raw = (
-            (keywords or "")
-            + "|"
-            + (exclude_keywords or "")
-            + "|"
-            + ",".join(exemption_markers or [])
+        # 规则版本和有效豁免标记进入结构化摘要，隔离旧缓存及 None/空列表。
+        raw = json.dumps(
+            [SEARCH_NORMALIZATION_VERSION, keywords, exclude_keywords, markers],
+            ensure_ascii=False,
         )
         prefix = (keywords or "none")[:5]
         cache_key = CacheKeys.FTS_TSQUERY_RESULT.format(
@@ -144,8 +160,6 @@ async def build_fts_conditions(
 
     # ============ 反选关键词：构建排除子查询 ============
     if exclude_keywords:
-        markers = exemption_markers if exemption_markers is not None else ["禁", "🈲"]
-
         exclude_keywords_list = [
             kw.strip()
             for kw in re.split(r"[,，/\\\s]+", exclude_keywords)
@@ -227,7 +241,7 @@ async def build_fts_conditions(
                 if not kw:
                     continue
 
-                # 精确匹配语法：双引号包裹的关键词跳过 jieba 分词，所有 token 需同时存在
+                # 双引号关键词也使用规范化副本，所有 token 精确匹配且需同时存在
                 if kw.startswith('"') and kw.endswith('"') and len(kw) > 2:
                     exact_kw = kw[1:-1].strip().replace('"', "")
                     if exact_kw:
@@ -236,7 +250,9 @@ async def build_fts_conditions(
                             t.strip().lower() for t in exact_tokens if t.strip()
                         ]
                         if clean_tokens:
-                            phrase = " & ".join(f"'{t}'" for t in clean_tokens)
+                            phrase = " & ".join(
+                                f"'{escape_tsquery_token(t)}'" for t in clean_tokens
+                            )
                             or_tsquery_parts.append(f"({phrase})")
                 else:
                     tokens = _token_map.get(kw)
