@@ -24,6 +24,7 @@ async def test_unindexed_channel_application(monkeypatch, entry, accessible):
     session = AsyncMock()
     query_result = MagicMock()
     query_result.scalar_one_or_none.return_value = None
+    query_result.scalar_one.return_value = False
     session.execute.return_value = query_result
     session_factory = MagicMock()
     session_factory.return_value.__aenter__.return_value = session
@@ -41,6 +42,9 @@ async def test_unindexed_channel_application(monkeypatch, entry, accessible):
         cover_image_url="https://example.com/cover.png",
         target_scope="global",
         target_type=TargetType.CHANNEL.value,
+    )
+    monkeypatch.setattr(
+        BannerApplicationRepository, "get_by_id", AsyncMock(return_value=application)
     )
     create = AsyncMock(return_value=application)
     monkeypatch.setattr(BannerApplicationRepository, "create", create)

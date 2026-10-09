@@ -9,17 +9,12 @@ from typing import TYPE_CHECKING
 import discord
 from discord.ext import commands, tasks
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from sqlmodel import select as sm_select
 
 from banner.banner_service import BannerService
+from banner.banner_review_message_service import BannerReviewMessageService
+from banner.banner_review_notification_service import BannerReviewNotificationService
 from banner.channel_sync import ChannelSyncService
 from banner.views.channel_selection_view import ChannelSelectionView
-from banner.views.review_embed_builder import ReviewEmbedBuilder
-from banner.views.review_view import ReviewView
-from core.banner_application_repository import BannerApplicationRepository
-from core.thread_repository import ThreadRepository
-from models.banner_application import BannerApplication
-from models.channel import Channel
 from shared.enum import TargetType
 from shared.redis_client import RedisManager
 
@@ -61,7 +56,6 @@ class BannerEventListener(commands.Cog):
     async def _consume_banner_review_queue(self):
         """后台循环：消费 Redis 中的 banner 审核消息队列，发送审核消息到 Discord。"""
         redis = RedisManager.get_client()
-        banner_conf = self.config
 
         try:
             result = await redis.brpop("banner:review:queue", timeout=5)  # type: ignore[return-type]
@@ -71,66 +65,10 @@ class BannerEventListener(commands.Cog):
             data = json.loads(payload)
             application_id = data["application_id"]
 
-            async with self.session_factory() as session:
-                stmt = sm_select(BannerApplication).where(
-                    BannerApplication.id == application_id
-                )
-                r = await session.execute(stmt)
-                application = r.scalar_one_or_none()
-                if application is None:
-                    logger.warning(f"审核队列中的申请已不存在: {application_id}")
-                    return
-
-                # 构建审核 Embed 并发送到审核频道
-                # 根据 target_type 获取 guild_id
-                if application.target_type == TargetType.CHANNEL.value:
-                    channel_result = await session.execute(
-                        sm_select(Channel).where(
-                            Channel.channel_id == application.thread_id
-                        )
-                    )
-                    channel = channel_result.scalar_one_or_none()
-                    guild_id = channel.guild_id if channel else None
-                else:
-                    repo = ThreadRepository(session)
-                    guild_id = await repo.get_thread_guild_id(application.thread_id)
-                resolved_cover_url = application.cover_image_url
-                if (
-                    resolved_cover_url is None
-                    and application.target_type == TargetType.THREAD.value
-                ):
-                    thread = await ThreadRepository(session).get_thread_with_tags(
-                        application.thread_id
-                    )
-                    if thread and thread.thumbnail_urls:
-                        resolved_cover_url = thread.thumbnail_urls[0]
-                # 查询历史申请记录
-                app_repo = BannerApplicationRepository(session)
-                history = await app_repo.get_history_by_thread_id(application.thread_id)
-
-                embed = ReviewEmbedBuilder.build_review_embed(
-                    application=application,
-                    config=banner_conf,
-                    guild_id=guild_id,
-                    history=history if history else None,
-                    resolved_cover_image_url=resolved_cover_url,
-                )
-                review_thread_id = banner_conf.get("review_thread_id")
-                if review_thread_id:
-                    review_channel = await self.bot.fetch_channel(review_thread_id)
-                    if isinstance(review_channel, discord.Thread):
-                        review_view = ReviewView()
-                        review_message = await review_channel.send(
-                            embed=embed, view=review_view
-                        )
-                        # 回填审核消息 ID
-                        service = BannerService(session)
-                        await service.update_review_message_info(
-                            application.id,  # type: ignore[arg-type]
-                            review_message.id,
-                            review_thread_id,
-                        )
-                        await session.commit()
+            # 统一投递服务读取最新状态，不为已拒绝申请重建审核按钮。
+            await BannerReviewMessageService(
+                self.bot, self.session_factory, self.config
+            ).send(application_id)
         except Exception:
             logger.error("消费 Banner 审核队列时出错", exc_info=True)
             await asyncio.sleep(5)
@@ -154,6 +92,12 @@ class BannerEventListener(commands.Cog):
         try:
             async with self.session_factory() as session:
                 service = BannerService(session, channel_sync=self.channel_sync)
+                # 表单阶段复查，避免用户填写期间已有其他申请获批。
+                if await service.has_ongoing_banner(interaction.user.id):
+                    await interaction.followup.send(
+                        f"❌ {service.APPLICANT_LIMIT_MESSAGE}", ephemeral=True
+                    )
+                    return
                 validation = await service.validate_application_request(
                     target_id=target_id,
                     guild_id=guild_id,
@@ -230,6 +174,7 @@ class BannerEventListener(commands.Cog):
                     applicant_id=applicant_id,
                     cover_image_url=cover_image_url,
                     target_scope=target_scope,
+                    enforce_applicant_limit=True,
                 )
 
                 if not result.success:
@@ -245,71 +190,21 @@ class BannerEventListener(commands.Cog):
                     )
                     return
 
-                # 获取目标所属服务器 ID
-                if application.target_type == TargetType.CHANNEL.value:
-                    channel_result = await session.execute(
-                        sm_select(Channel).where(
-                            Channel.channel_id == application.thread_id
-                        )
-                    )
-                    channel = channel_result.scalar_one_or_none()
-                    thread_guild_id = channel.guild_id if channel else guild_id
-                else:
-                    repo = ThreadRepository(session)
-                    thread_guild_id = await repo.get_thread_guild_id(thread_id)
-                resolved_cover_url = application.cover_image_url
-                if (
-                    resolved_cover_url is None
-                    and application.target_type == TargetType.THREAD.value
-                ):
-                    thread = await ThreadRepository(session).get_thread_with_tags(
-                        application.thread_id
-                    )
-                    if thread and thread.thumbnail_urls:
-                        resolved_cover_url = thread.thumbnail_urls[0]
+                application_id = application.id
 
-                # 查询历史申请记录
-                app_repo = BannerApplicationRepository(session)
-                history = await app_repo.get_history_by_thread_id(application.thread_id)
-
-                # 构建审核 Embed
-                embed = ReviewEmbedBuilder.build_review_embed(
-                    application=application,
-                    config=self.config,
-                    guild_id=thread_guild_id,
-                    history=history if history else None,
-                    resolved_cover_image_url=resolved_cover_url,
+            # 创建事务结束后统一投递，并按返回的最新状态反馈申请人。
+            latest = await BannerReviewMessageService(
+                self.bot, self.session_factory, self.config
+            ).send(application_id, guild_id)
+            if latest is None:
+                await interaction.followup.send(
+                    "❌ 申请已创建，但审核消息发送失败，请联系管理员", ephemeral=True
                 )
-
-                # 发送到审核频道
-                review_thread_id = self.config.get("review_thread_id")
-                if not review_thread_id:
-                    await interaction.followup.send(
-                        "❌ 审核频道未配置，请联系管理员", ephemeral=True
-                    )
-                    return
-
-                review_channel = await self.bot.fetch_channel(review_thread_id)
-                if not isinstance(review_channel, discord.Thread):
-                    await interaction.followup.send(
-                        "❌ 审核频道配置错误", ephemeral=True
-                    )
-                    return
-
-                review_view = ReviewView()
-                review_message = await review_channel.send(
-                    embed=embed, view=review_view
-                )
-
-                # 回填审核消息 ID
-                await service.update_review_message_info(
-                    application.id, review_message.id, review_thread_id
-                )
-                await session.commit()
-
-            await interaction.followup.send(
-                "✅ 申请已提交！审核员将尽快处理您的申请。", ephemeral=True
-            )
+                return
+            message = "✅ 申请已提交！审核员将尽快处理您的申请。"
+            if latest.status != "pending":
+                message = f"✅ 申请已提交，当前审核状态: {latest.status}"
+            await interaction.followup.send(message, ephemeral=True)
 
         except Exception:
             logger.error("处理 banner_apply 事件时出错", exc_info=True)
@@ -357,57 +252,26 @@ class BannerEventListener(commands.Cog):
                     await interaction.followup.send("❌ 申请数据异常", ephemeral=True)
                     return
 
-                application, entered_carousel = await service.approve_application(
-                    application_id, reviewer_id
-                )
+                result = await service.approve_application(application_id, reviewer_id)
 
-                # 更新审核消息
-                original_embed = interaction.message.embeds[0]
-                original_embed.color = discord.Color.green()
-                status_text = (
-                    "✅ 已同意 - 已加入轮播"
-                    if entered_carousel
-                    else "✅ 已同意 - 已加入等待列表"
-                )
-                original_embed.add_field(
-                    name="审核结果",
-                    value=f"{status_text} by <@{reviewer_id}>",
-                    inline=False,
-                )
-                await interaction.message.edit(embed=original_embed, view=None)
-
-                # DM 通知
-                try:
-                    applicant = await self.bot.fetch_user(application.applicant_id)
-                    dm_embed = ReviewEmbedBuilder.build_approve_dm(
-                        application=application,
-                        entered_carousel=entered_carousel,
-                    )
-                    await applicant.send(embed=dm_embed)
-                except Exception:
-                    logger.warning(
-                        f"无法向申请者 {application.applicant_id} 发送 DM",
-                        exc_info=True,
-                    )
-
-                # 存档
-                await ReviewEmbedBuilder.archive_review(
-                    bot=self.bot,
-                    config=self.config,
-                    application=application,
-                    status=(
-                        "approved_carousel" if entered_carousel else "approved_waitlist"
-                    ),
-                    reviewer_id=reviewer_id,
-                )
-
-            result_msg = "✅ 已同意申请并通知申请者"
-            if entered_carousel:
-                result_msg += "\n🎨 Banner已加入轮播列表"
-            else:
-                result_msg += "\n⏳ Banner已加入等待列表"
+            # 服务已提交事务，后续只使用 DTO，并逐项隔离 Discord 失败。
+            notifier = BannerReviewNotificationService(self.bot, self.config)
+            await notifier.notify(
+                result.application, result.entered_carousel, interaction.message
+            )
+            for rejected in result.auto_rejected:
+                await notifier.notify(rejected)
+            result_msg = "✅ 已同意申请"
+            result_msg += (
+                "\n🎨 Banner已加入轮播列表"
+                if result.entered_carousel
+                else "\n⏳ Banner已加入等待列表"
+            )
+            result_msg += f"\n已自动拒绝其他 {len(result.auto_rejected)} 个待审核申请"
             await interaction.followup.send(result_msg, ephemeral=True)
 
+        except ValueError as error:
+            await interaction.followup.send(f"❌ {error}", ephemeral=True)
         except Exception:
             logger.error("处理 banner_review_approve 事件时出错", exc_info=True)
             try:
@@ -459,41 +323,13 @@ class BannerEventListener(commands.Cog):
                     application_id, reviewer_id, reason
                 )
 
-                # 更新审核消息
-                original_embed = interaction.message.embeds[0]
-                original_embed.color = discord.Color.red()
-                original_embed.add_field(
-                    name="审核结果",
-                    value=f"❌ 已拒绝 by <@{reviewer_id}>",
-                    inline=False,
-                )
-                original_embed.add_field(name="拒绝理由", value=reason, inline=False)
-                await interaction.message.edit(embed=original_embed, view=None)
+            await BannerReviewNotificationService(self.bot, self.config).notify(
+                application, message=interaction.message
+            )
+            await interaction.followup.send("✅ 已拒绝申请", ephemeral=True)
 
-                # DM 通知
-                try:
-                    applicant = await self.bot.fetch_user(application.applicant_id)
-                    dm_embed = ReviewEmbedBuilder.build_reject_dm(
-                        application=application, reason=reason
-                    )
-                    await applicant.send(embed=dm_embed)
-                except Exception:
-                    logger.warning(
-                        f"无法向申请者 {application.applicant_id} 发送 DM",
-                        exc_info=True,
-                    )
-
-                # 存档
-                await ReviewEmbedBuilder.archive_review(
-                    bot=self.bot,
-                    config=self.config,
-                    application=application,
-                    status="rejected",
-                    reviewer_id=reviewer_id,
-                )
-
-            await interaction.followup.send("✅ 已拒绝申请并通知申请者", ephemeral=True)
-
+        except ValueError as error:
+            await interaction.followup.send(f"❌ {error}", ephemeral=True)
         except Exception:
             logger.error("处理 banner_review_reject 事件时出错", exc_info=True)
             try:

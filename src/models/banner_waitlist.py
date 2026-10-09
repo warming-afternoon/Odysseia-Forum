@@ -1,7 +1,14 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, CheckConstraint, Column, SmallInteger
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    ForeignKey,
+    Integer,
+    SmallInteger,
+)
 from sqlmodel import Field, SQLModel
 
 from shared.enum import TargetType
@@ -20,6 +27,22 @@ class BannerWaitlist(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    application_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(
+            Integer,
+            ForeignKey(
+                "banner_application.id", name="fk_banner_waitlist_application_id"
+            ),
+            nullable=True,
+        ),
+        description="审核通过的申请ID；旧记录留空",
+    )
+    applicant_id: Optional[int] = Field(
+        default=None,
+        sa_column=Column(BigInteger, index=True, nullable=True),
+        description="申请人Discord ID；旧记录留空",
+    )
     thread_id: int = Field(
         sa_column=Column(BigInteger, index=True), description="帖子ID"
     )

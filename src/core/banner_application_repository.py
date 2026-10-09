@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import desc, select
 
@@ -38,10 +39,48 @@ class BannerApplicationRepository:
         await self.session.flush()
         return application
 
+    async def lock_applicant(self, applicant_id: int) -> None:
+        """在事务内串行化同一申请人的申请创建和审核。"""
+        # 命名锁键隔离其他业务，事务结束时 PostgreSQL 自动释放。
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+            {"key": f"banner:applicant:{applicant_id}"},
+        )
+
+    async def reject_other_pending(
+        self,
+        applicant_id: int,
+        approved_id: int,
+        reviewer_id: int,
+        reviewed_at: datetime,
+        reason: str,
+    ) -> List[BannerApplication]:
+        """一次更新并返回同申请人的其他待审核申请。"""
+        # 状态条件保护已审核历史，RETURNING 避免逐条更新和查询。
+        result = await self.session.execute(
+            update(BannerApplication)
+            .where(
+                BannerApplication.applicant_id == applicant_id,
+                BannerApplication.id != approved_id,
+                BannerApplication.status == ApplicationStatus.PENDING.value,
+            )
+            .values(
+                status=ApplicationStatus.REJECTED.value,
+                reviewer_id=reviewer_id,
+                reviewed_at=reviewed_at,
+                reject_reason=reason,
+            )
+            .returning(BannerApplication)
+            .execution_options(populate_existing=True)
+        )
+        return list(result.scalars().all())
+
     async def get_by_id(self, application_id: int) -> Optional[BannerApplication]:
         """按主键查询。"""
         result = await self.session.execute(
-            select(BannerApplication).where(BannerApplication.id == application_id)
+            select(BannerApplication)
+            .where(BannerApplication.id == application_id)
+            .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
 
@@ -80,7 +119,9 @@ class BannerApplicationRepository:
     ) -> bool:
         """回填审核消息 ID 和所在线程 ID。"""
         result = await self.session.execute(
-            select(BannerApplication).where(BannerApplication.id == application_id)
+            select(BannerApplication)
+            .where(BannerApplication.id == application_id)
+            .execution_options(populate_existing=True)
         )
         application = result.scalar_one_or_none()
         if application:
