@@ -48,7 +48,9 @@ class BannerManagement(commands.Cog):
         ]
 
         # 注册申请按钮持久化视图
-        application_view = BannerApplicationButtonView(allowed_role_ids)
+        application_view = BannerApplicationButtonView(
+            allowed_role_ids, self.session_factory
+        )
         self.bot.add_view(application_view)
 
         # 注册审核按钮持久化视图
@@ -135,7 +137,7 @@ class BannerManagement(commands.Cog):
                 role_mention = "指定身份组"
 
             # 创建申请按钮视图
-            view = BannerApplicationButtonView(applicant_role_ids)
+            view = BannerApplicationButtonView(applicant_role_ids, self.session_factory)
 
             # 发送带按钮的消息
             embed = discord.Embed(
@@ -210,7 +212,9 @@ class BannerManagement(commands.Cog):
                     names[cid] = channel.name if channel else str(cid)
             for message in BannerStatusView.build_messages(scopes, names, now):
                 await interaction.followup.send(
-                    message, ephemeral=True, allowed_mentions=discord.AllowedMentions.none()
+                    message,
+                    ephemeral=True,
+                    allowed_mentions=discord.AllowedMentions.none(),
                 )
 
         except Exception as e:

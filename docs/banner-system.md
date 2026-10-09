@@ -88,11 +88,11 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 
 ```
 用户点击 "申请Banner展示" 按钮
-  └─ BannerApplicationButtonView  ── 检查用户角色权限
-       └─ ApplicationFormModal     ── 填写 帖子ID + 封面URL
+  └─ BannerApplicationButtonView  ── 检查用户角色权限和已有 Banner
+       └─ ApplicationFormModal     ── 填写 帖子ID + 封面URL，提交时复查占位
             └─ ChannelSelectionView ── 选择展示范围（全局/某频道）
                  └─ BannerService.validate_and_create_application()
-                      └─ send_review_message() 推送审核消息到审核频道
+                      └─ 统一审核消息服务推送审核消息到审核频道
 ```
 
 ### 审核交互流程
@@ -101,8 +101,10 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 审核员点击 "批准"
   └─ BannerService.approve_application()
        ├─ 轮播未满 → 写入 banner_carousel（start=now, end=now+3天）
-       └─ 轮播已满 → 写入 banner_waitlist（排队等待）
+       ├─ 轮播已满 → 写入 banner_waitlist（排队等待）
+       └─ 同事务自动拒绝该申请人的其他全部 pending 申请
   └─ DM 通知申请人 "你的 Banner 已通过审核"
+  └─ 更新自动拒绝申请的审核消息并移除按钮，逐条私信及归档
   └─ 归档到 archive_thread
 
 审核员点击 "拒绝"
@@ -218,6 +220,20 @@ REST API 位于 [src/api/v1/routers/banner.py](../src/api/v1/routers/banner.py)�
 ---
 
 ## 8. 设计要点
+
+### 申请人与重复申请规则
+- Bot 在按钮点击、表单提交和最终创建三个阶段检查申请人；最终创建在申请人事务锁内复查。
+- 按申请人 Discord ID 跨全部展示范围及帖子/频道目标统一计算；仅统计归属字段均非空的有效轮播及等待项。
+- 轮播采用 `end_time > 当前 UTC 时间` 判断，已过期但尚未清理的记录不阻止申请；已移除记录和历史 `approved` 申请也不阻止申请。
+- 只有待审核申请时允许继续提交。批准一个申请后，在同一事务内拒绝该申请人的其他全部 `pending` 申请，包括上线前提交的申请。
+- 自动拒绝记录本次审核员、审核时间和关联通过申请 ID 的理由，不修改已审核历史或其他申请人的申请。
+- API 仍可提交；审核员也仍可批准已有 Banner 用户的新申请。自动拒绝不会删除已有轮播或等待项。
+
+### 审核事务与消息投递
+- 申请创建、批准、拒绝及审核消息回填共用按申请人划分的 PostgreSQL 事务锁；审核获取锁后重新读取状态，仅处理 `pending`。
+- 批准、轮播/等待写入和自动拒绝一起提交，失败则整体回滚。服务返回 DTO，Discord 通知使用提交后的独立快照。
+- 每条自动拒绝申请执行消息更新、按钮移除、拒绝私信和归档；各动作失败单独记录日志，不撤销审核结果，也不阻断其他动作。
+- Bot 直接发送和 Redis 延迟投递使用同一审核消息服务，发送前读取最新状态，回填消息 ID 后再次同步结果。已审核记录不展示可操作按钮。
 
 ### 容量控制
 - **全局最多 3 个** Banner 同时展示

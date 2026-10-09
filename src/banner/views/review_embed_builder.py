@@ -7,6 +7,7 @@ from shared.enum import ApplicationStatus, TargetType
 
 if TYPE_CHECKING:
     from models import BannerApplication
+    from banner.dto.banner_review_application import BannerReviewApplication
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +17,7 @@ class ReviewEmbedBuilder:
 
     @staticmethod
     def build_review_embed(
-        application: "BannerApplication",
+        application: "BannerApplication | BannerReviewApplication",
         config: dict,
         guild_id: int | None,
         history: Optional[List["BannerApplication"]] = None,
@@ -90,8 +91,42 @@ class ReviewEmbedBuilder:
         return embed
 
     @staticmethod
+    def apply_review_result(
+        embed: discord.Embed,
+        application: "BannerApplication | BannerReviewApplication",
+        entered_carousel: bool | None = None,
+    ) -> discord.Embed:
+        """幂等更新审核结果字段，供审核通知及延迟消息投递共用。"""
+        # 先移除旧结果，避免投递与审核并发时重复添加字段。
+        for index in range(len(embed.fields) - 1, -1, -1):
+            if embed.fields[index].name in ("审核结果", "拒绝理由"):
+                embed.remove_field(index)
+        if application.status == ApplicationStatus.PENDING.value:
+            return embed
+        reviewer = (
+            f" by <@{application.reviewer_id}>" if application.reviewer_id else ""
+        )
+        if application.status == ApplicationStatus.REJECTED.value:
+            embed.color = discord.Color.red()
+            embed.add_field(name="审核结果", value=f"❌ 已拒绝{reviewer}", inline=False)
+            embed.add_field(
+                name="拒绝理由",
+                value=application.reject_reason or "未提供理由",
+                inline=False,
+            )
+        else:
+            embed.color = discord.Color.green()
+            detail = ""
+            if entered_carousel is not None:
+                detail = " - 已加入轮播" if entered_carousel else " - 已加入等待列表"
+            embed.add_field(
+                name="审核结果", value=f"✅ 已同意{detail}{reviewer}", inline=False
+            )
+        return embed
+
+    @staticmethod
     def build_approve_dm(
-        application: "BannerApplication",
+        application: "BannerApplication | BannerReviewApplication",
         entered_carousel: bool,
     ) -> discord.Embed:
         """构建批准后发给申请者的 DM Embed。"""
@@ -116,7 +151,7 @@ class ReviewEmbedBuilder:
 
     @staticmethod
     def build_reject_dm(
-        application: "BannerApplication",
+        application: "BannerApplication | BannerReviewApplication",
         reason: str,
     ) -> discord.Embed:
         """构建拒绝后发给申请者的 DM Embed。"""
@@ -132,7 +167,7 @@ class ReviewEmbedBuilder:
     async def archive_review(
         bot,
         config: dict,
-        application: "BannerApplication",
+        application: "BannerApplication | BannerReviewApplication",
         status: str,
         reviewer_id: int,
     ) -> None:

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, cast
 
-from sqlalchemy import ColumnElement, func
+from sqlalchemy import ColumnElement, Select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import desc, select
 
@@ -22,6 +22,14 @@ class BannerWaitlistRepository:
             select(channel_id_col, func.count()).group_by(channel_id_col)
         )
         return {channel_id: count for channel_id, count in result.all()}
+
+    def owned_banner_query(self, applicant_id: int) -> Select:
+        """构造新归属记录查询，供服务层使用同一 SQL 快照检查占位。"""
+        # 空申请ID及其他申请人的记录不参与限制。
+        return select(BannerWaitlist.id).where(
+            BannerWaitlist.applicant_id == applicant_id,
+            BannerWaitlist.application_id.is_not(None),
+        )
 
     async def get_by_thread(self, thread_id: int) -> List[BannerWaitlist]:
         """按帖子 ID 查询等待项。"""
@@ -46,6 +54,8 @@ class BannerWaitlistRepository:
         cover_image_url: str | None,
         title: str,
         target_type: int = 1,
+        application_id: int | None = None,
+        applicant_id: int | None = None,
     ) -> None:
         """插入一条等待记录（含 position 计算）。"""
         now = datetime.now().replace(microsecond=0)
@@ -67,6 +77,8 @@ class BannerWaitlistRepository:
             cover_image_url=cover_image_url,
             title=title,
             target_type=target_type,
+            application_id=application_id,
+            applicant_id=applicant_id,
             queued_at=now,
             position=new_position,
         )

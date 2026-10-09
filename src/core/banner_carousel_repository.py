@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import List, Optional, cast
 
-from sqlalchemy import ColumnElement
+from sqlalchemy import ColumnElement, Select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import and_, desc, select
 
@@ -50,7 +50,9 @@ class BannerCarouselRepository:
             select(BannerCarousel)
             .where(
                 and_(
-                    channel_id_col.is_not(None) if all_channels else channel_id_col.in_(ordered_channel_ids),
+                    channel_id_col.is_not(None)
+                    if all_channels
+                    else channel_id_col.in_(ordered_channel_ids),
                     end_time_col > now,
                 )
             )
@@ -111,6 +113,15 @@ class BannerCarouselRepository:
         )
         return list(result.scalars().all())
 
+    def owned_banner_query(self, applicant_id: int, now: datetime) -> Select:
+        """构造新归属记录查询，供服务层使用同一 SQL 快照检查占位。"""
+        # 空申请ID及其他申请人的记录不参与限制。
+        return select(BannerCarousel.id).where(
+            BannerCarousel.applicant_id == applicant_id,
+            BannerCarousel.application_id.is_not(None),
+            BannerCarousel.end_time > now,
+        )
+
     async def get_by_thread(self, thread_id: int) -> List[BannerCarousel]:
         """按帖子 ID 查询轮播项。"""
         result = await self.session.execute(
@@ -126,6 +137,8 @@ class BannerCarouselRepository:
         title: str,
         duration_days: int,
         target_type: int = 1,
+        application_id: int | None = None,
+        applicant_id: int | None = None,
     ) -> None:
         """插入一条轮播记录（含 position 计算）。"""
         start_time = utc_now().replace(microsecond=0)
@@ -149,6 +162,8 @@ class BannerCarouselRepository:
             cover_image_url=cover_image_url,
             title=title,
             target_type=target_type,
+            application_id=application_id,
+            applicant_id=applicant_id,
             start_time=start_time,
             end_time=end_time,
             position=new_position,

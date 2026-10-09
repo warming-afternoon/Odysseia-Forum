@@ -697,7 +697,10 @@ class TestBannerCapacity:
         session.commit = AsyncMock()
         session.refresh = AsyncMock()
         service = BannerService(session)
-        application = SimpleNamespace(
+        application = BannerApplication(
+            id=1,
+            applicant_id=123,
+            channel_id=10,
             thread_id=100,
             target_scope="10",
             target_type=TargetType.THREAD.value,
@@ -707,6 +710,8 @@ class TestBannerCapacity:
             reviewer_id=None,
         )
         service.app_repo.get_by_id = AsyncMock(return_value=application)
+        service.app_repo.lock_applicant = AsyncMock()
+        service.app_repo.reject_other_pending = AsyncMock(return_value=[])
         service.carousel_repo.get_count = AsyncMock(return_value=current_count)
         service.carousel_repo.add = AsyncMock()
         service.waitlist_repo.add = AsyncMock()
@@ -718,9 +723,9 @@ class TestBannerCapacity:
             "banner.banner_service.ThreadRepository", lambda _: thread_repo
         )
 
-        _, actual_entered = await service.approve_application(1, 2)
+        result = await service.approve_application(1, 2)
 
-        assert actual_entered is entered_carousel
+        assert result.entered_carousel is entered_carousel
         if entered_carousel:
             service.carousel_repo.add.assert_awaited_once()
             service.waitlist_repo.add.assert_not_awaited()
@@ -733,9 +738,7 @@ class TestBannerCapacity:
         ("active_count", "promoted"),
         [(4, False), (2, True)],
     )
-    async def test_cleanup_refills_only_below_capacity(
-        self, active_count, promoted
-    ):
+    async def test_cleanup_refills_only_below_capacity(self, active_count, promoted):
         """活跃数量达到容量时不补位，少于容量时才补位。"""
         session = MagicMock()
         session.commit = AsyncMock()
@@ -746,6 +749,8 @@ class TestBannerCapacity:
             channel_id=10,
             cover_image_url=None,
             title="等待项",
+            application_id=None,
+            applicant_id=None,
             target_type=TargetType.THREAD.value,
         )
         service.carousel_repo.get_expired = AsyncMock(return_value=[expired])
@@ -781,6 +786,8 @@ class TestBannerCapacity:
             channel_id=10,
             cover_image_url=None,
             title="等待项",
+            application_id=None,
+            applicant_id=None,
             target_type=TargetType.THREAD.value,
         )
         service.carousel_repo.get_by_thread = AsyncMock(return_value=[banner])
