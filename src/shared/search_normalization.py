@@ -4,7 +4,7 @@ from importlib.metadata import version
 
 from opencc import OpenCC
 
-# 实际安装版本随 uv.lock 固定；词典升级自动隔离缓存和历史回填。
+# 实际安装版本随 uv.lock 固定；词典升级自动隔离旧规则缓存。
 # 修改转换顺序或算法时需递增规则末尾的版本号。
 SEARCH_NORMALIZATION_VERSION = f"opencc-{version('opencc')}-s2t-hk2sp-s2t-tw2sp-v1"
 SEARCH_CONVERSION_CONFIGS = ("s2t.json", "hk2sp.json", "s2t.json", "tw2sp.json")
