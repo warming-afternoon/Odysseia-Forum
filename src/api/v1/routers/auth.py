@@ -16,11 +16,11 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
-import orjson
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from api.v1.utils.jwt_utils import sign_jwt, verify_jwt
+from core.discord_member_cache_service import DiscordMemberCacheService
 from core.discord_member_verifier import DiscordMemberVerifier
 from core.oauth_callback_cache import OAuthCallbackCache
 from shared.enum.constant_enum import ConstantEnum
@@ -95,23 +95,8 @@ def initialize_auth_config():
 
 async def _get_cached_member(user_id: str) -> Optional[dict]:
     """从 Redis 读取缓存的 Discord 成员信息"""
-    try:
-        client = RedisManager.get_client()
-        cache_key = f"user:discord:{user_id}"
-        raw = await client.get(cache_key)
-        if raw:
-            cached = orjson.loads(raw)
-            # 旧缓存没有时间字段时，用 Redis 剩余 TTL 反推出最近验证时间
-            if "roles_verified_at" not in cached:
-                remaining_ttl = await client.ttl(cache_key)
-                if 0 <= remaining_ttl <= ROLE_VERIFICATION_TTL_SECONDS:
-                    cached["roles_verified_at"] = time.time() - (
-                        ROLE_VERIFICATION_TTL_SECONDS - remaining_ttl
-                    )
-            return cached
-    except Exception:
-        logger.warning("读取用户缓存失败", exc_info=True)
-    return None
+    # 读取成员身份组、用户资料和验证时间，供登录状态校验使用。
+    return await DiscordMemberCacheService().get_member(user_id)
 
 
 async def _cache_member(user_id: str, member: dict) -> None:
@@ -125,15 +110,8 @@ async def _cache_member(user_id: str, member: dict) -> None:
         )
         return
 
-    try:
-        client = RedisManager.get_client()
-        await client.setex(
-            f"user:discord:{user_id}",
-            int(ConstantEnum.AUTH_CACHE_TTL),
-            orjson.dumps(member).decode(),
-        )
-    except Exception:
-        logger.warning("写入用户缓存失败", exc_info=True)
+    # 保存通过访问资格校验的成员快照，写入故障不影响认证结果。
+    await DiscordMemberCacheService().set_member(user_id, member)
 
 
 async def _delete_cached_member(user_id: str, reason: str) -> None:

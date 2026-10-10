@@ -34,13 +34,13 @@ async def get_user_role(
     response: Response,
     current_user: dict = Depends(require_auth),
 ) -> UserRole:
-    """独立返回主服务器管理组和 BOT 管理员身份，用于前端控制按钮显示。"""
+    """返回是否为主服务器管理组和 BOT 管理员，用于前端控制按钮显示。"""
     cache_headers = {"Cache-Control": "private, no-store"}
     response.headers.update(cache_headers)
     if role_config is None:
         raise HTTPException(503, "用户身份查询服务尚未初始化", headers=cache_headers)
     try:
-        # 每次请求创建独立核验实例，避免复用其他用户或过期的身份组数据。
+        # 查询并判定当前用户是否为管理组身份和 BOT 管理员身份。
         return await UserRoleService(role_config).get_role(int(current_user["id"]))
     except TagError as exc:
         raise HTTPException(exc.status, exc.detail, headers=cache_headers) from exc

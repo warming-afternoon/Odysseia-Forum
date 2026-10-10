@@ -21,11 +21,8 @@ class TagAccessService:
             str(v) for v in self.config.get("bot_admin_user_ids", [])
         }
 
-    async def roles(self, user_id, guild_id):
-        """实时读取成员身份组并在单次业务请求内复用。"""
-        key = (user_id, guild_id)
-        if key in self.cache:
-            return self.cache[key]
+    async def get_member(self, user_id: int, guild_id: int) -> dict:
+        """实时读取完整成员信息，供身份组判断和登录缓存回填使用。"""
         token = os.environ.get("BOT_TOKEN", "")
         if not token or not guild_id:
             raise TagError("permission_unavailable", "成员权限服务尚未就绪", 503)
@@ -38,7 +35,24 @@ class TagAccessService:
             raise TagError("forbidden", "用户不是服务器成员", 403)
         if response.status_code != 200:
             raise TagError("permission_unavailable", "暂时无法核验成员权限", 503)
-        self.cache[key] = {str(v) for v in response.json().get("roles", [])}
+
+        # 拒绝异常成功响应，避免将缺失的身份组误判为普通成员。
+        member = response.json()
+        if not isinstance(member, dict) or not isinstance(member.get("roles"), list):
+            raise ValueError("Discord 成员身份组格式错误")
+        if any(not isinstance(role, (str, int)) for role in member["roles"]):
+            raise ValueError("Discord 成员身份组格式错误")
+        return member
+
+    async def roles(self, user_id, guild_id):
+        """实时读取成员身份组并在单次业务请求内复用。"""
+        key = (user_id, guild_id)
+        if key in self.cache:
+            return self.cache[key]
+
+        # 权限检查使用实时成员数据，避免角色撤销后继续授权。
+        member = await self.get_member(user_id, guild_id)
+        self.cache[key] = {str(v) for v in member["roles"]}
         return self.cache[key]
 
     async def manager(self, user_id, guild_id):
