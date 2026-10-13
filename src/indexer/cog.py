@@ -253,9 +253,21 @@ class Indexer(commands.Cog):
                     thread = await dashboard.queue.get()
 
                     try:
-                        await self.sync_service.sync_thread(
+                        result = await self.sync_service.sync_thread(
                             thread, fetch_if_incomplete=True
                         )
+                        # 返回失败状态也记录到原有列表，保留失败原因字段格式。
+                        if not result.success:
+                            error_reason = result.error_code or "sync_failed"
+                            logging.warning(
+                                "消费者 #%s 同步帖子 %s 失败: %s",
+                                consumer_id,
+                                thread.id,
+                                error_reason,
+                            )
+                            dashboard.progress["failures"].append(
+                                {"id": thread.id, "reason": error_reason}
+                            )
                     except Exception as e:
                         error_reason = f"{type(e).__name__}"
                         logging.error(

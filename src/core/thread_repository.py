@@ -5,9 +5,10 @@ from collections.abc import AsyncIterator
 from typing import List, Optional, Sequence, cast
 
 from sqlalchemy import ColumnElement, case, delete, func, update, text
+from sqlalchemy import select as sqlalchemy_select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
-from sqlmodel import select
+from sqlmodel import col, select
 
 from dto.meta import ChannelThreadCount
 from dto.open_graph import (
@@ -17,6 +18,8 @@ from dto.open_graph import (
     ThreadShareQueryDTO,
 )
 from dto.search.fts_result_dto import FTSResultDTO
+from dto.thread_channel_sync_result import ThreadChannelSyncResult
+from dto.thread_message_snapshot import ThreadMessageSnapshot
 from dto.thread_sync_mutation_result import ThreadSyncMutationResult
 from dto.update_data import UpdateData
 from models import Author, Tag, Thread, ThreadFollow
@@ -39,30 +42,31 @@ class ThreadRepository:
     ) -> ThreadShareQueryDTO | None:
         """查询一个可公开分享的帖子及其作者标量信息。"""
         # 外连接作者，作者记录缺失时仍允许帖子以“未命名”作者展示。
+        # 用 SQLAlchemy 查询多列，col 明确 SQLModel 字段的列表达式类型。
         statement = (
-            select(
-                Thread.thread_id,
-                Thread.title,
-                Thread.first_message_excerpt,
-                Thread.thumbnail_urls,
-                Thread.reaction_count,
-                Thread.reply_count,
-                Thread.collection_count,
-                Thread.created_at,
-                Thread.last_active_at,
-                Author.display_name,
-                Author.avatar_url,
+            sqlalchemy_select(
+                col(Thread.thread_id),
+                col(Thread.title),
+                col(Thread.first_message_excerpt),
+                col(Thread.thumbnail_urls),
+                col(Thread.reaction_count),
+                col(Thread.reply_count),
+                col(Thread.collection_count),
+                col(Thread.created_at),
+                col(Thread.last_active_at),
+                col(Author.display_name),
+                col(Author.avatar_url),
             )
-            .outerjoin(Author, Author.id == Thread.author_id)
+            .outerjoin(Author, col(Author.id) == col(Thread.author_id))
             .where(
-                Thread.thread_id == thread_id,
-                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
-                Thread.not_found_count == 0,
+                col(Thread.thread_id) == thread_id,
+                col(Thread.show_flag).is_(True),
+                col(Thread.not_found_count) == 0,
             )
         )
         if excluded_channel_ids:
             statement = statement.where(
-                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+                col(Thread.channel_id).not_in(excluded_channel_ids)
             )
         row = (await self.session.execute(statement)).first()
         if row is None:
@@ -85,18 +89,18 @@ class ThreadRepository:
         self, author_id: int, excluded_channel_ids: set[int]
     ) -> AuthorStatsQueryDTO:
         """聚合作者全部可公开作品的数量、反应与回复统计。"""
-        statement = select(
-            func.count(Thread.id).label("thread_count"),
-            func.coalesce(func.sum(Thread.reaction_count), 0).label("reaction_count"),
-            func.coalesce(func.sum(Thread.reply_count), 0).label("reply_count"),
+        statement = sqlalchemy_select(
+            func.count(col(Thread.id)).label("thread_count"),
+            func.coalesce(func.sum(col(Thread.reaction_count)), 0).label("reaction_count"),
+            func.coalesce(func.sum(col(Thread.reply_count)), 0).label("reply_count"),
         ).where(
-            Thread.author_id == author_id,
-            Thread.show_flag.is_(True),  # type: ignore[attr-defined]
-            Thread.not_found_count == 0,
+            col(Thread.author_id) == author_id,
+            col(Thread.show_flag).is_(True),
+            col(Thread.not_found_count) == 0,
         )
         if excluded_channel_ids:
             statement = statement.where(
-                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+                col(Thread.channel_id).not_in(excluded_channel_ids)
             )
         row = (await self.session.execute(statement)).one()
         return AuthorStatsQueryDTO(
@@ -110,18 +114,18 @@ class ThreadRepository:
     ) -> OpenGraphLatestWorkDTO | None:
         """按创建时间与帖子 ID 稳定选择作者最新公开作品。"""
         statement = (
-            select(Thread.title, Thread.created_at)
+            sqlalchemy_select(col(Thread.title), col(Thread.created_at))
             .where(
-                Thread.author_id == author_id,
-                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
-                Thread.not_found_count == 0,
+                col(Thread.author_id) == author_id,
+                col(Thread.show_flag).is_(True),
+                col(Thread.not_found_count) == 0,
             )
-            .order_by(Thread.created_at.desc(), Thread.id.asc())
+            .order_by(col(Thread.created_at).desc(), col(Thread.id).asc())
             .limit(1)
         )
         if excluded_channel_ids:
             statement = statement.where(
-                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+                col(Thread.channel_id).not_in(excluded_channel_ids)
             )
         row = (await self.session.execute(statement)).first()
         if row is None:
@@ -133,27 +137,27 @@ class ThreadRepository:
     ) -> AsyncIterator[OpenGraphWorkCandidateDTO]:
         """按热度与稳定次序流式返回作者代表作品候选。"""
         statement = (
-            select(
-                Thread.thread_id,
-                Thread.title,
-                Thread.thumbnail_urls,
-                Thread.reaction_count,
-                Thread.created_at,
+            sqlalchemy_select(
+                col(Thread.thread_id),
+                col(Thread.title),
+                col(Thread.thumbnail_urls),
+                col(Thread.reaction_count),
+                col(Thread.created_at),
             )
             .where(
-                Thread.author_id == author_id,
-                Thread.show_flag.is_(True),  # type: ignore[attr-defined]
-                Thread.not_found_count == 0,
+                col(Thread.author_id) == author_id,
+                col(Thread.show_flag).is_(True),
+                col(Thread.not_found_count) == 0,
             )
             .order_by(
-                Thread.reaction_count.desc(),
-                Thread.created_at.desc(),
-                Thread.id.asc(),
+                col(Thread.reaction_count).desc(),
+                col(Thread.created_at).desc(),
+                col(Thread.id).asc(),
             )
         )
         if excluded_channel_ids:
             statement = statement.where(
-                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+                col(Thread.channel_id).not_in(excluded_channel_ids)
             )
         result = await self.session.stream(statement)
         async for row in result:
@@ -175,15 +179,15 @@ class ThreadRepository:
         unique_thread_ids = set(thread_ids)
         if not unique_thread_ids:
             return True
-        statement = select(func.count(Thread.id)).where(
-            Thread.thread_id.in_(unique_thread_ids),  # type: ignore[attr-defined]
-            Thread.author_id == author_id,
-            Thread.show_flag.is_(True),  # type: ignore[attr-defined]
-            Thread.not_found_count == 0,
+        statement = sqlalchemy_select(func.count(col(Thread.id))).where(
+            col(Thread.thread_id).in_(unique_thread_ids),
+            col(Thread.author_id) == author_id,
+            col(Thread.show_flag).is_(True),
+            col(Thread.not_found_count) == 0,
         )
         if excluded_channel_ids:
             statement = statement.where(
-                Thread.channel_id.not_in(excluded_channel_ids)  # type: ignore[attr-defined]
+                col(Thread.channel_id).not_in(excluded_channel_ids)
             )
         count = (await self.session.execute(statement)).scalar_one()
         return int(count) == len(unique_thread_ids)
@@ -227,6 +231,65 @@ class ThreadRepository:
             created=created,
             tags_changed=tags_changed,
         )
+
+    async def update_thread_channel_with_tags(
+        self, thread_data: dict, tags: list[Tag]
+    ) -> ThreadChannelSyncResult | None:
+        """锁定既有帖子，仅更新频道字段及原生标签。"""
+        # 沿用完整同步的标签治理锁顺序，不补录已被清理的记录。
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock_shared(73902141)")
+        )
+        db_thread = (
+            await self.session.execute(
+                select(Thread)
+                .where(Thread.thread_id == thread_data["thread_id"])
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if db_thread is None:
+            return None
+
+        # 字段白名单避免覆盖消息快照和重建帖的原始身份。
+        visibility_changed = db_thread.not_found_count != 0
+        for key in (
+            "guild_id",
+            "channel_id",
+            "title",
+            "reply_count",
+            "last_active_at",
+        ):
+            setattr(db_thread, key, thread_data[key])
+        db_thread.not_found_count = 0
+        await self.session.flush()
+        tags_changed = await TagBindingRepository(self.session).sync_native(
+            db_thread.id, tags
+        )
+        if tags_changed:
+            db_thread.native_tag_revision += 1
+        await self.session.flush()
+        return ThreadChannelSyncResult(
+            author_id=db_thread.author_id,
+            tags_changed=tags_changed,
+            visibility_changed=visibility_changed,
+        )
+
+    async def update_thread_messages(self, snapshot: ThreadMessageSnapshot) -> bool:
+        """锁定既有帖子，仅更新消息字段并维护摘要搜索向量。"""
+        # ORM 更新保留 before_update 钩子，标题和摘要使用同一锁定行。
+        db_thread = (
+            await self.session.execute(
+                select(Thread)
+                .where(Thread.thread_id == snapshot.thread_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if db_thread is None:
+            return False
+        for key, value in snapshot.model_dump(exclude={"thread_id"}).items():
+            setattr(db_thread, key, value)
+        await self.session.flush()
+        return True
 
     async def delete_thread_index(self, thread_id: int):
         """删除帖子记录"""
@@ -275,7 +338,7 @@ class ThreadRepository:
 
             # 删除 UserCollection 记录（target_type=THREAD，依赖 Discord thread_id）
             delete_collections = delete(UserCollection).where(
-                UserCollection.target_type == CollectionType.THREAD.value,
+                col(UserCollection.target_type) == CollectionType.THREAD.value,
                 cast(ColumnElement, UserCollection.target_id).in_(discord_ids),
             )
             await self.session.execute(delete_collections)
