@@ -279,12 +279,17 @@ async def test_failed_fetch_is_not_deletion_and_message_routes(setup_tags):
     from tag.cog import TagCog
 
     factory, config, _ = setup_tags
+
+    async def submit(*, coro_factory, priority):
+        return await coro_factory()
+
     bot = SimpleNamespace(
         fetch_channel=AsyncMock(side_effect=PermissionError()),
         event_mediator=SimpleNamespace(publish=AsyncMock()),
+        api_scheduler=SimpleNamespace(submit=AsyncMock(side_effect=submit)),
     )
     with pytest.raises(PermissionError):
-        await SyncService(bot, factory).pre_sync_forum_tags(SimpleNamespace(id=20))
+        await SyncService(bot, factory).pre_sync_forum_tags(20)
     bot.event_mediator.publish.assert_not_awaited()
     user = SimpleNamespace(send=AsyncMock())
     bot = SimpleNamespace(get_user=lambda _: user)
