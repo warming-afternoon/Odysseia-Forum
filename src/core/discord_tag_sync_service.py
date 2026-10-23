@@ -2,8 +2,8 @@ from sqlalchemy import select, text, update
 
 from core.discord_tag_source_repository import DiscordTagSourceRepository
 from models import DiscordTagSource, DiscordTagSyncState, Tag, Thread
-from models.tag_binding import TagBinding
 from models.operation_log import OperationLog
+from models.tag_binding import TagBinding
 from models.tag_notification_task import TagNotificationTask
 from shared.tag_error import TagError
 from shared.time_utils import utc_now
@@ -67,17 +67,27 @@ class DiscordTagSyncService:
                 source.synced_at = event.observed_at
         await self.session.flush()
         by_id = {s.id: s for s in sources}
-        bindings = list(
-            (
-                await self.session.execute(
-                    select(TagBinding).where(
-                        TagBinding.discord_source_id.in_(by_id),
-                        TagBinding.ended_at.is_(None),
-                        TagBinding.binding_source == "discord_sync",
+        # 只有既有来源的概念或删除状态改变才需要迁移绑定。
+        # 新来源尚无历史绑定，确认时间和频道补齐也不改变绑定归属。
+        changed_source_ids = [
+            source.id
+            for source in sources
+            if source.id in original
+            and original[source.id] != (source.tag_id, source.deleted_at)
+        ]
+        bindings = []
+        if changed_source_ids:
+            bindings = list(
+                (
+                    await self.session.execute(
+                        select(TagBinding).where(
+                            TagBinding.discord_source_id.in_(changed_source_ids),
+                            TagBinding.ended_at.is_(None),
+                            TagBinding.binding_source == "discord_sync",
+                        )
                     )
-                )
-            ).scalars()
-        )
+                ).scalars()
+            )
         renamed = []
         affected = set()
         for binding in bindings:
