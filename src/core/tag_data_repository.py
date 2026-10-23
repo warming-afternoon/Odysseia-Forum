@@ -8,18 +8,20 @@ class TagDataRepository:
         self.session = session
         self.model = model
 
-    async def rows(self, *conditions, lock=False, limit=None):
+    async def rows(self, *conditions, lock=False, limit=None, refresh=False):
         """按条件读取当前表，可在事务中锁定结果。"""
         statement = select(self.model).where(*conditions)
+        if refresh:
+            statement = statement.execution_options(populate_existing=True)
         if lock:
             statement = statement.with_for_update()
         if limit is not None:
             statement = statement.limit(limit)
         return list((await self.session.execute(statement)).scalars().all())
 
-    async def one(self, *conditions, lock=False):
+    async def one(self, *conditions, lock=False, refresh=False):
         """读取首个匹配记录。"""
-        rows = await self.rows(*conditions, lock=lock, limit=1)
+        rows = await self.rows(*conditions, lock=lock, limit=1, refresh=refresh)
         return rows[0] if rows else None
 
     async def add(self, **values):

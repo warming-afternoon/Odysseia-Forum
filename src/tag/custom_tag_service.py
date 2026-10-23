@@ -72,7 +72,18 @@ class CustomTagService:
         # 池维护与绑定写入互斥，防止软删除和新增绑定交错。
         exclusive = command.action in ("manage", "merge")
         lock = "pg_advisory_xact_lock" if exclusive else "pg_advisory_xact_lock_shared"
-        await self.session.execute(text(f"SELECT {lock}(73902141)"))
+        # 目标操作在实时权限查询之后取得共享锁，避免网络等待拖住池维护。
+        target_action = command.action in (
+            "read",
+            "replace",
+            "propose",
+            "proposals",
+            "review",
+            "vote",
+            "audit",
+        ) and command.payload.get("target_type") in ("thread", "booklist")
+        if not target_action:
+            await self.session.execute(text(f"SELECT {lock}(73902141)"))
         return await handlers[command.action](command.actor_id, command.payload)
 
     async def log(self, action, actor, kind, target_id, tag_id=None, **detail):
@@ -92,8 +103,8 @@ class CustomTagService:
             detail=detail,
         )
 
-    async def target(self, actor, payload, manage=False, audit=False):
-        """锁定目标并检查当前访问权限。"""
+    async def target(self, actor, payload, manage=False, audit=False, lock=True):
+        """无锁核验实时权限，再刷新目标状态并按需获取写锁。"""
         kind, target_id = payload["target_type"], int(payload["target_id"])
         if kind not in ("thread", "booklist"):
             raise TagError("invalid_target", "目标类型无效", 422)
@@ -103,12 +114,28 @@ class CustomTagService:
             if kind == "thread"
             else Booklist.id
         )
-        target = await self.repo(model).one(key == target_id, lock=True)
+        target = await self.repo(model).one(key == target_id)
         if target is None:
             raise TagError("not_found", "目标不存在", 404)
+        # 保存标量快照，避免 populate_existing 原地刷新后丢失授权依据。
+        access_fields = (
+            (
+                "id", "guild_id", "channel_id", "author_id", "show_flag", "not_found_count"
+            )
+            if kind == "thread"
+            else ("id", "owner_id", "is_public")
+        )
+        access_state = tuple(getattr(target, field) for field in access_fields)
         allowed = await self.access.access(
             actor, kind, target, manage=manage, audit=audit
         )
+        await self.session.execute(text("SELECT pg_advisory_xact_lock_shared(73902141)"))
+        target = await self.repo(model).one(key == target_id, lock=lock, refresh=True)
+        if target is None:
+            raise TagError("not_found", "目标不存在", 404)
+        if tuple(getattr(target, field) for field in access_fields) != access_state:
+            # 权限相关状态变化时重新发起请求，不在持锁期间追加外部查询。
+            raise TagError("concurrent_conflict", "目标访问权限已变化，请刷新后重试")
         return kind, target.id, target, allowed
 
     async def bindings(self, kind, target_id):
@@ -142,19 +169,30 @@ class CustomTagService:
     async def snapshot(self, actor, kind, target_id, target):
         """批量生成目标标签快照与并发版本。"""
         bindings = await self.bindings(kind, target_id)
-        native = await self.native_tags(kind, target)
+        # 只读快照不持目标行锁，标签及来源必须在同一查询中读取。
+        native_rows = []
+        if kind == "thread":
+            native_rows = (
+                await self.session.execute(
+                    select(Tag, TagBinding.discord_source_id)
+                    .join(TagBinding, Tag.id == TagBinding.tag_id)
+                    .where(
+                        TagBinding.target_type == "thread",
+                        TagBinding.target_id == target_id,
+                        TagBinding.binding_source == "discord_sync",
+                        TagBinding.ended_at.is_(None),
+                        Tag.deleted_at.is_(None),
+                        Tag.source == "discord",
+                    )
+                )
+            ).all()
+        native = [tag for tag, _ in native_rows]
+        native_source = {tag.id: str(source_id) for tag, source_id in native_rows}
         tags = await self.repo(Tag).rows(Tag.id.in_(bindings), Tag.deleted_at.is_(None))
         self.tag_cache.update({tag.id: tag for tag in tags})
         self.source_cache.update(
             await load_discord_sources(self.session, [t.id for t in tags + native])
         )
-        native_bindings = await self.repo(TagBinding).rows(
-            TagBinding.target_type == kind,
-            TagBinding.target_id == target_id,
-            TagBinding.binding_source == "discord_sync",
-            TagBinding.ended_at.is_(None),
-        )
-        native_source = {b.tag_id: str(b.discord_source_id) for b in native_bindings}
         votes = await self.repo(TagVote).rows(
             TagVote.binding_id.in_([b.id for b in bindings.values()]),
             TagVote.user_id == actor,
@@ -216,7 +254,7 @@ class CustomTagService:
 
     async def read(self, actor, payload):
         """读取目标标签，不披露其他用户身份。"""
-        kind, tid, target, _ = await self.target(actor, payload)
+        kind, tid, target, _ = await self.target(actor, payload, lock=False)
         return await self.snapshot(actor, kind, tid, target)
 
     async def validate(self, kind, target, current, desired):
@@ -374,7 +412,7 @@ class CustomTagService:
 
     async def proposals(self, actor, payload):
         """提供作者审核队列或申请人自己的申请历史。"""
-        kind, tid, _, allowed = await self.target(actor, payload)
+        kind, tid, _, allowed = await self.target(actor, payload, lock=False)
         conditions = [TagProposal.target_type == kind, TagProposal.target_id == tid]
         if payload.get("review_queue"):
             if not allowed:
@@ -785,7 +823,7 @@ class CustomTagService:
                 raise TagError("forbidden", "仅 BOT 管理员可查标签池审计", 403)
             tid = int(payload["target_id"])
         else:
-            kind, tid, _, _ = await self.target(actor, payload, audit=True)
+            kind, tid, _, _ = await self.target(actor, payload, audit=True, lock=False)
         statement = (
             select(OperationLog)
             .where(
