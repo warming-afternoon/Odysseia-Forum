@@ -119,6 +119,11 @@ class RedisTrendService:
         self, metric: str, days: int, channel_ids: list[int]
     ) -> Optional[str]:
         """获取或构建多频道趋势子榜缓存。"""
+        scope_cache_key = self._get_channel_scope_cache_key(metric, days, channel_ids)
+        redis = RedisManager.get_client()
+        if await redis.exists(scope_cache_key):
+            return scope_cache_key
+
         channel_cache_keys = await asyncio.gather(
             *[
                 self._get_or_build_channel_cache(metric, days, channel_id)
@@ -128,7 +133,6 @@ class RedisTrendService:
         if any(cache_key is None for cache_key in channel_cache_keys):
             return None
 
-        scope_cache_key = self._get_channel_scope_cache_key(metric, days, channel_ids)
         return await self._get_or_build_aggregate_cache(
             scope_cache_key,
             [cache_key for cache_key in channel_cache_keys if cache_key],
