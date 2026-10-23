@@ -245,14 +245,15 @@ class CacheService:
 
             # ── 回填 Redis ──
             if redis:
-                for tid in miss_ids:
-                    infos = db_map.get(tid, [])
-                    key = CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
+                # 每批最多一百条，避免逐帖往返或单个超大 pipeline 占用内存。
+                for start in range(0, len(miss_ids), 100):
                     try:
-                        if infos:
-                            await redis.setex(key, 3600, json.dumps(infos))
-                        else:
-                            await redis.setex(key, 3600, "[]")
+                        async with redis.pipeline(transaction=False) as pipeline:
+                            for tid in miss_ids[start : start + 100]:
+                                infos = db_map.get(tid, [])
+                                key = CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
+                                pipeline.setex(key, 3600, json.dumps(infos) if infos else "[]")
+                            await pipeline.execute()
                     except Exception:
                         pass
 
