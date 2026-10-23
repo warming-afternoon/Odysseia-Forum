@@ -13,6 +13,7 @@ from sqlmodel import col
 from core.author_repository import AuthorRepository
 from core.notification_fanout_service import NotificationFanoutService
 from core.tag_repository import TagRepository
+from core.tag_source_write_required import TagSourceWriteRequired
 from core.thread_repository import ThreadRepository
 from dto.events.discord_tags_snapshot import DiscordTagsSnapshot
 from dto.open_graph import ThreadSyncResult
@@ -377,22 +378,34 @@ class SyncService:
 
         try:
             tags_data = await self._prepare_thread_tags(thread)
-            async with self.session_factory() as session:
-                tags = await TagRepository(session).get_or_create_tags(
-                    tags_data, update_names=False, channel_id=thread.parent_id
-                )
-                repo = ThreadRepository(session=session)
-                mutation = await repo.add_or_update_thread_with_tags(
-                    thread_data=thread_data, tags=tags
-                )
-                if mutation.created:
-                    # 在当前事务中直接从作者关注关系生成通知
-                    await NotificationFanoutService(session).fanout_author_new_thread(
-                        author_id=thread_data["author_id"],
-                        event_source_id=thread.id,
-                        thread_id=thread.id,
-                    )
-                await session.commit()
+            for allow_source_changes in (False, True):
+                try:
+                    async with self.session_factory() as session:
+                        tags = await TagRepository(session).get_or_create_tags(
+                            tags_data,
+                            update_names=False,
+                            channel_id=thread.parent_id,
+                            allow_source_changes=allow_source_changes,
+                        )
+                        repo = ThreadRepository(session=session)
+                        mutation = await repo.add_or_update_thread_with_tags(
+                            thread_data=thread_data, tags=tags
+                        )
+                        if mutation.created:
+                            # 来源、绑定与新帖通知仍在同一事务中提交。
+                            await NotificationFanoutService(
+                                session
+                            ).fanout_author_new_thread(
+                                author_id=thread_data["author_id"],
+                                event_source_id=thread.id,
+                                thread_id=thread.id,
+                            )
+                        await session.commit()
+                    break
+                except TagSourceWriteRequired:
+                    # 上一会话已关闭并回滚，不能在共享锁事务内原地升级。
+                    if allow_source_changes:
+                        raise
         except Exception:
             logger.exception(f"帖子 {thread.id} 数据库提交失败")
             return ThreadSyncResult(success=False, error_code="database_failed")
@@ -518,18 +531,30 @@ class SyncService:
             assert thread is not None
             try:
                 tags_data = await self._prepare_thread_tags(thread)
-                async with self.session_factory() as session:
-                    tags = await TagRepository(session).get_or_create_tags(
-                        tags_data, update_names=False, channel_id=thread.parent_id
-                    )
-                    mutation = await ThreadRepository(
-                        session
-                    ).update_thread_channel_with_tags(self._channel_data(thread), tags)
-                    if mutation is None:
-                        return ThreadSyncResult(
-                            success=False, error_code="thread_missing"
-                        )
-                    await session.commit()
+                for allow_source_changes in (False, True):
+                    try:
+                        async with self.session_factory() as session:
+                            tags = await TagRepository(session).get_or_create_tags(
+                                tags_data,
+                                update_names=False,
+                                channel_id=thread.parent_id,
+                                allow_source_changes=allow_source_changes,
+                            )
+                            mutation = await ThreadRepository(
+                                session
+                            ).update_thread_channel_with_tags(
+                                self._channel_data(thread), tags
+                            )
+                            if mutation is None:
+                                return ThreadSyncResult(
+                                    success=False, error_code="thread_missing"
+                                )
+                            await session.commit()
+                        break
+                    except TagSourceWriteRequired:
+                        # 释放共享锁后新建会话，独占重读来源和权威检查点。
+                        if allow_source_changes:
+                            raise
             except Exception:
                 logger.exception("频道审计提交失败: thread_id=%s", thread_id)
                 return ThreadSyncResult(success=False, error_code="database_failed")

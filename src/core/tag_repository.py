@@ -22,10 +22,12 @@ class TagRepository:
         tags_data: dict[int, str],
         update_names: bool = True,
         channel_id: int | None = None,
+        *,
+        allow_source_changes: bool = True,
     ) -> List[Tag]:
         """解析原生来源返回标准概念；名称更新仅由完整频道快照负责。"""
         sources = await DiscordTagSourceRepository(self.session).ensure(
-            tags_data, channel_id
+            tags_data, channel_id, allow_source_changes=allow_source_changes
         )
         if not sources:
             return []
