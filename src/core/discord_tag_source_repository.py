@@ -1,5 +1,6 @@
 from sqlalchemy import select, text
 
+from core.tag_source_write_required import TagSourceWriteRequired
 from models import DiscordTagSource, DiscordTagSyncState, Tag
 from models.tag_notification_task import TagNotificationTask
 
@@ -51,17 +52,25 @@ class DiscordTagSourceRepository:
                 )
         return result
 
-    async def ensure(self, tags_data, channel_id=None):
+    async def ensure(
+        self, tags_data, channel_id=None, *, allow_source_changes: bool = True
+    ):
         """帖子快照仅补齐未知来源，不用缓存名称覆盖完整频道同步结果。"""
         if not tags_data:
             return []
-        await self.session.execute(text("SELECT pg_advisory_xact_lock(73902141)"))
+        # 普通同步只读取来源；需要补齐时由调用方退出当前事务后独占重试。
+        lock = (
+            "pg_advisory_xact_lock"
+            if allow_source_changes
+            else "pg_advisory_xact_lock_shared"
+        )
+        await self.session.execute(text(f"SELECT {lock}(73902141)"))
         existing = list(
             (
                 await self.session.execute(
-                    select(DiscordTagSource).where(
-                        DiscordTagSource.discord_tag_id.in_(tags_data)
-                    )
+                    select(DiscordTagSource)
+                    .where(DiscordTagSource.discord_tag_id.in_(tags_data))
+                    .execution_options(populate_existing=True)
                 )
             ).scalars()
         )
@@ -69,9 +78,16 @@ class DiscordTagSourceRepository:
         # 已有完整频道检查点时，未知缓存标签不能绕过权威快照重新创建来源。
         missing = tags_data.keys() - known
         if channel_id is not None and await self.session.get(
-            DiscordTagSyncState, channel_id
+            DiscordTagSyncState, channel_id, populate_existing=True
         ):
             missing = set()
+        needs_channel = channel_id is not None and any(
+            source.channel_id is None for source in existing
+        )
+        if not allow_source_changes:
+            if missing or needs_channel:
+                raise TagSourceWriteRequired()
+            return [source for source in existing if source.deleted_at is None]
         concepts = await self.concepts(tags_data[key] for key in missing)
         for key in sorted(missing):
             source = DiscordTagSource(
