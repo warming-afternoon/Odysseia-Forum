@@ -1,10 +1,10 @@
-from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload, joinedload
-from sqlmodel import select, case
-from models import Thread, Tag
-from dto.preferences.user_search_preferences_dto import UserSearchPreferencesDTO
+from sqlalchemy.orm import joinedload, selectinload
+from sqlmodel import case, select
+
 from core.thread_repository import ThreadRepository
+from dto.preferences.user_search_preferences_dto import UserSearchPreferencesDTO
+from models import Tag, Thread
 
 
 class DiscoveryRepository:
@@ -13,26 +13,35 @@ class DiscoveryRepository:
     def __init__(
         self,
         session: AsyncSession,
-        exclude_channel_ids: Optional[List[int]] = None,
+        exclude_channel_ids: list[int] | None = None,
     ):
         self.session = session
         self.thread_repo = ThreadRepository(session)
         self.exclude_channel_ids = exclude_channel_ids or []
+        # 仓储随请求创建，只缓存偏好条件，不缓存轨道范围、排序或分页。
+        self._preference_conditions: dict[str, tuple] = {}
 
     async def _apply_preferences_filter(
-        self, stmt, prefs: Optional[UserSearchPreferencesDTO]
+        self, stmt, prefs: UserSearchPreferencesDTO | None
     ):
         """应用用户偏好到查询构建器"""
         if not prefs:
             return stmt
 
+        # 固定本次解析的值，避免调用方原地修改 DTO 后误用旧条件。
+        prefs = prefs.model_copy(deep=True)
+        cache_key = prefs.model_dump_json()
+        if cache_key in self._preference_conditions:
+            return stmt.where(*self._preference_conditions[cache_key])
+        conditions = []
+
         # 频道过滤
         if prefs.preferred_channels:
-            stmt = stmt.where(Thread.channel_id.in_(prefs.preferred_channels))  # type: ignore
+            conditions.append(Thread.channel_id.in_(prefs.preferred_channels))  # type: ignore
 
         # 作者过滤
         if prefs.exclude_authors:
-            stmt = stmt.where(Thread.author_id.notin_(prefs.exclude_authors))  # type: ignore
+            conditions.append(Thread.author_id.notin_(prefs.exclude_authors))  # type: ignore
 
         # 标签过滤 (先查出 ID 再用 EXISTS 进行 OR 匹配)
         if prefs.include_tags or prefs.exclude_tags:
@@ -59,9 +68,9 @@ class DiscoveryRepository:
 
             if include_tag_ids:
                 # 默认 or 逻辑，只要带有一个偏好标签就放行
-                stmt = stmt.where(Thread.tags.any(Tag.id.in_(include_tag_ids)))  # type: ignore
+                conditions.append(Thread.tags.any(Tag.id.in_(include_tag_ids)))  # type: ignore
             if exclude_tag_ids:
-                stmt = stmt.where(~Thread.tags.any(Tag.id.in_(exclude_tag_ids)))  # type: ignore
+                conditions.append(~Thread.tags.any(Tag.id.in_(exclude_tag_ids)))  # type: ignore
 
         # FTS5 正反选关键词过滤处理
         fts_result = await self.thread_repo.get_fts_matched_thread_ids(
@@ -71,20 +80,21 @@ class DiscoveryRepository:
         )
 
         if fts_result.has_include:
-            for cond in fts_result.include_conditions:
-                stmt = stmt.where(cond)
+            conditions.extend(fts_result.include_conditions)
         if fts_result.has_exclude:
-            stmt = stmt.where(~fts_result.exclude_condition)
+            conditions.append(~fts_result.exclude_condition)
 
-        return stmt
+        # 解析全部成功后发布缓存，失败重试不会使用部分构建的条件。
+        self._preference_conditions[cache_key] = tuple(conditions)
+        return stmt.where(*conditions)
 
     async def get_latest_threads(
         self,
         limit: int,
         offset: int,
-        prefs: Optional[UserSearchPreferencesDTO],
-        channel_ids: Optional[List[int]] = None,
-    ) -> List[Thread]:
+        prefs: UserSearchPreferencesDTO | None,
+        channel_ids: list[int] | None = None,
+    ) -> list[Thread]:
         """拉取最新的帖子列表"""
         stmt = select(Thread).where(
             Thread.not_found_count == 0, Thread.show_flag.is_(True)
@@ -109,10 +119,10 @@ class DiscoveryRepository:
 
     async def get_threads_by_ids_ordered(
         self,
-        thread_ids: List[int],
-        prefs: Optional[UserSearchPreferencesDTO],
-        channel_ids: Optional[List[int]] = None,
-    ) -> List[Thread]:
+        thread_ids: list[int],
+        prefs: UserSearchPreferencesDTO | None,
+        channel_ids: list[int] | None = None,
+    ) -> list[Thread]:
         """拉取指定ID列表的帖子并依靠传入的列表保持顺序不变"""
         if not thread_ids:
             return []
