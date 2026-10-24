@@ -80,7 +80,7 @@ class BooklistService:
             user_id, thread_ids
         )
 
-        # 执行书单添加操作（内部会 commit + refresh，返回 ORM 对象）
+        # 执行书单添加操作（内部提交后批量回读，返回 ORM 对象）
         added_items = await self.booklist_repo.add_threads_to_booklist(
             booklist_id, items
         )

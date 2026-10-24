@@ -451,11 +451,22 @@ class BooklistRepository:
             self.session.add(booklist)
 
         try:
+            # 提交会使 ORM 属性过期，先保存新项目主键和请求顺序。
+            await self.session.flush()
+            new_item_ids = [item.id for item in new_booklist_items]
             await self.session.commit()
-            for item in new_booklist_items:
-                await self.session.refresh(item)
+            # 有界批量回读全部字段，避免逐项 refresh 及超大 IN 参数列表。
+            reloaded_items = {}
+            for offset in range(0, len(new_item_ids), 500):
+                statement = (
+                    select(BooklistItem)
+                    .where(BooklistItem.id.in_(new_item_ids[offset : offset + 500]))
+                    .execution_options(populate_existing=True)
+                )
+                result = await self.session.execute(statement)
+                reloaded_items.update({item.id: item for item in result.scalars().all()})
             # logger.info(f"{len(new_booklist_items)} 个帖子已添加到书单 {booklist_id}")
-            return new_booklist_items
+            return [reloaded_items[item_id] for item_id in new_item_ids]
         except Exception as e:
             logger.error(f"批量添加帖子到书单失败: {e}", exc_info=True)
             await self.session.rollback()
