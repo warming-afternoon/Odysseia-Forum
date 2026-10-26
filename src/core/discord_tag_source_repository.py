@@ -1,6 +1,7 @@
 from sqlalchemy import select, text
 
 from core.tag_source_write_required import TagSourceWriteRequired
+from dto.meta.tag_meta import TagMeta
 from models import DiscordTagSource, DiscordTagSyncState, Tag
 from models.tag_notification_task import TagNotificationTask
 
@@ -11,6 +12,30 @@ class DiscordTagSourceRepository:
     def __init__(self, session):
         """复用当前事务。"""
         self.session = session
+
+    async def get_active_channel_tags(
+        self, channel_ids: list[int]
+    ) -> dict[int, list[TagMeta]]:
+        """批量读取有效原生标签，用 Discord ID 和原始名称构建目录。"""
+        if not channel_ids:
+            return {}
+        # 原生来源 ID 不等于标准标签 ID，不能使用概念映射替代频道标签身份。
+        result = await self.session.execute(
+            select(
+                DiscordTagSource.channel_id,
+                DiscordTagSource.discord_tag_id,
+                DiscordTagSource.name,
+            )
+            .where(
+                DiscordTagSource.channel_id.in_(channel_ids),
+                DiscordTagSource.deleted_at.is_(None),
+            )
+            .order_by(DiscordTagSource.channel_id, DiscordTagSource.discord_tag_id)
+        )
+        tags: dict[int, list[TagMeta]] = {}
+        for channel_id, discord_id, name in result:
+            tags.setdefault(channel_id, []).append(TagMeta(id=discord_id, name=name))
+        return tags
 
     async def concepts(self, names):
         """同名 DC 概念唯一，避免通过重复 INSERT 消耗序列。"""

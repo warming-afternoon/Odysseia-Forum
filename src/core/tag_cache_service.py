@@ -5,6 +5,7 @@ from typing import Dict, List
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.tag_repository import TagRepository
+from dto.tag_cache_snapshot_dto import TagCacheSnapshotDTO
 
 logger = logging.getLogger(__name__)
 
@@ -22,37 +23,41 @@ class TagCacheService:
         self.global_merged_tags: list[str] = []
 
     async def build_cache(self):
-        """
-        从数据库加载所有标签，并构建/重建缓存。
-        这应该在机器人启动时以及索引更新后调用。
-        """
+        """完成数据库读取与快照构建后，再替换当前缓存。"""
         logger.debug("Building tag cache...")
         async with self.session_factory() as session:
-            tag_service = TagRepository(session)
-            all_tags = await tag_service.get_all_tags()
-            all_unique_tags_from_indexed_threads = (
-                await tag_service.get_all_unique_tags_from_indexed_threads()
-            )
+            snapshot = await self.load_snapshot(session)
+        self.apply_snapshot(snapshot)
 
-        self._id_to_name.clear()
-        self._name_to_ids.clear()
-
+    async def load_snapshot(self, session) -> TagCacheSnapshotDTO:
+        """在调用方事务内读取标签，全部转换成普通数据后返回。"""
+        tag_service = TagRepository(session)
+        all_tags = await tag_service.get_all_tags()
+        indexed_tags = await tag_service.get_all_unique_tags_from_indexed_threads()
+        id_to_name = {}
         temp_name_to_ids = defaultdict(list)
         for tag in all_tags:
             if tag.deleted_at is not None:
                 continue
-            self._id_to_name[tag.id] = tag.name
+            id_to_name[tag.id] = tag.name
             temp_name_to_ids[tag.name].append(tag.id)
-
-        self._name_to_ids = dict(temp_name_to_ids)
-        self._unique_tag_names = sorted(self._name_to_ids.keys())
-        logger.info(
-            f"Tag cache built. Found {len(all_tags)} tags, "
-            f"{len(self._unique_tag_names)} unique names."
+        # 不清空旧缓存，查询或转换失败时旧快照仍可继续使用。
+        return TagCacheSnapshotDTO(
+            id_to_name=id_to_name,
+            name_to_ids=dict(temp_name_to_ids),
+            unique_tag_names=sorted(temp_name_to_ids),
+            global_merged_tags=sorted(tag.name for tag in indexed_tags),
         )
 
-        self.global_merged_tags = sorted(
-            [tag.name for tag in all_unique_tags_from_indexed_threads]
+    def apply_snapshot(self, snapshot: TagCacheSnapshotDTO):
+        """不经过异步等待，统一替换已经完整构建的标签缓存。"""
+        self._id_to_name = snapshot.id_to_name
+        self._name_to_ids = snapshot.name_to_ids
+        self._unique_tag_names = snapshot.unique_tag_names
+        self.global_merged_tags = snapshot.global_merged_tags
+        logger.info(
+            f"Tag cache built. Found {len(self._id_to_name)} tags, "
+            f"{len(self._unique_tag_names)} unique names."
         )
 
     def get_tag_name_by_id(self, tag_id: int) -> str | None:

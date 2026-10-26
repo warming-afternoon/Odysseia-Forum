@@ -3,7 +3,7 @@ import json
 import logging
 import sys
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, ORJSONResponse
 from sqlalchemy import text
@@ -16,6 +16,7 @@ from api.v1.routers import (
     banner,
     booklists,
     collections,
+    discovery,
     fetch_images,
     follows,
     meta,
@@ -24,7 +25,6 @@ from api.v1.routers import (
     preferences,
     search,
     tags,
-    discovery,
     tournaments,
 )
 from shared.database import AsyncSessionFactory
@@ -133,8 +133,8 @@ app.include_router(tournaments.router, prefix="/v1")
 
 # 包含 v1 的健康检查端点
 @app.get("/v1/health", summary="健康检查", tags=["系统"])
-async def health_check():
-    """API 服务健康检查端点，检查数据库和 Redis 连通性"""
+async def health_check(request: Request):
+    """检查数据库、Redis 和 API 自身的频道缓存就绪状态。"""
     healthy = True
     checks = {}
 
@@ -158,13 +158,13 @@ async def health_check():
         healthy = False
         logger.warning("健康检查：Redis 不可达", exc_info=True)
 
-    # Bot 元数据就绪检查（仅观测，不影响健康状态）
-    try:
-        redis = RedisManager.get_client()
-        ready = await redis.get("cache:forum-ready")
-        checks["bot_metadata"] = "ready" if ready else "not_ready"
-    except Exception:
-        checks["bot_metadata"] = "unknown"
+    # 频道缓存由 API 自己构建，无需 BOT 写入任何 Redis 就绪标志。
+    cache = getattr(request.app.state, "cache_service", None)
+    if cache is None or not cache.is_ready:
+        checks["channel_metadata"] = "not_ready"
+        healthy = False
+    else:
+        checks["channel_metadata"] = "ready" if cache.last_refresh_succeeded else "stale"
 
     status_code = 200 if healthy else 503
     return JSONResponse(

@@ -209,7 +209,9 @@ async def main():
         config = json.load(f)
 
     # 初始化 Redis
-    redis_url = config.get("redis_url", "redis://odysseia-redis:6379/0")
+    redis_url = os.environ.get(
+        "REDIS_URL", config.get("redis_url", "redis://odysseia-redis:6379/0")
+    )
     await RedisManager.init_redis(redis_url)
 
     # 初始化数据库
@@ -223,15 +225,15 @@ async def main():
     initialize_rate_limit(config)
 
     # 创建并构建缓存服务
+    tag_cache_service = TagCacheService(AsyncSessionFactory)
     cache_service = ApiCacheService(
         session_factory=AsyncSessionFactory,
         redis_client=RedisManager.get_client(),
+        tag_cache_service=tag_cache_service,
     )
     await cache_service.build_cache()
+    fastapi_app.state.cache_service = cache_service
     cache_service.start()
-
-    tag_cache_service = TagCacheService(AsyncSessionFactory)
-    await tag_cache_service.build_cache()
 
     impression_cache_service = ImpressionCacheService(
         session_factory=AsyncSessionFactory,

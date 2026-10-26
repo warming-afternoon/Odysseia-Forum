@@ -437,12 +437,6 @@ async def main():
     )
     await RedisManager.init_redis(redis_url)  # type: ignore[arg-type]
 
-    # 清除上一次运行残留的就绪标志，确保 API 不会在 Bot 重启期间读到过期状态
-    try:
-        await RedisManager.get_client().delete("cache:forum-ready")
-    except Exception:
-        pass
-
     bot = MyBot(intents=intents, config=config)
 
     @bot.event

@@ -61,19 +61,3 @@ class ChannelSnapshotDTO:
             if isinstance(channel, discord.ForumChannel)
             else (),
         )
-
-    def to_cache_entry(self) -> dict:
-        """生成兼容现有 API 的频道 Redis 快照，不暴露新增内部字段。"""
-        # Redis 继续保留原生标签 ID 和展示顺序，数据库使用现有标签来源表。
-        return {
-            "id": self.channel_id,
-            "name": self.name,
-            "guild": {"id": self.guild_id, "name": self.guild_name or ""},
-            "category_id": self.category_id,
-            "category": {"id": self.category_id, "name": self.category_name}
-            if self.category_id is not None and self.category_name is not None
-            else None,
-            "available_tags": [
-                {"id": tag_id, "name": name} for tag_id, name in self.available_tags
-            ],
-        }

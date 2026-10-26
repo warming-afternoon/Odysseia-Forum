@@ -1,3 +1,4 @@
+import hashlib
 import logging
 from typing import Dict, List, Optional, Union
 
@@ -6,14 +7,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 
 from api.v1.dependencies.security import get_current_user, require_auth
-from dto.meta import ChannelDetail
 from core.cache_service import CacheService
 from core.user_role_service import UserRoleService
+from dto.meta import ChannelDetail
 from dto.meta.user_role import UserRole
 from meta.meta_service import MetaService
 from shared.database import AsyncSessionFactory
-from shared.redis_client import RedisManager
 from shared.enum import ConstantEnum, SearchConfigType
+from shared.redis_client import RedisManager
 from shared.tag_error import TagError
 
 logger = logging.getLogger(__name__)
@@ -47,11 +48,19 @@ async def get_user_role(
 
 
 def _build_channel_meta_cache_key(
-    guild_id: Optional[int], channel_ids: Optional[list[int]]
+    guild_id: Optional[int], channel_ids: Optional[list[int]], metadata_version: str
 ) -> str:
+    """将频道快照和映射配置版本加入缓存键，隔离不同 API 实例的旧目录。"""
     gid = str(guild_id) if guild_id else "all"
     cids = "-".join(str(c) for c in sorted(channel_ids)) if channel_ids else "all"
-    return f"cache:meta:channels:{gid}:{cids}"
+    # 配置变化后的重启也不能复用旧虚拟频道映射。
+    mapping_version = hashlib.sha256(
+        orjson.dumps(
+            channel_mappings_config,
+            option=orjson.OPT_SORT_KEYS | orjson.OPT_NON_STR_KEYS,
+        )
+    ).hexdigest()[:16]
+    return f"cache:meta:channels:v2:{metadata_version}:{mapping_version}:{gid}:{cids}"
 
 
 @router.get(
@@ -88,13 +97,20 @@ async def get_indexed_channels_with_tags(
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"无效的频道ID格式: {cid}")
 
-    cache_key = _build_channel_meta_cache_key(effective_guild_id, effective_channel_ids)
+    metadata_version = getattr(
+        cache_service_instance, "metadata_version", "unversioned"
+    )
+    cache_key = _build_channel_meta_cache_key(
+        effective_guild_id, effective_channel_ids, metadata_version
+    )
 
     # 尝试从 Redis 读取缓存
     try:
         redis = RedisManager.get_client()
         cached = await redis.get(cache_key)
-        if cached is not None:
+        if cached is not None and metadata_version == getattr(
+            cache_service_instance, "metadata_version", "unversioned"
+        ):
             return Response(content=cached, media_type="application/json")
     except Exception:
         logger.warning("读取 Redis 频道元数据缓存失败，回退到数据库查询", exc_info=True)
@@ -115,11 +131,15 @@ async def get_indexed_channels_with_tags(
             serialized = orjson.dumps(
                 [item.model_dump(mode="json", by_alias=True) for item in result]
             )
-            await redis.setex(
-                cache_key,
-                ConstantEnum.CHANNELS_CACHE_EXPIRE_SECONDS.value,
-                serialized,
-            )
+            # 查询过程中缓存发生刷新时，不把新目录写到旧版本的键下。
+            if metadata_version == getattr(
+                cache_service_instance, "metadata_version", "unversioned"
+            ):
+                await redis.setex(
+                    cache_key,
+                    ConstantEnum.CHANNELS_CACHE_EXPIRE_SECONDS.value,
+                    serialized,
+                )
         except Exception:
             logger.warning("写入 Redis 频道元数据缓存失败", exc_info=True)
 

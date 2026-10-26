@@ -1,21 +1,21 @@
 import asyncio
+import hashlib
 import json
 import logging
 from collections import defaultdict
+from dataclasses import asdict
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import async_sessionmaker
-from sqlmodel import select as sm_select
 
+from core.api_channel_metadata_service import ApiChannelMetadataService
 from core.booklist_item_repository import BooklistItemRepository
+from core.config_repository import ConfigRepository
 from core.null_bot import NullBot
-from core.thread_repository import ThreadRepository
+from core.tag_cache_service import TagCacheService
 from dto.bot_config_dto import BotConfigDTO
-from dto.meta.category_meta import CategoryMeta
 from dto.meta.channel_meta import ChannelMeta
-from dto.meta.guild_meta import GuildMeta
-from dto.meta.tag_meta import TagMeta
 from dto.search import SearchConfigDTO
-from models import BotConfig
 from shared.enum import CacheKeys, SearchConfigDefaults, SearchConfigType
 
 logger = logging.getLogger(__name__)
@@ -23,16 +23,20 @@ logger = logging.getLogger(__name__)
 
 class ApiCacheService:
     """
-    API 进程专用的缓存服务，不依赖 discord.Client。
-
-    从 Redis 加载频道元数据（由 Bot 进程发布），从数据库加载 BotConfig。
-    启动定时轮询任务，自动同步频道元数据和配置变更。
+    API 进程从数据库独立构建缓存，不依赖 BOT 进程或其 Redis 快照。
     """
 
-    def __init__(self, session_factory: async_sessionmaker, redis_client):
+    def __init__(
+        self,
+        session_factory: async_sessionmaker,
+        redis_client,
+        tag_cache_service: TagCacheService | None = None,
+    ):
+        """复用数据库和 Redis，并统一管理 API 使用的标签缓存。"""
         self.bot = NullBot()
         self.session_factory = session_factory
         self._redis = redis_client
+        self.tag_cache_service = tag_cache_service or TagCacheService(session_factory)
         self.indexed_channel_ids: set[int] = set()
         # int -> ChannelMeta
         self.indexed_channels: dict[int, ChannelMeta] = {}
@@ -41,15 +45,17 @@ class ApiCacheService:
         self.bot_configs: dict[SearchConfigType, BotConfigDTO] = {}
         self._task: asyncio.Task | None = None
         self._is_running = False
+        self._refresh_lock = asyncio.Lock()
+        self.is_ready = False
+        self.last_refresh_succeeded = False
+        self.metadata_version = ""
         logger.debug("ApiCacheService 已初始化")
 
     # ── 公开接口（与 CacheService 完全一致）─────────────────────
 
     async def build_cache(self):
         """首次构建缓存。"""
-        await self._refresh_indexed_channel_ids()
-        await self._load_channel_metadata_from_redis(retry_on_missing=True)
-        await self.refresh_bot_config_cache()
+        await self.refresh_cache()
         logger.info(
             f"ApiCacheService 缓存构建完毕。"
             f"已索引 {len(self.indexed_channel_ids)} 个频道，"
@@ -136,15 +142,18 @@ class ApiCacheService:
 
     async def refresh_bot_config_cache(self):
         """从数据库刷新 BotConfig 缓存。"""
-        async with self.session_factory() as session:
-            result = await session.execute(sm_select(BotConfig))
-            all_configs = result.scalars().all()
-
-        self.bot_configs = {
-            SearchConfigType(config.type): BotConfigDTO.from_orm(config)
-            for config in all_configs
-            if config.type in SearchConfigType._value2member_map_
-        }
+        async with self._refresh_lock:
+            async with self.session_factory() as session:
+                configs = await ConfigRepository(
+                    session
+                ).get_all_configurable_search_configs()
+                # 在会话关闭前复制 ORM 字段，避免过期对象触发隐式查询。
+                bot_configs = {
+                    SearchConfigType(item.type): BotConfigDTO.from_orm(item)
+                    for item in configs
+                    if item.type in SearchConfigType._value2member_map_
+                }
+            self.bot_configs = bot_configs
 
     def is_channel_indexed(self, channel_id: int) -> bool:
         """检查频道ID是否已索引。"""
@@ -209,7 +218,9 @@ class ApiCacheService:
                         for tid in miss_ids[start : start + 100]:
                             infos = db_map.get(tid, [])
                             key = CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
-                            pipeline.setex(key, 3600, json.dumps(infos) if infos else "[]")
+                            pipeline.setex(
+                                key, 3600, json.dumps(infos) if infos else "[]"
+                            )
                         await pipeline.execute()
                 except Exception:
                     pass
@@ -220,82 +231,57 @@ class ApiCacheService:
 
     # ── 内部方法 ─────────────────────────────────────────────
 
-    async def _refresh_indexed_channel_ids(self):
-        """从数据库加载已索引频道 ID 集合。"""
-        async with self.session_factory() as session:
-            thread_service = ThreadRepository(session)
-            indexed_channel_ids = await thread_service.get_all_indexed_channel_ids()
-            self.indexed_channel_ids = set(indexed_channel_ids)
-
-    async def _load_channel_metadata_from_redis(self, retry_on_missing: bool = False):
-        """从 Redis 加载由 Bot 进程发布的频道元数据。"""
-        try:
-            raw = await self._redis.get("cache:forum-channels")
-
-            # ── 启动重试：Bot 进程可能尚未发布元数据 ──
-            if not raw and retry_on_missing:
-                logger.info("等待 Bot 发布频道元数据到 Redis...")
-                for attempt in range(1, 31):
-                    await asyncio.sleep(1)
-                    try:
-                        raw = await self._redis.get("cache:forum-channels")
-                    except Exception:
-                        logger.debug(f"Redis 读取失败（第 {attempt} 次），将继续重试")
-                        continue
-                    if raw:
-                        logger.info(f"频道元数据已就绪（等待了 {attempt} 秒）")
-                        break
-                else:
-                    logger.warning("等待超时：Bot 未在 30 秒内发布频道元数据")
-                    return
-
-            if not raw:
-                logger.warning("Redis 中无频道元数据（Bot 可能尚未发布）")
-                return
-
-            channels_list = json.loads(raw)
-            new_channels: dict[int, ChannelMeta] = {}
-            new_guild_channels: dict[int, dict[int, ChannelMeta]] = defaultdict(dict)
-
-            for entry in channels_list:
-                channel_id = entry["id"]
-                guild_data = entry["guild"]
-                guild = GuildMeta(id=guild_data["id"], name=guild_data["name"])
-
-                category = None
-                if entry.get("category"):
-                    cat_data = entry["category"]
-                    category = CategoryMeta(id=cat_data["id"], name=cat_data["name"])
-
-                tags = [
-                    TagMeta(id=t["id"], name=t["name"])
-                    for t in entry.get("available_tags", [])
-                ]
-
-                channel_meta = ChannelMeta(
-                    id=channel_id,
-                    name=entry["name"],
-                    guild=guild,
-                    category_id=entry.get("category_id"),
-                    category=category,
-                    available_tags=tags,
-                )
-                new_channels[channel_id] = channel_meta
-                new_guild_channels[guild.id][channel_id] = channel_meta
-
-            self.indexed_channels = new_channels
-            self.guild_channels = dict(new_guild_channels)
-            logger.debug(f"从 Redis 加载了 {len(new_channels)} 个频道的元数据")
-        except Exception:
-            logger.error("从 Redis 加载频道元数据失败", exc_info=True)
+    async def refresh_cache(self):
+        """在一致性只读事务中构建完整缓存，成功后统一替换旧快照。"""
+        async with self._refresh_lock:
+            try:
+                async with self.session_factory() as session, session.begin():
+                    # 同一轮读取共享数据库快照，不将并发更新前后的资料混在一起。
+                    await session.connection(
+                        execution_options={"isolation_level": "REPEATABLE READ"}
+                    )
+                    await session.execute(text("SET TRANSACTION READ ONLY"))
+                    indexed_ids, channels = await ApiChannelMetadataService(
+                        session
+                    ).load_channels()
+                    configs = await ConfigRepository(
+                        session
+                    ).get_all_configurable_search_configs()
+                    bot_configs = {
+                        SearchConfigType(item.type): BotConfigDTO.from_orm(item)
+                        for item in configs
+                        if item.type in SearchConfigType._value2member_map_
+                    }
+                    tag_snapshot = await self.tag_cache_service.load_snapshot(session)
+                guild_channels: dict[int, dict[int, ChannelMeta]] = defaultdict(dict)
+                for channel in channels.values():
+                    guild_channels[channel.guild.id][channel.id] = channel
+                # 仅目录内容决定版本；同步时间变化不会反复制造缓存键。
+                encoded = json.dumps(
+                    [asdict(channels[key]) for key in sorted(channels)],
+                    sort_keys=True,
+                    ensure_ascii=False,
+                ).encode("utf-8")
+                version = hashlib.sha256(encoded).hexdigest()[:16]
+            except Exception:
+                self.last_refresh_succeeded = False
+                raise
+            # 以下替换没有异步等待，读取失败时任何已发布缓存均保持原状。
+            self.tag_cache_service.apply_snapshot(tag_snapshot)
+            self.indexed_channel_ids = indexed_ids
+            self.indexed_channels = channels
+            self.guild_channels = dict(guild_channels)
+            self.bot_configs = bot_configs
+            self.metadata_version = version
+            self.is_ready = True
+            self.last_refresh_succeeded = True
 
     async def _periodic_sync(self):
-        """定时轮询：每 60 秒从 Redis 刷新频道元数据，从 DB 刷新 BotConfig。"""
+        """每六十秒刷新数据库频道、标签和搜索配置，失败保留旧缓存。"""
         while self._is_running:
             await asyncio.sleep(60)
             try:
                 logger.debug("ApiCacheService 定时同步触发")
-                await self._load_channel_metadata_from_redis()
-                await self.refresh_bot_config_cache()
+                await self.refresh_cache()
             except Exception:
-                logger.error("ApiCacheService 定时同步失败", exc_info=True)
+                logger.exception("ApiCacheService 定时同步失败，保留已有缓存")

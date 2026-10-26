@@ -103,8 +103,6 @@ services:
         condition: service_healthy
       odysseia-redis:
         condition: service_healthy
-      odysseia-forum-bot:
-        condition: service_healthy
     cap_add:
       - SYS_PTRACE
     command: ["uv", "run", "api_main.py"]

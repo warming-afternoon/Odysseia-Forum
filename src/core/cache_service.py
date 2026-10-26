@@ -42,9 +42,9 @@ class CacheService:
         logger.debug("CacheService 已初始化")
 
     async def build_or_refresh_cache(self, *, prefer_gateway: bool = False):
-        """构建核心缓存，同时持久化频道资料并发布 Redis 目录。"""
+        """构建核心缓存，同时持久化频道资料。"""
         logger.debug("正在刷新 CacheService...")
-        # 所有重建入口统一落库和发布，避免索引更新与实时事件交错写入。
+        # 所有重建入口统一落库，避免索引更新与实时事件交错写入。
         async with self._channel_lock:
             await self._refresh_indexed_channels_cache(prefer_gateway=prefer_gateway)
         await self.refresh_bot_config_cache()
@@ -125,34 +125,6 @@ class CacheService:
             for item in snapshots
             if item.channel_id in accepted or item.channel_id in self._channel_snapshots
         }
-        await self._publish_channel_metadata(redis)
-
-    async def publish_channel_metadata(self, redis_client):
-        """在同步锁内重新发布已持久化的频道快照。"""
-        async with self._channel_lock:
-            await self._publish_channel_metadata(redis_client)
-
-    async def _publish_channel_metadata(self, redis_client):
-        """原子发布频道目录与就绪标志，失败不撤销已提交资料。"""
-        channels_data = [
-            item.to_cache_entry()
-            for item in self._channel_snapshots.values()
-            if item.channel_type == discord.ChannelType.forum.value
-        ]
-        try:
-            # 名称、标签发生变化时，让 API 的派生目录缓存重新计算。
-            async for key in redis_client.scan_iter(match="cache:meta:channels:*"):
-                await redis_client.delete(key)
-            async with redis_client.pipeline(transaction=True) as pipeline:
-                pipeline.set(
-                    "cache:forum-channels",
-                    json.dumps(channels_data, ensure_ascii=False),
-                )
-                pipeline.set("cache:forum-ready", "1")
-                await pipeline.execute()
-            logger.debug("已发布持久化论坛目录: channels=%s", len(channels_data))
-        except Exception:
-            logger.exception("频道资料已提交，但 Redis 发布失败，等待后续刷新重试")
 
     async def refresh_channel(
         self,
@@ -184,7 +156,6 @@ class CacheService:
             for item in self.indexed_channels.values():
                 guild_channels[item.guild.id][item.id] = item
             self.guild_channels = dict(guild_channels)
-            await self._publish_channel_metadata(redis)
         if sync_tags:
             await self.bot.tag_cache_service.build_cache()
         return True

@@ -50,6 +50,13 @@ api/
 - **CORS**: 从 `config.json` 的 `api.cors_origins` 和 `auth.frontend_url` 读取允许的源。
 - **ORJSONResponse**: 使用 orjson 加速 JSON 序列化。
 
+### 运行与缓存
+- API 和 BOT 可分别启动，API 依赖 PostgreSQL、Redis 和已初始化的业务数据。
+- 论坛目录从 `channel`、帖子索引及有效原生标签来源构建，仅包含已索引论坛频道。频道资料和标签检查点不完整时启动失败，避免返回不完整目录。
+- API 每 60 秒在一致性只读事务中刷新频道、标签缓存及搜索配置；刷新失败保留旧缓存。目录响应缓存使用内容版本，频道名称、标签或映射变化后不会命中旧目录。
+- `/v1/health` 检查数据库、Redis 和 API 自身的 `channel_metadata` 状态；`stale` 表示最近刷新失败但仍有可用缓存。
+- `BOT_TOKEN` 继续用于 Discord REST 身份验证与图片获取；Discord 后台消息投递及重索引任务仍由 BOT 处理。
+
 ### 认证机制
 1. 用户通过 `/v1/auth` 使用 Discord OAuth2 登录。
 2. 后端签发 JWT Token，包含 `user_id` 等声明。

@@ -67,3 +67,15 @@ class ChannelRepository:
             .execution_options(populate_existing=True)
         )
         return result.scalar_one_or_none()
+
+    async def get_by_channel_ids(self, channel_ids: list[int]) -> list[Channel]:
+        """一次读取索引范围的频道，供服务在当前会话内组装目录。"""
+        if not channel_ids:
+            return []
+        # 保留未知类型和文字频道，交给组装服务区分缺失资料与正常排除。
+        result = await self.session.execute(
+            select(Channel)
+            .where(Channel.channel_id.in_(channel_ids))
+            .order_by(Channel.channel_id)
+        )
+        return list(result.scalars())
