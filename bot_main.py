@@ -95,6 +95,7 @@ class MyBot(commands.Bot):
         self._max_disconnect_seconds: float = 300.0  # 5 分钟断连后自愈退出
         self._health_exit_code: int = 0
         self._closing: bool = False  # close() 重入守卫
+        self._channel_metadata_ready: bool = False
 
     async def process_commands(self, message: discord.Message):
         """
@@ -115,9 +116,6 @@ class MyBot(commands.Bot):
         if tasks:
             await asyncio.gather(*tasks)
 
-        # 刷新后重新发布频道元数据到 Redis
-        if self.cache_service:
-            await self.cache_service.publish_channel_metadata(RedisManager.get_client())
         logger.info("核心缓存刷新完毕")
 
     def reload_config(self):
@@ -177,9 +175,6 @@ class MyBot(commands.Bot):
             self.tag_cache_service.build_cache(),
             self.cache_service.build_or_refresh_cache(),
         )
-
-        # 将频道元数据发布到 Redis，供 API 进程读取
-        await self.cache_service.publish_channel_metadata(RedisManager.get_client())
 
         # 加载 Cogs
         cogs_to_load = [
@@ -452,6 +447,13 @@ async def main():
 
     @bot.event
     async def on_ready():
+        # 网关就绪后重新获取频道对象，补齐登录前未知的服务器和分类名称。
+        if not bot._channel_metadata_ready:
+            try:
+                await bot.cache_service.build_or_refresh_cache(prefer_gateway=True)
+                bot._channel_metadata_ready = True
+            except Exception:
+                logger.exception("网关就绪后的频道资料回填失败，等待后续刷新补偿")
         if bot.user:
             logger.info(f"机器人已登录: {bot.user} (ID: {bot.user.id})")
         else:

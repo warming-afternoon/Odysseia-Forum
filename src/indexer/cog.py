@@ -8,10 +8,11 @@ from discord.ext import commands
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from core.thread_deletion_service import ThreadDeletionService
+from dto.events import IndexUpdatedEvent
 from indexer.views import IndexerDashboard
 from shared.permissions import is_admin_or_bot_admin
 from shared.safe_defer import safe_defer
-from dto.events import IndexUpdatedEvent
+from shared.time_utils import utc_now
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -290,36 +291,38 @@ class Indexer(commands.Cog):
     async def on_guild_channel_update(
         self, before: discord.abc.GuildChannel, after: discord.abc.GuildChannel
     ):
-        """
-        监听频道更新事件。
-        当变动的频道为已索引频道且标签发生任何变化（增、删、改）时，重建 TagService 的缓存。
-        """
-        if not isinstance(after, discord.ForumChannel) or not isinstance(
-            before, discord.ForumChannel
-        ):
+        """利用网关完整频道对象同步资料和标签，不重复发起 REST 请求。"""
+        # 分类改名会影响其下所有已索引论坛的目录名称。
+        if isinstance(after, discord.CategoryChannel):
+            if before.name != after.name:
+                try:
+                    await self.bot.cache_service.build_or_refresh_cache()
+                except Exception:
+                    logger.exception(
+                        "分类名称同步失败，等待周期补偿: category_id=%s", after.id
+                    )
             return
-
-        # 仅当频道是已索引频道时才继续处理
+        if not isinstance(after, discord.ForumChannel):
+            return
         if not self.bot.cache_service.is_channel_indexed(after.id):
             return
-
-        # 如果可用标签列表没有发生任何变化，则提前返回，避免不必要的操作。
-        if before.available_tags == after.available_tags:
-            return
-
-        logging.info(
-            f"检测到已索引论坛频道 '{after.name}' (ID: {after.id}) 的标签发生变化，准备刷新 TagService 缓存。"
-        )
-
         try:
-            await self.sync_service.pre_sync_forum_tags(after)
-            # 调用服务重建整个缓存，确保数据完全同步
-            await self.tag_service.build_cache()
-            logging.info("TagService 缓存已因频道更新而成功刷新。")
-        except Exception as e:
-            logging.error(
-                f"因频道更新事件刷新 TagService 缓存时出错: {e}", exc_info=True
-            )
+            await self.bot.cache_service.refresh_channel(after, utc_now())
+        except Exception:
+            logger.exception("频道更新同步失败，等待周期补偿: channel_id=%s", after.id)
+
+    @commands.Cog.listener()
+    async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+        """服务器改名后刷新目录中的服务器名称。"""
+        if before.name == after.name:
+            return
+        if not self.bot.cache_service.get_indexed_channels(after.id):
+            return
+        try:
+            # 频道已有网关资料，重建不额外逐频道请求 Discord。
+            await self.bot.cache_service.build_or_refresh_cache()
+        except Exception:
+            logger.exception("服务器名称同步失败，等待周期补偿: guild_id=%s", after.id)
 
     async def cog_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError

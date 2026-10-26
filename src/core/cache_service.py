@@ -1,18 +1,24 @@
+import asyncio
 import json
 import logging
 from collections import defaultdict
+from dataclasses import replace
+from datetime import datetime
 
 import discord
 from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlmodel import select
 
 from core.booklist_item_repository import BooklistItemRepository
+from core.channel_metadata_service import ChannelMetadataService
 from core.thread_repository import ThreadRepository
 from dto.bot_config_dto import BotConfigDTO
+from dto.channel_snapshot_dto import ChannelSnapshotDTO
 from dto.search import SearchConfigDTO
 from models import BotConfig
-from shared.discord_utils import DiscordUtils
 from shared.enum import SearchConfigDefaults, SearchConfigType
+from shared.redis_client import RedisManager
+from shared.time_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +37,16 @@ class CacheService:
         # guild_id -> {channel_id -> ForumChannel}
         self.guild_channels: dict[int, dict[int, discord.ForumChannel]] = {}
         self.bot_configs: dict[SearchConfigType, BotConfigDTO] = {}
+        self._channel_lock = asyncio.Lock()
+        self._channel_snapshots: dict[int, ChannelSnapshotDTO] = {}
         logger.debug("CacheService 已初始化")
 
-    async def build_or_refresh_cache(self):
-        """
-        从数据库加载数据，构建或刷新所有缓存。
-        这个方法应该在机器人启动时和索引更新后被调用。
-        """
+    async def build_or_refresh_cache(self, *, prefer_gateway: bool = False):
+        """构建核心缓存，同时持久化频道资料并发布 Redis 目录。"""
         logger.debug("正在刷新 CacheService...")
-        await self._refresh_indexed_channels_cache()
+        # 所有重建入口统一落库和发布，避免索引更新与实时事件交错写入。
+        async with self._channel_lock:
+            await self._refresh_indexed_channels_cache(prefer_gateway=prefer_gateway)
         await self.refresh_bot_config_cache()
         logger.info(
             f"CacheService 刷新完毕。缓存了 {len(self.indexed_channel_ids)} 个频道ID，"
@@ -47,61 +54,140 @@ class CacheService:
             f"同步缓存了 {len(self.bot_configs)} 个 BotConfig 配置项。"
         )
 
-    async def _refresh_indexed_channels_cache(self):
+    async def _refresh_indexed_channels_cache(self, *, prefer_gateway: bool = False):
         """刷新已索引频道缓存。"""
         async with self.session_factory() as session:
             thread_service = ThreadRepository(session)
             indexed_channel_ids = await thread_service.get_all_indexed_channel_ids()
-            self.indexed_channel_ids = set(indexed_channel_ids)
+            indexed_channel_ids = set(indexed_channel_ids)
 
         new_channel_cache: dict[int, discord.ForumChannel] = {}
-        new_guild_channels: dict[int, dict[int, discord.ForumChannel]] = defaultdict(
-            dict
-        )
-
-        for channel_id in self.indexed_channel_ids:
+        observed_at = utc_now()
+        for channel_id in sorted(indexed_channel_ids):
             # 优先从缓存获取频道，失败则从 API 获取
-            channel = await DiscordUtils.get_channel_safely(self.bot, channel_id)
+            channel = self.bot.get_channel(channel_id) if prefer_gateway else None
+            if channel is None:
+                channel = self.indexed_channels.get(channel_id)
+            if channel is None:
+                channel = self.bot.get_channel(channel_id)
+            if channel is None:
+                try:
+                    channel = await self.bot.api_scheduler.submit(
+                        coro_factory=lambda channel_id=channel_id: (
+                            self.bot.fetch_channel(channel_id)
+                        ),
+                        priority=10,
+                    )
+                except Exception:
+                    logger.exception(
+                        "构建缓存时无法读取频道，保留已有资料: channel_id=%s",
+                        channel_id,
+                    )
+                    continue
             if channel and isinstance(channel, discord.ForumChannel):
                 new_channel_cache[channel_id] = channel
-                new_guild_channels[channel.guild.id][channel_id] = channel
             elif channel:
                 logger.warning(f"频道 (ID: {channel_id}) 不是论坛频道，已跳过。")
 
-        self.indexed_channels = new_channel_cache
-        self.guild_channels = dict(new_guild_channels)
+        # 内存缓存和频道表都只写入已索引论坛频道，文字频道仍供 Banner 单独使用。
+        snapshots = [
+            ChannelSnapshotDTO.from_channel(channel, observed_at)
+            for channel in new_channel_cache.values()
+        ]
+        # 未变化的本地缓存不伪装成新的观测，避免压过尚未返回的真实请求。
+        snapshots = [
+            previous
+            if (previous := self._channel_snapshots.get(item.channel_id))
+            and replace(item, observed_at=previous.observed_at) == previous
+            else item
+            for item in snapshots
+        ]
+        redis = RedisManager.get_client()
+        accepted = await ChannelMetadataService(self.session_factory, redis).save(
+            snapshots
+        )
+        self.indexed_channel_ids = indexed_channel_ids
+        self.indexed_channels = {
+            item.channel_id: new_channel_cache[item.channel_id]
+            if item.channel_id in accepted
+            else self.indexed_channels[item.channel_id]
+            for item in snapshots
+            if item.channel_id in accepted or item.channel_id in self.indexed_channels
+        }
+        guild_channels = defaultdict(dict)
+        for channel in self.indexed_channels.values():
+            guild_channels[channel.guild.id][channel.id] = channel
+        self.guild_channels = dict(guild_channels)
+        self._channel_snapshots = {
+            item.channel_id: item
+            if item.channel_id in accepted
+            else self._channel_snapshots[item.channel_id]
+            for item in snapshots
+            if item.channel_id in accepted or item.channel_id in self._channel_snapshots
+        }
+        await self._publish_channel_metadata(redis)
 
     async def publish_channel_metadata(self, redis_client):
-        """将频道元数据序列化到 Redis，供 API 进程读取。"""
-        channels_data = []
-        for channel_id, channel in self.indexed_channels.items():
-            entry = {
-                "id": channel_id,
-                "name": channel.name,
-                "guild": {
-                    "id": channel.guild.id,
-                    "name": channel.guild.name,
-                },
-                "category_id": channel.category_id,
-                "category": {
-                    "id": channel.category.id,
-                    "name": channel.category.name,
-                }
-                if channel.category
-                else None,
-                "available_tags": [
-                    {"id": tag.id, "name": tag.name} for tag in channel.available_tags
-                ],
-            }
-            channels_data.append(entry)
+        """在同步锁内重新发布已持久化的频道快照。"""
+        async with self._channel_lock:
+            await self._publish_channel_metadata(redis_client)
 
-        await redis_client.set(
-            "cache:forum-channels", json.dumps(channels_data, ensure_ascii=False)
-        )
-        await redis_client.set("cache:forum-ready", "1")
-        logger.debug(
-            f"已将 {len(channels_data)} 个频道的元数据发布到 Redis（含 ready 信号）"
-        )
+    async def _publish_channel_metadata(self, redis_client):
+        """原子发布频道目录与就绪标志，失败不撤销已提交资料。"""
+        channels_data = [
+            item.to_cache_entry()
+            for item in self._channel_snapshots.values()
+            if item.channel_type == discord.ChannelType.forum.value
+        ]
+        try:
+            # 名称、标签发生变化时，让 API 的派生目录缓存重新计算。
+            async for key in redis_client.scan_iter(match="cache:meta:channels:*"):
+                await redis_client.delete(key)
+            async with redis_client.pipeline(transaction=True) as pipeline:
+                pipeline.set(
+                    "cache:forum-channels",
+                    json.dumps(channels_data, ensure_ascii=False),
+                )
+                pipeline.set("cache:forum-ready", "1")
+                await pipeline.execute()
+            logger.debug("已发布持久化论坛目录: channels=%s", len(channels_data))
+        except Exception:
+            logger.exception("频道资料已提交，但 Redis 发布失败，等待后续刷新重试")
+
+    async def refresh_channel(
+        self,
+        channel: discord.ForumChannel,
+        observed_at: datetime,
+        *,
+        sync_tags: bool = True,
+    ) -> bool:
+        """保存单个已索引论坛的可信新快照，并拒绝过期响应覆盖。"""
+        if not isinstance(channel, discord.ForumChannel):
+            return False
+        snapshot = ChannelSnapshotDTO.from_channel(channel, observed_at)
+        async with self._channel_lock:
+            current = self._channel_snapshots.get(channel.id)
+            if channel.id not in self.indexed_channel_ids:
+                return False
+            if current and current.observed_at > observed_at:
+                return False
+            redis = RedisManager.get_client()
+            accepted = await ChannelMetadataService(self.session_factory, redis).save(
+                [snapshot], sync_tags=sync_tags
+            )
+            if channel.id not in accepted:
+                return False
+            self.indexed_channels[channel.id] = channel
+            self._channel_snapshots[channel.id] = snapshot
+            # 服务器或分类归属变化后，重建内存分组，不残留旧服务器映射。
+            guild_channels = defaultdict(dict)
+            for item in self.indexed_channels.values():
+                guild_channels[item.guild.id][item.id] = item
+            self.guild_channels = dict(guild_channels)
+            await self._publish_channel_metadata(redis)
+        if sync_tags:
+            await self.bot.tag_cache_service.build_cache()
+        return True
 
     async def refresh_bot_config_cache(self):
         """刷新 BotConfig 缓存。"""
@@ -252,7 +338,9 @@ class CacheService:
                             for tid in miss_ids[start : start + 100]:
                                 infos = db_map.get(tid, [])
                                 key = CacheKeys.TOURNAMENT_THREAD.format(thread_id=tid)
-                                pipeline.setex(key, 3600, json.dumps(infos) if infos else "[]")
+                                pipeline.setex(
+                                    key, 3600, json.dumps(infos) if infos else "[]"
+                                )
                             await pipeline.execute()
                     except Exception:
                         pass

@@ -33,6 +33,7 @@
 
 ### 3. ⚡ 内存缓存服务 (Caches)
 - `cache_service.py`: 全局通用缓存。缓存已索引的频道列表、服务器结构以及 `BotConfig`，避免频繁查库。
+- `channel_repository.py` / `channel_metadata_service.py`: 批量保存频道资料，以采集时间拒绝过期响应；可信论坛快照与原生标签来源共享事务。BOT 频道缓存重建和实时更新后发布 Redis 目录，目录只包含已索引论坛，Banner 文字频道不会加入目录。
 - `tag_cache_service.py`: 标签缓存。维护 `Tag ID <-> Name` 的双向映射，以及全局合并标签列表，供自动补全和 UI 快速渲染使用。
 - `impression_cache_service.py`: 异步展示次数缓冲池。利用内存计数器和锁收集短时间内的帖子曝光量，通过后台 Task 每隔一定时间批量 `UPDATE` 数据库。
 

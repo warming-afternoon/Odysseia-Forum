@@ -8,6 +8,8 @@ from discord.ext import commands, tasks
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from auditor.auditor_service import AuditorService
+from core.thread_repository import ThreadRepository
+from shared.time_utils import utc_now
 
 if TYPE_CHECKING:
     from bot_main import MyBot
@@ -24,6 +26,8 @@ class Auditor(commands.Cog):
     CYCLE_SLEEP_SECONDS = 60.0  # 整轮审计结束或批次读取失败后的等待时间（秒）。
     MESSAGE_WARN_SECONDS = 18 * 3600  # 消息审计整轮耗时达到 18 小时的预警阈值（秒）。
     MESSAGE_ALERT_SECONDS = 24 * 3600  # 消息审计整轮耗时超过 24 小时的告警阈值（秒）。
+    FORUM_REFRESH_SLEEP_SECONDS = 10 * 60  # 每次频道资料请求后休眠十分钟。
+    FORUM_CYCLE_SLEEP_SECONDS = 3 * 3600  # 整轮完成后再等待三小时。
 
     def __init__(self, bot: "MyBot", session_factory: async_sessionmaker):
         """初始化两个独立的分页游标和周期统计。"""
@@ -42,12 +46,55 @@ class Auditor(commands.Cog):
         self.channel_audit_loop.start()
         self.message_audit_loop.start()
         self.cleanup_loop.start()
+        self.forum_refresh_loop.start()
 
     async def cog_unload(self):
         """同时取消所有后台审计任务。"""
         self.channel_audit_loop.cancel()
         self.message_audit_loop.cancel()
         self.cleanup_loop.cancel()
+        self.forum_refresh_loop.cancel()
+
+    @tasks.loop(seconds=0)
+    async def forum_refresh_loop(self):
+        """逐频道刷新资料与标签，单次休眠十分钟，整轮后休眠三小时。"""
+        try:
+            # 每轮重新读取索引集合，不在 HTTP 请求或休眠期间持有会话。
+            async with self.session_factory() as session:
+                channel_ids = await ThreadRepository(
+                    session
+                ).get_all_indexed_channel_ids()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("频道资料刷新列表读取失败")
+            await asyncio.sleep(self.FORUM_CYCLE_SLEEP_SECONDS)
+            return
+
+        logger.info("开始频道资料刷新周期: channels=%s", len(channel_ids))
+        for channel_id in sorted(channel_ids):
+            if self.forum_refresh_loop.is_being_cancelled():
+                return
+            try:
+                # 只调度实际 HTTP 请求，记录请求开始时间以识别晚返回的旧结果。
+                observed_at = utc_now()
+                channel = await self.bot.api_scheduler.submit(
+                    coro_factory=lambda channel_id=channel_id: self.bot.fetch_channel(
+                        channel_id
+                    ),
+                    priority=10,
+                )
+                await self.bot.cache_service.refresh_channel(channel, observed_at)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception(
+                    "频道资料刷新失败，保留旧数据: channel_id=%s", channel_id
+                )
+            # 包括最后一个频道和失败请求，全部遵守单次请求后的休眠。
+            await asyncio.sleep(self.FORUM_REFRESH_SLEEP_SECONDS)
+        logger.info("频道资料刷新周期完成，三小时后开始下一轮")
+        await asyncio.sleep(self.FORUM_CYCLE_SLEEP_SECONDS)
 
     @tasks.loop(seconds=0)
     async def channel_audit_loop(self):
@@ -175,6 +222,7 @@ class Auditor(commands.Cog):
     @channel_audit_loop.before_loop
     @message_audit_loop.before_loop
     @cleanup_loop.before_loop
+    @forum_refresh_loop.before_loop
     async def before_loops(self):
         """在所有循环开始前等待机器人准备就绪。"""
         await self.bot.wait_until_ready()

@@ -5,11 +5,12 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.channel_repository import ChannelRepository
+from dto.channel_snapshot_dto import ChannelSnapshotDTO
 from models.channel import Channel
+from shared.time_utils import utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -30,55 +31,35 @@ class ChannelSyncService:
         若频道已存在则跳过，保证幂等。
         """
         # 先查本地是否已有
-        result = await session.execute(
-            select(Channel).where(Channel.channel_id == channel_id)
-        )
-        existing = result.scalar_one_or_none()
+        repository = ChannelRepository(session)
+        existing = await repository.get_by_channel_id(channel_id)
         if existing:
             return existing
 
         # 调 Discord REST API 获取频道信息
+        observed_at = utc_now()
         channel_data = await self._fetch_channel(channel_id)
         if channel_data is None:
             return None
 
-        # 构造 Channel 并写入
-        channel = Channel(
+        # REST 不含服务器和分类名称，保留空值供 BOT 完整同步补齐。
+        snapshot = ChannelSnapshotDTO(
             channel_id=channel_id,
             guild_id=int(channel_data["guild_id"]),
+            guild_name=None,
             name=channel_data["name"],
             topic=channel_data.get("topic"),
             category_id=int(channel_data["parent_id"])
             if channel_data.get("parent_id")
             else None,
+            category_name=None,
+            channel_type=int(channel_data["type"]),
             created_at=parse_discord_snowflake(channel_id),
+            observed_at=observed_at,
         )
-
-        # ON CONFLICT 幂等处理
-        stmt = insert(Channel).values(
-            channel_id=channel.channel_id,
-            guild_id=channel.guild_id,
-            name=channel.name,
-            topic=channel.topic,
-            category_id=channel.category_id,
-            created_at=channel.created_at,
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["channel_id"],
-            set_={
-                "name": stmt.excluded.name,
-                "topic": stmt.excluded.topic,
-                "category_id": stmt.excluded.category_id,
-            },
-        )
-        await session.execute(stmt)
+        await repository.upsert_snapshots([snapshot])
         await session.commit()
-
-        # 重新查询返回
-        result = await session.execute(
-            select(Channel).where(Channel.channel_id == channel_id)
-        )
-        return result.scalar_one()
+        return await repository.get_by_channel_id(channel_id)
 
     async def _fetch_channel(self, channel_id: int) -> Optional[dict]:
         """调 Discord REST API 获取频道信息"""

@@ -1,9 +1,3 @@
-from core.discord_tag_sync_service import DiscordTagSyncService
-from dto.events.discord_tags_snapshot import DiscordTagsSnapshot
-from models import Tag
-from shared.time_utils import utc_now
-from tag.tag_category_select import TagCategorySelect
-
 import json
 import logging
 
@@ -11,10 +5,14 @@ import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
-from dto.events.tag_command import TagCommand
+from core.discord_tag_sync_service import DiscordTagSyncService
 from core.tag_pool_cache_service import TagPoolCacheService
+from dto.events.discord_tags_snapshot import DiscordTagsSnapshot
+from dto.events.tag_command import TagCommand
+from models import Tag
 from shared.redis_client import RedisManager
 from shared.tag_error import TagError
+from tag.tag_category_select import TagCategorySelect
 from tag.tag_runtime import create_tag_mediator
 from tag.tag_worker import TagWorker
 
@@ -41,13 +39,11 @@ class TagCog(commands.Cog):
         """启动可恢复的审核和通知循环。"""
         self.bot.add_dynamic_items(TagCategorySelect)
         self.bot.event_mediator.register(DiscordTagsSnapshot, self.sync_snapshot)
-        self.reconcile.start()
         self.expire.start()
         self.notify.start()
 
     async def cog_unload(self):
         """停止后台循环。"""
-        self.reconcile.cancel()
         self.bot.remove_dynamic_items(TagCategorySelect)
         self.expire.cancel()
         self.notify.cancel()
@@ -115,31 +111,6 @@ class TagCog(commands.Cog):
             pool_changed = await DiscordTagSyncService(session).apply(event)
         if pool_changed:
             await self.pool_cache.invalidate()
-
-    @tasks.loop(minutes=10)
-    async def reconcile(self):
-        """启动后及周期性读取完整频道快照，补偿离线事件。"""
-        for channel_id in list(self.bot.cache_service.indexed_channels):
-            try:
-                observed_at = utc_now()
-                channel = await self.bot.fetch_channel(channel_id)
-                if isinstance(channel, discord.ForumChannel):
-                    await self.bot.event_mediator.publish(
-                        DiscordTagsSnapshot(
-                            channel.id,
-                            {t.id: t.name for t in channel.available_tags},
-                            observed_at,
-                        )
-                    )
-            except Exception:
-                logger.exception(
-                    "频道标签同步失败，保留已有数据 channel_id=%s", channel_id
-                )
-
-    @reconcile.before_loop
-    async def before_reconcile(self):
-        """等待连接完成再执行启动补偿。"""
-        await self.bot.wait_until_ready()
 
     async def send_lifecycle_notice(self, task):
         """发送转换或分类冲突提醒，失败交由持久化任务重试。"""
