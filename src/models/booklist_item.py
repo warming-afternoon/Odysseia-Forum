@@ -20,7 +20,7 @@ class BooklistItem(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     """主键ID"""
 
-    owner_id: int = Field(
+    owner_id: int | None = Field(
         default=0,
         sa_column=Column(BigInteger, index=True),
         description="所属用户的ID",
@@ -66,5 +66,8 @@ class BooklistItem(SQLModel, table=True):
     )
     """最后更新时间"""
 
-    fluxer_owner_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_owner_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

@@ -23,5 +23,8 @@ class Author(SQLModel, table=True):
         description="此条记录的最后更新时间 (UTC)",
     )
 
-    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_user_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

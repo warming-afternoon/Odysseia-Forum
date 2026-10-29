@@ -34,7 +34,7 @@ class BannerCarousel(SQLModel, table=True):
         ),
         description="审核通过的申请ID；旧记录留空",
     )
-    applicant_id: Optional[int] = Field(
+    applicant_id: int | None = Field(
         default=None,
         sa_column=Column(BigInteger, index=True, nullable=True),
         description="申请人Discord ID；旧记录留空",
@@ -66,5 +66,8 @@ class BannerCarousel(SQLModel, table=True):
     end_time: datetime = Field(index=True, description="结束展示时间（3天后）")
     position: int = Field(default=0, index=True, description="展示位置顺序")
 
-    fluxer_applicant_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_applicant_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

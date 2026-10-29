@@ -5,6 +5,10 @@
 """
 
 import logging
+from fastapi import HTTPException
+from fastapi.responses import JSONResponse
+from identity.runtime import is_fluxer_mode
+from identity.auth_runtime import resolve_principal
 from typing import Any, Dict, Optional
 
 from api.v1.dependencies.security import VERIFIED_JWT_PAYLOAD_STATE_KEY
@@ -54,7 +58,13 @@ class RateLimitMiddleware:
             await self.app(scope, receive, send)
             return
 
-        payload = await self._extract_user_payload(scope)
+        try:
+            payload = await self._extract_user_payload(scope)
+        except HTTPException as exc:
+            await JSONResponse({"detail": exc.detail}, status_code=exc.status_code)(
+                scope, receive, send
+            )
+            return
         scope.setdefault("state", {})[VERIFIED_JWT_PAYLOAD_STATE_KEY] = payload
         user_id = payload.get("id") if payload else None
         if not user_id:
@@ -157,7 +167,7 @@ class RateLimitMiddleware:
 
     async def _extract_user_payload(self, scope) -> Optional[Dict[str, Any]]:
         """从请求中解析并验证 JWT，失败时返回 None。"""
-        if not self._jwt_secret:
+        if not self._jwt_secret and not is_fluxer_mode():
             return None
 
         token = None
@@ -170,6 +180,10 @@ class RateLimitMiddleware:
                 if val.startswith("Bearer "):
                     token = val[7:]
                     break
+
+        # Fluxer 仅使用 Bearer，避免 Cookie 写请求的 CSRF 风险。
+        if is_fluxer_mode():
+            return await resolve_principal(token) if token else None
 
         # 回退到 Cookie 会话
         if not token:

@@ -7,6 +7,8 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 
 from api.v1.utils.jwt_utils import verify_jwt
+from identity.runtime import is_fluxer_mode
+from identity.auth_runtime import resolve_principal
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +57,14 @@ async def get_current_user(
     从请求中提取并验证 JWT token，返回用户信息
     优先从 Authorization Bearer 中读取，回退到 Cookie
     """
+    if is_fluxer_mode():
+        request_state = request.scope.get("state", {})
+        if VERIFIED_JWT_PAYLOAD_STATE_KEY in request_state:
+            return request_state[VERIFIED_JWT_PAYLOAD_STATE_KEY]
+        header = request.headers.get("Authorization", "")
+        token = header[7:].strip() if header.startswith("Bearer ") else None
+        return await resolve_principal(token) if token else None
+
     if not _JWT_SECRET:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

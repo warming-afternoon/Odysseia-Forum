@@ -49,8 +49,8 @@ class TagBinding(SQLModel, table=True):
     """同步绑定对应唯一来源，历史轮次保留来源引用"""
 
     actor_id: int | None = Field(
-        sa_column=Column(BigInteger, nullable=True),
         default=None,
+        sa_column=Column(BigInteger, nullable=True),
         description="执行挂标的 Discord 用户 ID；自动超时挂标时为 0",
     )
     """执行挂标的 Discord 用户 ID；自动超时挂标时为 0"""
@@ -105,5 +105,8 @@ class TagBinding(SQLModel, table=True):
         ),
     )
 
-    fluxer_actor_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_actor_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

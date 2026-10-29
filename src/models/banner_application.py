@@ -26,8 +26,10 @@ class BannerApplication(SQLModel, table=True):
     channel_id: int = Field(
         sa_column=Column(BigInteger, index=True), description="帖子所在频道ID"
     )
-    applicant_id: int = Field(
-        sa_column=Column(BigInteger, index=True), description="申请人Discord ID"
+    applicant_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, index=True),
+        description="申请人Discord ID",
     )
     cover_image_url: Optional[str] = Field(
         default=None,
@@ -48,7 +50,7 @@ class BannerApplication(SQLModel, table=True):
     )
     applied_at: datetime = Field(default_factory=utc_now, description="申请时间")
     reviewed_at: Optional[datetime] = Field(default=None, description="审核时间")
-    reviewer_id: Optional[int] = Field(
+    reviewer_id: int | None = Field(
         default=None,
         sa_column=Column(BigInteger),
         description="审核员Discord ID",
@@ -67,7 +69,14 @@ class BannerApplication(SQLModel, table=True):
         description="审核记录所在的thread ID",
     )
 
-    fluxer_applicant_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+    fluxer_applicant_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )
 
-    fluxer_reviewer_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_reviewer_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

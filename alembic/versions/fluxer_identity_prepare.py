@@ -52,7 +52,7 @@ def upgrade():
     for table, columns in REFERENCES.items():
         assignments = []
         for column in columns:
-            target = "fluxer_user_id" if column == "id" else "fluxer_" + column
+            target = "fluxer_user_id" if column in {"id", "discord_user_id"} else "fluxer_" + column
             op.add_column(table, sa.Column(target, sa.String(), nullable=True))
             assignments.append(
                 f"IF (TG_OP = 'INSERT' AND NEW.{target} IS NULL) OR (TG_OP = 'UPDATE' AND NEW.{column} IS DISTINCT FROM OLD.{column} AND NEW.{target} IS NOT DISTINCT FROM OLD.{target}) THEN NEW.{target} := (SELECT user_id FROM discord_identity WHERE discord_user_id = NEW.{column}::text AND NEW.{column} <> 0); END IF;"

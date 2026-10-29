@@ -50,7 +50,8 @@ class Thread(SQLModel, table=True):
     )
     """原生标签变更修订号，用于识别同步导致的并发变更"""
 
-    author_id: int = Field(
+    author_id: int | None = Field(
+        default=None,
         sa_column=Column(BigInteger, index=True),
         description="帖子作者的 Discord ID",
     )
@@ -142,8 +143,11 @@ class Thread(SQLModel, table=True):
     )
     """帖子作者的关系映射"""
 
-    fluxer_author_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_author_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )
 
 
 # ── search_vector 自动维护 ────────────────────────────

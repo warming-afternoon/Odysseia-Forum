@@ -111,15 +111,20 @@ class MigrationService:
     def backfill_vote_keys(self, limit):
         """历史投票代理键分批填充，不在 DDL 事务中全表改写。"""
         with self.engine.begin() as conn:
-            return conn.execute(text("""WITH batch AS (SELECT ctid FROM tag_vote WHERE id IS NULL
+            return conn.execute(
+                text("""WITH batch AS (SELECT ctid FROM tag_vote WHERE id IS NULL
                 LIMIT :limit FOR UPDATE SKIP LOCKED) UPDATE tag_vote t SET id=nextval('fluxer_tag_vote_id_seq')
-                FROM batch WHERE t.ctid=batch.ctid AND t.id IS NULL"""), {"limit": limit}).rowcount
+                FROM batch WHERE t.ctid=batch.ctid AND t.id IS NULL"""),
+                {"limit": limit},
+            ).rowcount
 
     def audit(self):
         """统计全部缺失、失配和孤立身份，任何非零计数都阻止切换。"""
         result = {}
         with self.engine.connect() as conn:
-            result["tag_vote.id"] = conn.execute(text("SELECT count(*) FROM tag_vote WHERE id IS NULL")).scalar_one()
+            result["tag_vote.id"] = conn.execute(
+                text("SELECT count(*) FROM tag_vote WHERE id IS NULL")
+            ).scalar_one()
             for table, columns in REFERENCES.items():
                 for column in columns:
                     target = fluxer_column(column)
@@ -129,7 +134,7 @@ class MigrationService:
                         LEFT JOIN "user" u ON u.id=t.{target}
                         WHERE (t.{column}<>0 AND t.{column} IS NOT NULL AND
                         (d.user_id IS NULL OR t.{target} IS DISTINCT FROM d.user_id))
-                        OR (t.{target} IS NOT NULL AND u.id IS NULL)""")
+                        OR (t.{target} IS NOT NULL AND (u.id IS NULL OR t.{column}=0))""")
                     ).scalar_one()
             for table, columns in AUTHOR_LISTS.items():
                 for column in columns:

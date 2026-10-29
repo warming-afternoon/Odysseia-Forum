@@ -55,8 +55,9 @@ class ThreadUpdate(SQLModel, table=True):
         sa_column=Column(BigInteger, nullable=True),
         description="来源 Discord 消息 ID",
     )
-    publisher_id: int = Field(
-        sa_column=Column(BigInteger, nullable=False),
+    publisher_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
         description="发布者 Discord ID",
     )
     description: str = Field(
@@ -83,5 +84,8 @@ class ThreadUpdate(SQLModel, table=True):
         description="自动发布概览消息 ID",
     )
 
-    fluxer_publisher_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_publisher_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

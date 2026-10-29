@@ -32,6 +32,8 @@ def migration_engine():
                     f"{column} BIGINT" + (" PRIMARY KEY" if table == "author" else "")
                     for column in columns
                 ]
+                if table == "tag_vote":
+                    fields += ["binding_id BIGINT NOT NULL", "PRIMARY KEY (binding_id,user_id)"]
                 if table == "user_search_preferences":
                     fields += ["include_authors JSON", "exclude_authors JSON"]
                 conn.execute(text(f"CREATE TABLE {table} ({','.join(fields)})"))

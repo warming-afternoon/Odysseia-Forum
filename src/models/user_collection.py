@@ -21,8 +21,10 @@ class UserCollection(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
 
-    user_id: int = Field(
-        sa_column=Column(BigInteger, index=True), description="收藏用户的 Discord ID"
+    user_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, index=True),
+        description="收藏用户的 Discord ID",
     )
 
     target_type: int = Field(
@@ -43,5 +45,8 @@ class UserCollection(SQLModel, table=True):
     )
     note: Optional[str] = Field(default=None, description="用户为收藏添加的备注")
 
-    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_user_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

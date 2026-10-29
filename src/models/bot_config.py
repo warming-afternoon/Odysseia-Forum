@@ -32,11 +32,14 @@ class BotConfig(SQLModel, table=True):
         sa_column_kwargs={"onupdate": utc_now},
         description="最近更新时间 (UTC)",
     )
-    update_user_id: Optional[int] = Field(
+    update_user_id: int | None = Field(
         default=None,
         sa_column=Column(BigInteger),
         description="最后修改此配置的用户ID",
     )
 
-    fluxer_update_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_update_user_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

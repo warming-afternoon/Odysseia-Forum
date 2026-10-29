@@ -60,8 +60,9 @@ class Notification(SQLModel, table=True):
     )
     """通知记录的内部主键"""
 
-    user_id: int = Field(
-        sa_column=Column(BigInteger, nullable=False),
+    user_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
         description="通知接收者的 Discord 用户 ID",
     )
     """通知接收者的 Discord 用户 ID"""
@@ -112,5 +113,8 @@ class Notification(SQLModel, table=True):
     )
     """用户阅读时间（UTC）；为空表示未读"""
 
-    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_user_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

@@ -65,3 +65,7 @@ __all__ = [
     "Notification",
     "ThreadUpdate",
 ]
+
+from identity.metadata import apply_identity_constraints
+
+apply_identity_constraints()

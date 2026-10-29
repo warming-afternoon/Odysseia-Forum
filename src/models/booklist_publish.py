@@ -37,8 +37,9 @@ class BooklistPublish(SQLModel, table=True):
     )
     """Discord 讨论帖 ID"""
 
-    discord_user_id: int = Field(
-        sa_column=Column(BigInteger, nullable=False),
+    discord_user_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
         description="发布者 Discord 用户 ID",
     )
     """发布者 Discord 用户 ID"""
@@ -65,5 +66,8 @@ class BooklistPublish(SQLModel, table=True):
     )
     """最后更新时间"""
 
-    fluxer_discord_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_user_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

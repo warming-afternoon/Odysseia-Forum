@@ -15,7 +15,9 @@ class UserSearchPreferences(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     """主键ID"""
 
-    user_id: int = Field(sa_column=Column(BigInteger, index=True, nullable=False))
+    user_id: int | None = Field(
+        default=None, sa_column=Column(BigInteger, index=True, nullable=True)
+    )
     """用户ID"""
 
     guild_id: int = Field(
@@ -87,9 +89,16 @@ class UserSearchPreferences(SQLModel, table=True):
     custom_base_sort: str = Field(default="comprehensive", nullable=False)
     """自定义排序的基础算法"""
 
-    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+    fluxer_user_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )
 
-    fluxer_include_authors: list[str] | None = Field(default=None, sa_column=Column(JSON), description="Fluxer 作者 ID 列表")
+    fluxer_include_authors: list[str] | None = Field(
+        default=None, sa_column=Column(JSON), description="Fluxer 作者 ID 列表"
+    )
 
-    fluxer_exclude_authors: list[str] | None = Field(default=None, sa_column=Column(JSON), description="Fluxer 作者 ID 列表")
-
+    fluxer_exclude_authors: list[str] | None = Field(
+        default=None, sa_column=Column(JSON), description="Fluxer 作者 ID 列表"
+    )

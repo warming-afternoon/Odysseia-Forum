@@ -28,4 +28,4 @@ AUTHOR_LISTS = {"user_search_preferences": ["include_authors", "exclude_authors"
 
 def fluxer_column(column):
     """返回不会与 Discord 列混淆的 Fluxer 字段名。"""
-    return "fluxer_user_id" if column == "id" else "fluxer_" + column
+    return "fluxer_user_id" if column in {"id", "discord_user_id"} else "fluxer_" + column

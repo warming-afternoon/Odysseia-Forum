@@ -37,7 +37,7 @@ class BooklistPublishRepository:
                 guild_id=guild_id,
                 thread_id=thread_id,
                 discord_user_id=discord_user_id,
-                fluxer_discord_user_id=fluxer_user_id,
+                fluxer_user_id=fluxer_user_id,
             )
             self.session.add(record)
         else:
@@ -53,7 +53,7 @@ class BooklistPublishRepository:
                     guild_id=guild_id,
                     thread_id=thread_id,
                     discord_user_id=discord_user_id,
-                    fluxer_discord_user_id=fluxer_user_id,
+                    fluxer_user_id=fluxer_user_id,
                 )
                 self.session.add(record)
                 logger.info(
@@ -64,7 +64,7 @@ class BooklistPublishRepository:
             else:
                 record.discord_user_id = discord_user_id
                 if fluxer_user_id is not None:
-                    record.fluxer_discord_user_id = fluxer_user_id
+                    record.fluxer_user_id = fluxer_user_id
                 now = utc_now()
                 # updated_at 同时作为同目标连续发布的本地请求版本。
                 if now <= record.updated_at:

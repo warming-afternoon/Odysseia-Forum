@@ -17,8 +17,9 @@ class UserUpdatePreference(SQLModel, table=True):
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    user_id: int = Field(
-        sa_column=Column(BigInteger, index=True, nullable=False),
+    user_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, index=True, nullable=True),
         description="用户 Discord ID",
     )
     thread_id: int = Field(
@@ -34,5 +35,8 @@ class UserUpdatePreference(SQLModel, table=True):
         description="是否不再提醒该帖子的更新检测",
     )
 
-    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_user_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )

@@ -35,14 +35,16 @@ class TagProposal(SQLModel, table=True):
     )
     """申请添加的自定义标签内部 ID"""
 
-    applicant_id: int = Field(
-        sa_column=Column(BigInteger, nullable=False, index=True),
+    applicant_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True, index=True),
         description="申请人的 Discord 用户 ID",
     )
     """申请人的 Discord 用户 ID"""
 
-    owner_id: int = Field(
-        sa_column=Column(BigInteger, nullable=False),
+    owner_id: int | None = Field(
+        default=None,
+        sa_column=Column(BigInteger, nullable=True),
         description="提交申请时的帖子作者或书单所有者 Discord ID，用于发送审核通知",
     )
     """提交申请时的帖子作者或书单所有者 Discord ID，用于发送审核通知"""
@@ -89,7 +91,14 @@ class TagProposal(SQLModel, table=True):
         ),
     )
 
-    fluxer_applicant_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+    fluxer_applicant_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )
 
-    fluxer_owner_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
-
+    fluxer_owner_id: str | None = Field(
+        default=None,
+        index=True,
+        description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
+    )
