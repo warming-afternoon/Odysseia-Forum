@@ -845,6 +845,8 @@ async def delete_booklist(
             # 删除前保存是否存在发布记录，供本地提交后通知外部服务。
             publish_repo = BooklistPublishRepository(session)
             publish_record = await publish_repo.get_by_booklist(booklist_id)
+            if is_fluxer_mode() and publish_record:
+                require_discord_id(current_user)
             success = await service.delete_booklist(booklist_id)
             if not success:
                 raise HTTPException(
@@ -951,6 +953,8 @@ async def unpublish_booklist(
     """
     try:
         user_id = _principal_id(current_user)
+        if is_fluxer_mode():
+            require_discord_id(current_user)
         async with AsyncSessionFactory() as session:
             # 权限校验
             booklist_repo = BooklistRepository(session)

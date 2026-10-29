@@ -83,3 +83,33 @@ async def test_tag_owner_uses_canonical_identity(monkeypatch):
     assert await service.access(
         123, "booklist", target, manage=True, canonical_user_id="456"
     )
+
+
+@pytest.mark.asyncio
+async def test_unpublish_requires_linked_discord(monkeypatch):
+    """取消 Discord 发布同样需要绑定，不能把统一 ID 当成 Discord 用户。"""
+    from api.v1.routers.booklists import unpublish_booklist
+
+    monkeypatch.setenv("FORUM_AUTH_MODE", "fluxer")
+    with pytest.raises(HTTPException) as error:
+        await unpublish_booklist(1, {"id": "123", "discord_user_id": None})
+    assert error.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_background_publish_sync_defers_missing_discord_binding(monkeypatch):
+    """解绑或映射未同步时，后台不会继续向 Discord 更新书单。"""
+    from booklist.booklist_publish_service import BooklistPublishService
+
+    monkeypatch.setenv("FORUM_AUTH_MODE", "fluxer")
+    monkeypatch.setattr(
+        "identity.identity_repository.IdentityRepository.fluxer_to_discord",
+        AsyncMock(return_value={}),
+    )
+    service = BooklistPublishService(object(), base_url="https://example.invalid")
+    service.publish_repo.get_by_booklist = AsyncMock(
+        return_value=SimpleNamespace(fluxer_user_id="200", discord_user_id=100)
+    )
+    service.publish_repo.upsert = AsyncMock()
+    await service.sync_published_booklist(1)
+    service.publish_repo.upsert.assert_not_awaited()
