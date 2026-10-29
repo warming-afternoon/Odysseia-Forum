@@ -111,3 +111,6 @@ class Notification(SQLModel, table=True):
         description="用户阅读时间（UTC）；为空表示未读",
     )
     """用户阅读时间（UTC）；为空表示未读"""
+
+    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

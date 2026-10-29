@@ -25,3 +25,6 @@ class TagVote(SQLModel, table=True):
     """当前票值：1 为赞，-1 为踩；撤票时删除此记录，变更历史保留在操作日志"""
 
     __table_args__ = (CheckConstraint("vote IN (-1, 1)", name="ck_tag_vote"),)
+
+    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

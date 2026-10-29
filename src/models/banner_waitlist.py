@@ -5,7 +5,6 @@ from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     Column,
-    ForeignKey,
     Integer,
     SmallInteger,
 )
@@ -31,9 +30,6 @@ class BannerWaitlist(SQLModel, table=True):
         default=None,
         sa_column=Column(
             Integer,
-            ForeignKey(
-                "banner_application.id", name="fk_banner_waitlist_application_id"
-            ),
             nullable=True,
         ),
         description="审核通过的申请ID；旧记录留空",
@@ -68,3 +64,6 @@ class BannerWaitlist(SQLModel, table=True):
         description="加入队列时间",
     )
     position: int = Field(default=0, index=True, description="队列位置")
+
+    fluxer_applicant_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

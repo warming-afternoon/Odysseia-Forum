@@ -1,3 +1,5 @@
+from models.user import User
+from models.discord_identity import DiscordIdentity
 from models.discord_tag_source import DiscordTagSource
 from models.discord_tag_sync_state import DiscordTagSyncState
 from models.author import Author

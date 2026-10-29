@@ -88,3 +88,8 @@ class TagProposal(SQLModel, table=True):
             postgresql_where=text("status = 'pending'"),
         ),
     )
+
+    fluxer_applicant_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+
+    fluxer_owner_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

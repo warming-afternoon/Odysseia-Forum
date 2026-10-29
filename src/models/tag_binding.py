@@ -104,3 +104,6 @@ class TagBinding(SQLModel, table=True):
             name="ck_tag_binding",
         ),
     )
+
+    fluxer_actor_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

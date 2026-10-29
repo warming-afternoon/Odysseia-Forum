@@ -47,3 +47,8 @@ class AuthorFollow(SQLModel, table=True):
         nullable=False,
         description="是否仍在关注",
     )
+
+    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+
+    fluxer_author_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

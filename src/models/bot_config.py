@@ -37,3 +37,6 @@ class BotConfig(SQLModel, table=True):
         sa_column=Column(BigInteger),
         description="最后修改此配置的用户ID",
     )
+
+    fluxer_update_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

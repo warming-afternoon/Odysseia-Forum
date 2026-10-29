@@ -42,3 +42,6 @@ class UserCollection(SQLModel, table=True):
         description="收藏时间 (UTC)",
     )
     note: Optional[str] = Field(default=None, description="用户为收藏添加的备注")
+
+    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

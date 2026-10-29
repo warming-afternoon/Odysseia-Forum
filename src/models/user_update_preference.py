@@ -33,3 +33,6 @@ class UserUpdatePreference(SQLModel, table=True):
         default=False,
         description="是否不再提醒该帖子的更新检测",
     )
+
+    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

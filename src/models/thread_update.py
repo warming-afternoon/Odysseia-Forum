@@ -82,3 +82,6 @@ class ThreadUpdate(SQLModel, table=True):
         sa_column=Column(BigInteger, nullable=True),
         description="自动发布概览消息 ID",
     )
+
+    fluxer_publisher_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

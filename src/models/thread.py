@@ -142,6 +142,9 @@ class Thread(SQLModel, table=True):
     )
     """帖子作者的关系映射"""
 
+    fluxer_author_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+
+
 
 # ── search_vector 自动维护 ────────────────────────────
 

@@ -35,3 +35,6 @@ class ThreadFollow(SQLModel, table=True):
     active_flag: bool = Field(
         default=True, description="是否为当前关注（False表示过去关注）"
     )
+
+    fluxer_user_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+

@@ -128,6 +128,9 @@ class Booklist(SQLModel, table=True):
     )
     """全文搜索向量"""
 
+    fluxer_owner_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+
+
 
 # ── search_vector 自动维护 ────────────────────────────
 

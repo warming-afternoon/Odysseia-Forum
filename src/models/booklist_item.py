@@ -65,3 +65,6 @@ class BooklistItem(SQLModel, table=True):
         description="最后更新时间",
     )
     """最后更新时间"""
+
+    fluxer_owner_id: str | None = Field(default=None, index=True, description="Fluxer 统一用户 ID；原始 Discord 字段保留审计")
+
