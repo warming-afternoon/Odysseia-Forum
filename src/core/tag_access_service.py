@@ -3,6 +3,7 @@ import os
 import httpx
 
 from shared.tag_error import TagError
+from identity.runtime import is_fluxer_mode
 
 
 class TagAccessService:
@@ -62,7 +63,9 @@ class TagAccessService:
         role = str(self.config.get("management_role_id") or "")
         return bool(role) and role in await self.roles(user_id, guild_id)
 
-    async def access(self, user_id, kind, target, manage=False, audit=False):
+    async def access(
+        self, user_id, kind, target, manage=False, audit=False, canonical_user_id=None
+    ):
         """核验目标可见性并返回是否具有直接修改权限。"""
         if self.bot_admin(user_id):
             return True
@@ -77,7 +80,12 @@ class TagAccessService:
                     raise
                 roles = set()
         is_manager = str(self.config.get("management_role_id") or "") in roles
-        owner = target.author_id if kind == "thread" else target.owner_id
+        owner = (
+            (target.fluxer_author_id if kind == "thread" else target.fluxer_owner_id)
+            if is_fluxer_mode()
+            else (target.author_id if kind == "thread" else target.owner_id)
+        )
+        identity = canonical_user_id if is_fluxer_mode() else user_id
         if audit:
             if not is_manager:
                 raise TagError("forbidden", "仅管理组可查看操作记录", 403)
@@ -97,9 +105,9 @@ class TagAccessService:
             if target.channel_id in {int(v) for v in abyss.get("channel_ids", [])}:
                 if str(abyss.get("required_role_id") or "") not in main_roles:
                     raise TagError("forbidden", "没有此频道的访问权限", 403)
-        elif not target.is_public and owner != user_id and not is_manager:
+        elif not target.is_public and owner != identity and not is_manager:
             raise TagError("not_found", "书单不可访问", 404)
-        allowed = owner == user_id or is_manager
+        allowed = owner is not None and owner == identity or is_manager
         if manage and not allowed:
             raise TagError("forbidden", "仅作者或管理组可直接修改", 403)
         return allowed

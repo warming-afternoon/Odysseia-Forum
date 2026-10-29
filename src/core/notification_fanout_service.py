@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
 from models import AuthorFollow, Notification, ThreadFollow
+from identity.runtime import is_fluxer_mode
+from identity.business_identity import resolve_business_id
 from shared.time_utils import utc_now
 
 
@@ -23,11 +25,15 @@ class NotificationFanoutService:
         created_at: datetime,
     ) -> int:
         """为作品更新生成全部活跃帖子关注者通知。"""
+        publisher_id = await resolve_business_id(self.session, publisher_id)
+        recipient_id = (
+            ThreadFollow.fluxer_user_id if is_fluxer_mode() else ThreadFollow.user_id
+        )
         # 仅在数据库中选择活跃关注者，并排除更新发布者
-        recipient_query = select(ThreadFollow.user_id.label("user_id")).where(
+        recipient_query = select(recipient_id.label("user_id")).where(
             ThreadFollow.thread_id == thread_id,
             ThreadFollow.active_flag.is_(True),
-            ThreadFollow.user_id != publisher_id,
+            recipient_id != publisher_id,
         )
         return await self._fanout(
             recipient_query=recipient_query,
@@ -45,11 +51,20 @@ class NotificationFanoutService:
         created_at: datetime | None = None,
     ) -> int:
         """为作者新作品生成全部活跃作者关注者通知。"""
+        author_id = await resolve_business_id(self.session, author_id)
+        recipient_id = (
+            AuthorFollow.fluxer_user_id if is_fluxer_mode() else AuthorFollow.user_id
+        )
+        followed_author = (
+            AuthorFollow.fluxer_author_id
+            if is_fluxer_mode()
+            else AuthorFollow.author_id
+        )
         # 仅在数据库中选择活跃关注者，并排除作者本人
-        recipient_query = select(AuthorFollow.user_id.label("user_id")).where(
-            AuthorFollow.author_id == author_id,
+        recipient_query = select(recipient_id.label("user_id")).where(
+            followed_author == author_id,
             AuthorFollow.active_flag.is_(True),
-            AuthorFollow.user_id != author_id,
+            recipient_id != author_id,
         )
         return await self._fanout(
             recipient_query=recipient_query,
@@ -82,7 +97,7 @@ class NotificationFanoutService:
             insert(Notification)
             .from_select(
                 [
-                    "user_id",
+                    "fluxer_user_id" if is_fluxer_mode() else "user_id",
                     "event_type",
                     "event_source_id",
                     "thread_id",
@@ -90,7 +105,7 @@ class NotificationFanoutService:
                 ],
                 notification_rows,
             )
-            .on_conflict_do_nothing(constraint="uk_notification_user_event_source")
+            .on_conflict_do_nothing()
         )
         result = await self.session.execute(statement)
         return int(result.rowcount or 0)

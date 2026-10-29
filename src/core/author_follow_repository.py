@@ -1,7 +1,9 @@
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import Author, AuthorFollow
+from models import Author, AuthorFollow, User
+from identity.runtime import is_fluxer_mode
+from identity.identity_repository import IdentityRepository
 from shared.time_utils import utc_now
 
 
@@ -19,14 +21,35 @@ class AuthorFollowRepository:
     ) -> AuthorFollow | None:
         """幂等设置作者关注状态。"""
         statement = select(AuthorFollow).where(
-            AuthorFollow.user_id == user_id,
-            AuthorFollow.author_id == author_id,
+            (AuthorFollow.fluxer_user_id if is_fluxer_mode() else AuthorFollow.user_id)
+            == user_id,
+            (
+                AuthorFollow.fluxer_author_id
+                if is_fluxer_mode()
+                else AuthorFollow.author_id
+            )
+            == author_id,
         )
         relation = (await self.session.execute(statement)).scalar_one_or_none()
         if relation is None:
             if not active:
                 return None
-            relation = AuthorFollow(user_id=user_id, author_id=author_id)
+            if is_fluxer_mode():
+                mappings = await IdentityRepository(self.session).fluxer_to_discord(
+                    [user_id, author_id]
+                )
+                relation = AuthorFollow(
+                    user_id=int(mappings[str(user_id)])
+                    if str(user_id) in mappings
+                    else None,
+                    author_id=int(mappings[str(author_id)])
+                    if str(author_id) in mappings
+                    else None,
+                    fluxer_user_id=str(user_id),
+                    fluxer_author_id=str(author_id),
+                )
+            else:
+                relation = AuthorFollow(user_id=user_id, author_id=author_id)
             self.session.add(relation)
             await self.session.flush()
             return relation
@@ -46,12 +69,21 @@ class AuthorFollowRepository:
         offset: int,
     ) -> tuple[list[tuple[AuthorFollow, Author]], int]:
         """分页返回用户关注的作者及作者资料。"""
-        conditions = [AuthorFollow.user_id == user_id]
+        conditions = [
+            (AuthorFollow.fluxer_user_id if is_fluxer_mode() else AuthorFollow.user_id)
+            == user_id
+        ]
         if active is not None:
             conditions.append(AuthorFollow.active_flag == active)
+        profile_model = User if is_fluxer_mode() else Author
+        profile_id = (
+            AuthorFollow.fluxer_author_id
+            if is_fluxer_mode()
+            else AuthorFollow.author_id
+        )
         statement = (
-            select(AuthorFollow, Author)
-            .join(Author, Author.id == AuthorFollow.author_id)
+            select(AuthorFollow, profile_model)
+            .join(profile_model, profile_model.id == profile_id)
             .where(*conditions)
             .order_by(AuthorFollow.followed_at.desc(), AuthorFollow.id.desc())
             .limit(limit)

@@ -4,6 +4,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from api.v1.dependencies.security import require_auth
+from identity.principal import current_identity_id
+from identity.runtime import is_fluxer_mode
 from api.v1.schemas.preferences import (
     UserPreferencesResponse,
     UserPreferencesUpdateRequest,
@@ -27,10 +29,17 @@ router = APIRouter(
     response_model=UserPreferencesResponse,
     summary="获取指定用户的搜索偏好",
 )
-async def get_user_preferences(user_id: int):
+async def get_user_preferences(
+    user_id: str, current_user: dict = Depends(require_auth)
+):
     """
     获取用户的搜索偏好设置。固定使用配置的主服务器 ID。
     """
+    if str(current_identity_id(current_user)) != str(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="无权访问其他用户的偏好"
+        )
+    user_id = str(user_id) if is_fluxer_mode() else int(user_id)
     if not async_session_factory:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -65,10 +74,19 @@ async def get_user_preferences(user_id: int):
     response_model=UserPreferencesResponse,
     summary="创建或更新用户搜索偏好",
 )
-async def update_user_preferences(user_id: int, request: UserPreferencesUpdateRequest):
+async def update_user_preferences(
+    user_id: str,
+    request: UserPreferencesUpdateRequest,
+    current_user: dict = Depends(require_auth),
+):
     """
     创建或更新用户的搜索偏好设置。固定使用配置的主服务器 ID。
     """
+    if str(current_identity_id(current_user)) != str(user_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="无权访问其他用户的偏好"
+        )
+    user_id = str(user_id) if is_fluxer_mode() else int(user_id)
     if not async_session_factory:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

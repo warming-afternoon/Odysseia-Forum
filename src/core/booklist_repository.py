@@ -1,4 +1,7 @@
+from identity.business_identity import discord_id_for_business_id
+from identity.business_identity import resolve_business_id
 from core.tag_binding_repository import TagBindingRepository
+from identity.runtime import is_fluxer_mode
 import logging
 from typing import List, Optional, Set, Tuple
 
@@ -28,15 +31,22 @@ class BooklistRepository:
 
     async def get_or_create_default_booklist(self, owner_id: int) -> Booklist:
         """获取用户的默认书单，如果不存在则自动创建"""
+        owner_id = await resolve_business_id(self.session, owner_id)
+        legacy_discord_id = await discord_id_for_business_id(self.session, owner_id)
         statement = select(Booklist).where(
-            and_(Booklist.owner_id == owner_id, Booklist.is_default)
+            and_(
+                (Booklist.fluxer_owner_id if is_fluxer_mode() else Booklist.owner_id)
+                == owner_id,
+                Booklist.is_default,
+            )
         )
         result = await self.session.execute(statement)
         booklist = result.scalar_one_or_none()
 
         if not booklist:
             booklist = Booklist(
-                owner_id=owner_id,
+                owner_id=legacy_discord_id,
+                fluxer_owner_id=str(owner_id) if is_fluxer_mode() else None,
                 title="默认收藏",
                 description="默认收藏夹",
                 is_public=False,  # 默认书单设定为私有
@@ -71,8 +81,11 @@ class BooklistRepository:
         """
         创建新书单
         """
+        owner_id = await resolve_business_id(self.session, owner_id)
+        legacy_discord_id = await discord_id_for_business_id(self.session, owner_id)
         booklist = Booklist(
-            owner_id=owner_id,
+            owner_id=legacy_discord_id,
+            fluxer_owner_id=str(owner_id) if is_fluxer_mode() else None,
             title=title,
             description=description,
             cover_image_url=cover_image_url,
@@ -110,7 +123,9 @@ class BooklistRepository:
     ) -> BooklistShareQueryDTO | None:
         """查询公开书单分享所需标量并在 Session 内转换为 DTO。"""
         statement = select(
-            Booklist.owner_id,
+            (Booklist.fluxer_owner_id if is_fluxer_mode() else Booklist.owner_id).label(
+                "owner_id"
+            ),
             Booklist.title,
             Booklist.description,
             Booklist.cover_image_url,
@@ -125,7 +140,7 @@ class BooklistRepository:
         if row is None:
             return None
         return BooklistShareQueryDTO(
-            owner_id=int(row.owner_id),
+            owner_id=(row.owner_id if is_fluxer_mode() else int(row.owner_id)),
             title=row.title,
             description=row.description,
             cover_image_url=row.cover_image_url,
@@ -318,9 +333,16 @@ class BooklistRepository:
         )
 
         if owner_id is not None:
-            query = query.where(Booklist.owner_id == owner_id)
+            query = query.where(
+                (Booklist.fluxer_owner_id if is_fluxer_mode() else Booklist.owner_id)
+                == owner_id
+            )
         if owner_ids is not None:
-            query = query.where(Booklist.owner_id.in_(owner_ids))  # type: ignore
+            query = query.where(
+                (
+                    Booklist.fluxer_owner_id if is_fluxer_mode() else Booklist.owner_id
+                ).in_(owner_ids)
+            )  # type: ignore
         if is_public is not None:
             query = query.where(Booklist.is_public == is_public)
         if is_tournament is not None:
@@ -342,7 +364,12 @@ class BooklistRepository:
                 UserCollection,
                 and_(
                     Booklist.id == UserCollection.target_id,
-                    UserCollection.user_id == collected_by_user_id,
+                    (
+                        UserCollection.fluxer_user_id
+                        if is_fluxer_mode()
+                        else UserCollection.user_id
+                    )
+                    == collected_by_user_id,
                     UserCollection.target_type == CollectionType.BOOKLIST.value,
                 ),
             )
@@ -434,6 +461,9 @@ class BooklistRepository:
                     booklist_id=booklist_id,
                     thread_id=item_data.thread_id,  # type: ignore
                     owner_id=owner_id,
+                    fluxer_owner_id=getattr(booklist, "fluxer_owner_id", None)
+                    if booklist
+                    else None,
                     comment=item_data.comment,
                     display_order=display_order,
                     tournament_participated_at=getattr(
@@ -464,7 +494,9 @@ class BooklistRepository:
                     .execution_options(populate_existing=True)
                 )
                 result = await self.session.execute(statement)
-                reloaded_items.update({item.id: item for item in result.scalars().all()})
+                reloaded_items.update(
+                    {item.id: item for item in result.scalars().all()}
+                )
             # logger.info(f"{len(new_booklist_items)} 个帖子已添加到书单 {booklist_id}")
             return [reloaded_items[item_id] for item_id in new_item_ids]
         except Exception as e:
@@ -516,6 +548,8 @@ class BooklistRepository:
         跳过已存在的项（on_conflict_do_nothing 保证幂等），
         返回实际新增了帖子的书单 ID 列表。
         """
+        owner_id = await resolve_business_id(self.session, owner_id)
+        legacy_discord_id = await discord_id_for_business_id(self.session, owner_id)
         if not booklist_ids:
             return []
 
@@ -536,7 +570,8 @@ class BooklistRepository:
             {
                 "booklist_id": bid,
                 "thread_id": thread_id,
-                "owner_id": owner_id,
+                "owner_id": legacy_discord_id,
+                "fluxer_owner_id": str(owner_id) if is_fluxer_mode() else None,
                 "display_order": max_orders.get(bid, 0) + 1,
                 "comment": comment,
             }
@@ -632,12 +667,18 @@ class BooklistRepository:
         """
         查询指定的一批帖子中，有哪些已经被该用户加入过任何书单。
         """
+        owner_id = await resolve_business_id(self.session, owner_id)
         if not thread_ids:
             return set()
 
         statement = select(BooklistItem.thread_id).where(
             and_(
-                BooklistItem.owner_id == owner_id,
+                (
+                    BooklistItem.fluxer_owner_id
+                    if is_fluxer_mode()
+                    else BooklistItem.owner_id
+                )
+                == owner_id,
                 BooklistItem.thread_id.in_(thread_ids),  # type: ignore
             )
         )

@@ -1,9 +1,16 @@
 from sqlalchemy import select
+from identity.runtime import is_fluxer_mode
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from dto.viewer_flag_map import ViewerFlagMap
-from models import AuthorFollow, Notification, ThreadFollow, UserCollection
+from models import (
+    AuthorFollow,
+    Notification,
+    ThreadFollow,
+    BooklistItem,
+    UserCollection,
+)
 from shared.enum import CollectionType
 
 
@@ -25,11 +32,17 @@ class ViewerFlagService:
         thread_ids = {thread_id for thread_id, _ in thread_author_pairs}
         author_ids = {author_id for _, author_id in thread_author_pairs}
 
-        collected_statement = select(col(UserCollection.target_id)).where(
-            col(UserCollection.user_id) == user_id,
-            col(UserCollection.target_type) == CollectionType.THREAD.value,
-            col(UserCollection.target_id).in_(thread_ids),
-        )
+        if is_fluxer_mode():
+            collected_statement = select(col(BooklistItem.thread_id)).where(
+                col(BooklistItem.fluxer_owner_id) == user_id,
+                col(BooklistItem.thread_id).in_(thread_ids),
+            )
+        else:
+            collected_statement = select(col(UserCollection.target_id)).where(
+                col(UserCollection.user_id) == user_id,
+                col(UserCollection.target_type) == CollectionType.THREAD.value,
+                col(UserCollection.target_id).in_(thread_ids),
+            )
         collected_ids = set(
             (await self.session.execute(collected_statement)).scalars().all()
         )
@@ -37,7 +50,12 @@ class ViewerFlagService:
             values[int(thread_id)].add("collected")
 
         followed_statement = select(col(ThreadFollow.thread_id)).where(
-            col(ThreadFollow.user_id) == user_id,
+            col(
+                ThreadFollow.fluxer_user_id
+                if is_fluxer_mode()
+                else ThreadFollow.user_id
+            )
+            == user_id,
             col(ThreadFollow.active_flag).is_(True),
             col(ThreadFollow.thread_id).in_(thread_ids),
         )
@@ -47,10 +65,25 @@ class ViewerFlagService:
         for thread_id in followed_ids:
             values[int(thread_id)].add("followed")
 
-        author_statement = select(col(AuthorFollow.author_id)).where(
-            col(AuthorFollow.user_id) == user_id,
+        author_statement = select(
+            col(
+                AuthorFollow.fluxer_author_id
+                if is_fluxer_mode()
+                else AuthorFollow.author_id
+            )
+        ).where(
+            col(
+                AuthorFollow.fluxer_user_id
+                if is_fluxer_mode()
+                else AuthorFollow.user_id
+            )
+            == user_id,
             col(AuthorFollow.active_flag).is_(True),
-            col(AuthorFollow.author_id).in_(author_ids),
+            col(
+                AuthorFollow.fluxer_author_id
+                if is_fluxer_mode()
+                else AuthorFollow.author_id
+            ).in_(author_ids),
         )
         followed_author_ids = set(
             (await self.session.execute(author_statement)).scalars().all()
@@ -62,7 +95,12 @@ class ViewerFlagService:
         unread_statement = (
             select(col(Notification.thread_id))
             .where(
-                col(Notification.user_id) == user_id,
+                col(
+                    Notification.fluxer_user_id
+                    if is_fluxer_mode()
+                    else Notification.user_id
+                )
+                == user_id,
                 col(Notification.read_at).is_(None),
                 col(Notification.thread_id).in_(thread_ids),
             )

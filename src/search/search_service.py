@@ -1,6 +1,9 @@
 import asyncio
 import logging
 import time
+from dataclasses import replace
+from identity.runtime import is_fluxer_mode
+from identity.business_identity import resolve_business_id, resolve_business_ids
 from typing import Sequence
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +20,7 @@ from dto.search import (
     SimilarThreadSourceDTO,
     SimilarThreadSourceTagDTO,
 )
-from models import Author, Tag, Thread, TagBinding, BooklistItem
+from models import Author, User, Tag, Thread, TagBinding, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
 from shared.channel_mapping_utils import ChannelMappingUtils
@@ -198,6 +201,26 @@ class SearchService:
             if debug_timing:
                 t0 = time.perf_counter()
 
+            # 将机器人来源的 Discord ID 批量映射到统一身份。
+            if is_fluxer_mode():
+                query = replace(
+                    query,
+                    include_authors=await resolve_business_ids(
+                        self.session, query.include_authors
+                    )
+                    if query.include_authors
+                    else query.include_authors,
+                    exclude_authors=await resolve_business_ids(
+                        self.session, query.exclude_authors
+                    )
+                    if query.exclude_authors
+                    else query.exclude_authors,
+                    user_id_for_collection_search=await resolve_business_id(
+                        self.session, query.user_id_for_collection_search
+                    )
+                    if query.user_id_for_collection_search is not None
+                    else None,
+                )
             # 清洗查询数据
             CleanedQo = self._clean_query(query, exclude_thread_ids)
 
@@ -234,14 +257,23 @@ class SearchService:
                 # 查找匹配的作者 ID，以便后续过滤
                 search_pattern = f"%{CleanedQo.normalized_author_name}%"
 
-                author_subquery = select(Author.id).where(
-                    (
-                        func.lower(Author.name)
-                        == CleanedQo.normalized_author_name.lower()
+                if is_fluxer_mode():
+                    author_subquery = select(User.id).where(
+                        (
+                            func.lower(User.username)
+                            == CleanedQo.normalized_author_name.lower()
+                        )
+                        | (User.display_name.like(search_pattern))
                     )
-                    | (Author.global_name.like(search_pattern))  # type: ignore
-                    | (Author.display_name.like(search_pattern))  # type: ignore
-                )  # type: ignore
+                else:
+                    author_subquery = select(Author.id).where(
+                        (
+                            func.lower(Author.name)
+                            == CleanedQo.normalized_author_name.lower()
+                        )
+                        | (Author.global_name.like(search_pattern))
+                        | (Author.display_name.like(search_pattern))
+                    )
 
                 author_result = await self.session.execute(author_subquery)
                 matched_author_ids = set(author_result.scalars().all())
@@ -255,13 +287,21 @@ class SearchService:
                     CleanedQo.final_include_author_ids = matched_author_ids
 
             # 应用作者过滤器
-            if CleanedQo.final_include_author_ids:
+            if CleanedQo.final_include_author_ids or CleanedQo.normalized_author_name:
                 filters.append(
-                    Thread.author_id.in_(list(CleanedQo.final_include_author_ids))  # type: ignore
+                    (
+                        Thread.fluxer_author_id
+                        if is_fluxer_mode()
+                        else Thread.author_id
+                    ).in_(list(CleanedQo.final_include_author_ids))  # type: ignore
                 )
             if query.exclude_authors:
                 filters.append(
-                    Thread.author_id.notin_(query.exclude_authors)  # type: ignore
+                    (
+                        Thread.fluxer_author_id
+                        if is_fluxer_mode()
+                        else Thread.author_id
+                    ).notin_(query.exclude_authors)  # type: ignore
                 )
 
             # 反应数范围过滤
@@ -350,7 +390,14 @@ class SearchService:
                 # 查询用户的帖子收藏记录，获取该用户收藏过的所有 thread_id
                 collected_stmt = (
                     select(BooklistItem.thread_id)
-                    .where(BooklistItem.owner_id == query.user_id_for_collection_search)
+                    .where(
+                        (
+                            BooklistItem.fluxer_owner_id
+                            if is_fluxer_mode()
+                            else BooklistItem.owner_id
+                        )
+                        == query.user_id_for_collection_search
+                    )
                     .distinct()
                 )
 
@@ -451,7 +498,12 @@ class SearchService:
                     BooklistItem,
                     and_(
                         Thread.thread_id == BooklistItem.thread_id,
-                        BooklistItem.owner_id == query.user_id_for_collection_search,
+                        (
+                            BooklistItem.fluxer_owner_id
+                            if is_fluxer_mode()
+                            else BooklistItem.owner_id
+                        )
+                        == query.user_id_for_collection_search,
                     ),
                 ).group_by(Thread.id)  # type: ignore
 
@@ -506,10 +558,14 @@ class SearchService:
         self, author_id: int, *, include_abyss: bool = True
     ) -> Sequence[Tag]:
         """获取指定作者发布过的所有帖子的唯一标签列表"""
+        author_id = await resolve_business_id(self.session, author_id)
         statement = (
             select(Tag)
             .join(Thread, Tag.threads)  # type: ignore
-            .where(Thread.author_id == author_id)  # type: ignore
+            .where(
+                (Thread.fluxer_author_id if is_fluxer_mode() else Thread.author_id)
+                == author_id
+            )  # type: ignore
             .distinct()
         )
         if not include_abyss:
@@ -546,6 +602,7 @@ class SearchService:
         self, user_id: int, *, include_abyss: bool = True
     ) -> Sequence[Tag]:
         """获取指定用户收藏的所有帖子的唯一标签列表"""
+        user_id = await resolve_business_id(self.session, user_id)
 
         statement = (
             select(Tag)
@@ -556,7 +613,12 @@ class SearchService:
                 Thread.thread_id == BooklistItem.thread_id,  # type: ignore
             )
             .where(
-                BooklistItem.owner_id == user_id,
+                (
+                    BooklistItem.fluxer_owner_id
+                    if is_fluxer_mode()
+                    else BooklistItem.owner_id
+                )
+                == user_id,
                 TagBinding.target_type == "thread",
                 TagBinding.ended_at.is_(None),
                 Tag.deleted_at.is_(None),
@@ -933,7 +995,9 @@ class SearchService:
         filters = []
         if prefs.exclude_authors:
             filters.append(
-                Thread.author_id.notin_(prefs.exclude_authors)  # type: ignore[arg-type]
+                (
+                    Thread.fluxer_author_id if is_fluxer_mode() else Thread.author_id
+                ).notin_(prefs.exclude_authors)  # type: ignore[arg-type]
             )
 
         if prefs.exclude_tags:

@@ -1,3 +1,4 @@
+from identity.runtime import is_fluxer_mode
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 from sqlmodel import case, select
@@ -41,7 +42,11 @@ class DiscoveryRepository:
 
         # 作者过滤
         if prefs.exclude_authors:
-            conditions.append(Thread.author_id.notin_(prefs.exclude_authors))  # type: ignore
+            conditions.append(
+                (
+                    Thread.fluxer_author_id if is_fluxer_mode() else Thread.author_id
+                ).notin_(prefs.exclude_authors)
+            )  # type: ignore
 
         # 标签过滤 (先查出 ID 再用 EXISTS 进行 OR 匹配)
         if prefs.include_tags or prefs.exclude_tags:

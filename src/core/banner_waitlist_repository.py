@@ -1,3 +1,5 @@
+from identity.runtime import is_fluxer_mode
+from identity.business_identity import resolve_business_id
 from datetime import datetime
 from typing import List, Optional, cast
 
@@ -79,6 +81,11 @@ class BannerWaitlistRepository:
             target_type=target_type,
             application_id=application_id,
             applicant_id=applicant_id,
+            fluxer_applicant_id=(
+                await resolve_business_id(self.session, applicant_id)
+                if is_fluxer_mode() and applicant_id
+                else None
+            ),
             queued_at=now,
             position=new_position,
         )

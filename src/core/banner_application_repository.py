@@ -1,3 +1,5 @@
+from identity.runtime import is_fluxer_mode
+from identity.business_identity import resolve_business_id
 from datetime import datetime
 from typing import List, Optional
 
@@ -29,6 +31,11 @@ class BannerApplicationRepository:
             thread_id=thread_id,
             channel_id=channel_id,
             applicant_id=applicant_id,
+            fluxer_applicant_id=(
+                await resolve_business_id(self.session, applicant_id)
+                if is_fluxer_mode() and applicant_id
+                else None
+            ),
             cover_image_url=cover_image_url,
             target_scope=target_scope,
             target_type=target_type,
@@ -67,6 +74,11 @@ class BannerApplicationRepository:
             .values(
                 status=ApplicationStatus.REJECTED.value,
                 reviewer_id=reviewer_id,
+                fluxer_reviewer_id=(
+                    await resolve_business_id(self.session, reviewer_id)
+                    if is_fluxer_mode() and reviewer_id
+                    else None
+                ),
                 reviewed_at=reviewed_at,
                 reject_reason=reason,
             )

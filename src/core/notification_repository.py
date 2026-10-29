@@ -1,4 +1,6 @@
 from sqlalchemy import delete, func, select, update
+from identity.runtime import is_fluxer_mode
+from identity.business_identity import resolve_business_id
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models import Notification
@@ -19,7 +21,11 @@ class NotificationRepository:
         offset: int,
     ) -> tuple[list[Notification], int, int]:
         """分页读取通知并同时返回总数与未读数。"""
-        conditions = [Notification.user_id == user_id]
+        user_id = await resolve_business_id(self.session, user_id)
+        conditions = [
+            (Notification.fluxer_user_id if is_fluxer_mode() else Notification.user_id)
+            == user_id
+        ]
         if unread_only:
             conditions.append(Notification.read_at.is_(None))
         statement = (
@@ -36,7 +42,12 @@ class NotificationRepository:
             select(func.count())
             .select_from(Notification)
             .where(
-                Notification.user_id == user_id,
+                (
+                    Notification.fluxer_user_id
+                    if is_fluxer_mode()
+                    else Notification.user_id
+                )
+                == user_id,
                 Notification.read_at.is_(None),
             )
         )
@@ -47,11 +58,17 @@ class NotificationRepository:
 
     async def unread_count(self, user_id: int) -> int:
         """获取用户动态通知未读数。"""
+        user_id = await resolve_business_id(self.session, user_id)
         statement = (
             select(func.count())
             .select_from(Notification)
             .where(
-                Notification.user_id == user_id,
+                (
+                    Notification.fluxer_user_id
+                    if is_fluxer_mode()
+                    else Notification.user_id
+                )
+                == user_id,
                 Notification.read_at.is_(None),
             )
         )
@@ -59,10 +76,16 @@ class NotificationRepository:
 
     async def mark_thread_read(self, user_id: int, thread_id: int) -> int:
         """将用户在某作品下的全部未读动态标为已读。"""
+        user_id = await resolve_business_id(self.session, user_id)
         statement = (
             update(Notification)
             .where(
-                Notification.user_id == user_id,
+                (
+                    Notification.fluxer_user_id
+                    if is_fluxer_mode()
+                    else Notification.user_id
+                )
+                == user_id,
                 Notification.thread_id == thread_id,
                 Notification.read_at.is_(None),
             )
@@ -73,11 +96,17 @@ class NotificationRepository:
 
     async def mark_one_read(self, user_id: int, notification_id: int) -> int:
         """仅标记当前用户拥有的单条通知。"""
+        user_id = await resolve_business_id(self.session, user_id)
         result = await self.session.execute(
             update(Notification)
             .where(
                 Notification.id == notification_id,
-                Notification.user_id == user_id,
+                (
+                    Notification.fluxer_user_id
+                    if is_fluxer_mode()
+                    else Notification.user_id
+                )
+                == user_id,
                 Notification.read_at.is_(None),
             )
             .values(read_at=utc_now())
@@ -86,10 +115,16 @@ class NotificationRepository:
 
     async def mark_all_read(self, user_id: int) -> int:
         """将用户的全部未读动态标为已读。"""
+        user_id = await resolve_business_id(self.session, user_id)
         statement = (
             update(Notification)
             .where(
-                Notification.user_id == user_id,
+                (
+                    Notification.fluxer_user_id
+                    if is_fluxer_mode()
+                    else Notification.user_id
+                )
+                == user_id,
                 Notification.read_at.is_(None),
             )
             .values(read_at=utc_now())

@@ -1,3 +1,5 @@
+from identity.runtime import is_fluxer_mode
+from identity.business_identity import resolve_business_id
 from core.tag_binding_repository import TagBindingRepository
 import logging
 from datetime import datetime
@@ -22,7 +24,7 @@ from dto.thread_channel_sync_result import ThreadChannelSyncResult
 from dto.thread_message_snapshot import ThreadMessageSnapshot
 from dto.thread_sync_mutation_result import ThreadSyncMutationResult
 from dto.update_data import UpdateData
-from models import Author, Tag, Thread, ThreadFollow
+from models import Author, User, Tag, Thread, ThreadFollow
 from models.booklist_item import BooklistItem
 from models.user_collection import UserCollection
 from shared.enum import CollectionType
@@ -43,6 +45,10 @@ class ThreadRepository:
         """查询一个可公开分享的帖子及其作者标量信息。"""
         # 外连接作者，作者记录缺失时仍允许帖子以“未命名”作者展示。
         # 用 SQLAlchemy 查询多列，col 明确 SQLModel 字段的列表达式类型。
+        profile_model = User if is_fluxer_mode() else Author
+        profile_author = (
+            Thread.fluxer_author_id if is_fluxer_mode() else Thread.author_id
+        )
         statement = (
             sqlalchemy_select(
                 col(Thread.thread_id),
@@ -54,10 +60,10 @@ class ThreadRepository:
                 col(Thread.collection_count),
                 col(Thread.created_at),
                 col(Thread.last_active_at),
-                col(Author.display_name),
-                col(Author.avatar_url),
+                col(profile_model.display_name),
+                col(profile_model.avatar_url),
             )
-            .outerjoin(Author, col(Author.id) == col(Thread.author_id))
+            .outerjoin(profile_model, col(profile_model.id) == col(profile_author))
             .where(
                 col(Thread.thread_id) == thread_id,
                 col(Thread.show_flag).is_(True),
@@ -91,10 +97,13 @@ class ThreadRepository:
         """聚合作者全部可公开作品的数量、反应与回复统计。"""
         statement = sqlalchemy_select(
             func.count(col(Thread.id)).label("thread_count"),
-            func.coalesce(func.sum(col(Thread.reaction_count)), 0).label("reaction_count"),
+            func.coalesce(func.sum(col(Thread.reaction_count)), 0).label(
+                "reaction_count"
+            ),
             func.coalesce(func.sum(col(Thread.reply_count)), 0).label("reply_count"),
         ).where(
-            col(Thread.author_id) == author_id,
+            col(Thread.fluxer_author_id if is_fluxer_mode() else Thread.author_id)
+            == (str(author_id) if is_fluxer_mode() else author_id),
             col(Thread.show_flag).is_(True),
             col(Thread.not_found_count) == 0,
         )
@@ -116,7 +125,8 @@ class ThreadRepository:
         statement = (
             sqlalchemy_select(col(Thread.title), col(Thread.created_at))
             .where(
-                col(Thread.author_id) == author_id,
+                col(Thread.fluxer_author_id if is_fluxer_mode() else Thread.author_id)
+                == (str(author_id) if is_fluxer_mode() else author_id),
                 col(Thread.show_flag).is_(True),
                 col(Thread.not_found_count) == 0,
             )
@@ -145,7 +155,8 @@ class ThreadRepository:
                 col(Thread.created_at),
             )
             .where(
-                col(Thread.author_id) == author_id,
+                col(Thread.fluxer_author_id if is_fluxer_mode() else Thread.author_id)
+                == (str(author_id) if is_fluxer_mode() else author_id),
                 col(Thread.show_flag).is_(True),
                 col(Thread.not_found_count) == 0,
             )
@@ -181,7 +192,8 @@ class ThreadRepository:
             return True
         statement = sqlalchemy_select(func.count(col(Thread.id))).where(
             col(Thread.thread_id).in_(unique_thread_ids),
-            col(Thread.author_id) == author_id,
+            col(Thread.fluxer_author_id if is_fluxer_mode() else Thread.author_id)
+            == (str(author_id) if is_fluxer_mode() else author_id),
             col(Thread.show_flag).is_(True),
             col(Thread.not_found_count) == 0,
         )
@@ -196,6 +208,14 @@ class ThreadRepository:
         self, thread_data: dict, tags: list[Tag]
     ) -> ThreadSyncMutationResult:
         """添加或更新帖子及标签并返回明确的变更结果。"""
+        if is_fluxer_mode():
+            thread_data = dict(thread_data)
+            source_author = thread_data.get("author_id")
+            thread_data["fluxer_author_id"] = (
+                await resolve_business_id(self.session, source_author)
+                if source_author
+                else None
+            )
         await self.session.execute(
             text("SELECT pg_advisory_xact_lock_shared(73902141)")
         )
@@ -286,7 +306,15 @@ class ThreadRepository:
         ).scalar_one_or_none()
         if db_thread is None:
             return False
-        for key, value in snapshot.model_dump(exclude={"thread_id"}).items():
+        snapshot_data = snapshot.model_dump(exclude={"thread_id"})
+        if is_fluxer_mode():
+            source_author = snapshot_data.get("author_id")
+            snapshot_data["fluxer_author_id"] = (
+                await resolve_business_id(self.session, source_author)
+                if source_author
+                else None
+            )
+        for key, value in snapshot_data.items():
             setattr(db_thread, key, value)
         await self.session.flush()
         return True

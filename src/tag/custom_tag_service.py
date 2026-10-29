@@ -5,6 +5,8 @@ from datetime import timedelta
 from sqlalchemy import func, or_, select, text
 
 from core.tag_access_service import TagAccessService
+from identity.runtime import is_fluxer_mode
+from identity.business_identity import resolve_business_id
 from core.tag_data_repository import TagDataRepository
 from core.tag_merge_service import TagMergeService
 from core.tag_presentation import load_discord_sources, tag_data
@@ -69,6 +71,8 @@ class CustomTagService:
         }
         if command.action not in handlers:
             raise TagError("unknown_command", "未知标签操作", 400)
+        if is_fluxer_mode():
+            await resolve_business_id(self.session, command.actor_id)
         # 池维护与绑定写入互斥，防止软删除和新增绑定交错。
         exclusive = command.action in ("manage", "merge")
         lock = "pg_advisory_xact_lock" if exclusive else "pg_advisory_xact_lock_shared"
@@ -94,9 +98,15 @@ class CustomTagService:
                 detail["tag_name"] = tag.name
                 detail["category"] = tag.category
         detail["target_id_kind"] = "internal"
+        canonical_actor = (
+            await resolve_business_id(self.session, actor)
+            if is_fluxer_mode() and actor
+            else None
+        )
         await self.repo(OperationLog).add(
             type=action,
             actor_id=actor,
+            fluxer_actor_id=canonical_actor,
             target_type=kind,
             target_id=target_id,
             tag_id=tag_id,
@@ -120,16 +130,35 @@ class CustomTagService:
         # 保存标量快照，避免 populate_existing 原地刷新后丢失授权依据。
         access_fields = (
             (
-                "id", "guild_id", "channel_id", "author_id", "show_flag", "not_found_count"
+                "id",
+                "guild_id",
+                "channel_id",
+                "author_id",
+                "fluxer_author_id",
+                "show_flag",
+                "not_found_count",
             )
             if kind == "thread"
-            else ("id", "owner_id", "is_public")
+            else ("id", "owner_id", "fluxer_owner_id", "is_public")
         )
         access_state = tuple(getattr(target, field) for field in access_fields)
-        allowed = await self.access.access(
-            actor, kind, target, manage=manage, audit=audit
+        if is_fluxer_mode():
+            canonical_actor = await resolve_business_id(self.session, actor)
+            allowed = await self.access.access(
+                actor,
+                kind,
+                target,
+                manage=manage,
+                audit=audit,
+                canonical_user_id=canonical_actor,
+            )
+        else:
+            allowed = await self.access.access(
+                actor, kind, target, manage=manage, audit=audit
+            )
+        await self.session.execute(
+            text("SELECT pg_advisory_xact_lock_shared(73902141)")
         )
-        await self.session.execute(text("SELECT pg_advisory_xact_lock_shared(73902141)"))
         target = await self.repo(model).one(key == target_id, lock=lock, refresh=True)
         if target is None:
             raise TagError("not_found", "目标不存在", 404)
@@ -193,9 +222,11 @@ class CustomTagService:
         self.source_cache.update(
             await load_discord_sources(self.session, [t.id for t in tags + native])
         )
+        canonical_actor = await resolve_business_id(self.session, actor)
         votes = await self.repo(TagVote).rows(
             TagVote.binding_id.in_([b.id for b in bindings.values()]),
-            TagVote.user_id == actor,
+            (TagVote.fluxer_user_id if is_fluxer_mode() else TagVote.user_id)
+            == canonical_actor,
         )
         mine = {v.binding_id: v.vote for v in votes}
         version_data = sorted(
@@ -308,11 +339,17 @@ class CustomTagService:
 
     async def attach(self, actor, kind, tid, tag_id, reason):
         """建立新的零票绑定并完成同标签待审核项。"""
+        canonical_actor = (
+            await resolve_business_id(self.session, actor)
+            if is_fluxer_mode() and actor
+            else None
+        )
         binding = await self.repo(TagBinding).add(
             target_type=kind,
             target_id=tid,
             tag_id=tag_id,
             actor_id=actor,
+            fluxer_actor_id=canonical_actor,
         )
         await self.log(
             "tag.bind",
@@ -379,12 +416,19 @@ class CustomTagService:
         )
         if pending:
             raise TagError("already_pending", "此标签已有待审核申请")
+        canonical_actor = await resolve_business_id(self.session, actor)
         proposal = await self.repo(TagProposal).add(
             target_type=kind,
             target_id=tid,
             tag_id=tag_id,
             applicant_id=actor,
+            fluxer_applicant_id=canonical_actor if is_fluxer_mode() else None,
             owner_id=target.author_id if kind == "thread" else target.owner_id,
+            fluxer_owner_id=(
+                target.fluxer_author_id if kind == "thread" else target.fluxer_owner_id
+            )
+            if is_fluxer_mode()
+            else None,
             due_at=utc_now() + timedelta(days=7),
         )
         await self.repo(TagNotificationTask).add(proposal_id=proposal.id)
@@ -419,7 +463,15 @@ class CustomTagService:
                 raise TagError("forbidden", "无审核权限", 403)
             conditions.append(TagProposal.status == "pending")
         else:
-            conditions.append(TagProposal.applicant_id == actor)
+            canonical_actor = await resolve_business_id(self.session, actor)
+            conditions.append(
+                (
+                    TagProposal.fluxer_applicant_id
+                    if is_fluxer_mode()
+                    else TagProposal.applicant_id
+                )
+                == canonical_actor
+            )
         statement = (
             select(TagProposal)
             .where(*conditions)
@@ -505,9 +557,11 @@ class CustomTagService:
         value = payload["vote"]
         if value not in (-1, 0, 1):
             raise TagError("invalid_vote", "投票必须为 -1、0 或 1", 422)
+        canonical_actor = await resolve_business_id(self.session, actor)
         vote = await self.repo(TagVote).one(
             TagVote.binding_id == binding.id,
-            TagVote.user_id == actor,
+            (TagVote.fluxer_user_id if is_fluxer_mode() else TagVote.user_id)
+            == canonical_actor,
         )
         old = vote.vote if vote else 0
         if old != value:
@@ -519,7 +573,10 @@ class CustomTagService:
                 await self.repo(TagVote).remove(vote)
             elif value:
                 await self.repo(TagVote).add(
-                    binding_id=binding.id, user_id=actor, vote=value
+                    binding_id=binding.id,
+                    user_id=actor,
+                    fluxer_user_id=canonical_actor if is_fluxer_mode() else None,
+                    vote=value,
                 )
             await self.log(
                 "tag.vote",
@@ -566,9 +623,7 @@ class CustomTagService:
             aliases = select(TagAlias.tag_id).where(TagAlias.name.ilike(pattern))
             conditions.append(or_(Tag.name.ilike(pattern), Tag.id.in_(aliases)))
         statement = (
-            select(Tag)
-            .where(*conditions)
-            .order_by(Tag.category, Tag.name, Tag.id)
+            select(Tag).where(*conditions).order_by(Tag.category, Tag.name, Tag.id)
         )
         tags = list((await self.session.execute(statement)).scalars())
         self.source_cache.update(
@@ -660,9 +715,7 @@ class CustomTagService:
             )
             is_abyss = payload.get("is_abyss", tag.is_abyss if tag else False)
             if not isinstance(is_abyss, bool):
-                raise TagError(
-                    "invalid_is_abyss", "深渊向标识必须为布尔值", 422
-                )
+                raise TagError("invalid_is_abyss", "深渊向标识必须为布尔值", 422)
             if action == "update" and tag is None:
                 raise TagError("missing_tag", "修改必须提供标签 ID", 422)
             name = unicodedata.normalize(
@@ -838,7 +891,13 @@ class CustomTagService:
             {
                 "id": str(r.id),
                 "type": r.type,
-                "actor_id": str(r.actor_id) if r.actor_id else None,
+                "actor_id": (
+                    r.fluxer_actor_id
+                    if is_fluxer_mode()
+                    else str(r.actor_id)
+                    if r.actor_id
+                    else None
+                ),
                 "tag_id": str(r.tag_id) if r.tag_id else None,
                 "detail": r.detail,
                 "created_at": r.created_at,

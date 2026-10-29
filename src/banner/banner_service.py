@@ -1,5 +1,8 @@
 """Banner申请和管理服务"""
 
+from identity.runtime import is_fluxer_mode
+from identity.business_identity import resolve_business_id
+
 import logging
 from datetime import datetime
 from typing import List, Optional, TYPE_CHECKING
@@ -171,7 +174,12 @@ class BannerService:
                     success=False,
                     message="该帖子当前不可见，无法申请Banner",
                 )
-            if thread.author_id != applicant_id:
+            canonical_applicant_id = await resolve_business_id(
+                self.session, applicant_id
+            )
+            if thread.author_id != applicant_id or (
+                is_fluxer_mode() and thread.fluxer_author_id != canonical_applicant_id
+            ):
                 return ApplicationResult(
                     success=False,
                     message="只能为自己的帖子申请Banner",
@@ -242,6 +250,7 @@ class BannerService:
     ) -> ApplicationResult:
         """验证并创建Banner申请。"""
         try:
+            await resolve_business_id(self.session, applicant_id)
             # 所有入口创建均加锁，只有 Bot 开启占位限制。
             await self.app_repo.lock_applicant(applicant_id)
             if enforce_applicant_limit and await self.has_ongoing_banner(applicant_id):
@@ -300,7 +309,9 @@ class BannerService:
     ) -> BannerApprovalResult:
         """批准申请并将banner加入轮播或等待列表。"""
         try:
+            await resolve_business_id(self.session, reviewer_id)
             application = await self._get_pending_for_review(application_id)
+            await resolve_business_id(self.session, application.applicant_id)
 
             # 根据 target_type 获取标题
             if application.target_type == TargetType.CHANNEL.value:
@@ -323,6 +334,11 @@ class BannerService:
             application.status = ApplicationStatus.APPROVED.value
             application.reviewed_at = now
             application.reviewer_id = reviewer_id
+            application.fluxer_reviewer_id = (
+                await resolve_business_id(self.session, reviewer_id)
+                if is_fluxer_mode()
+                else None
+            )
 
             # 判断是全频道还是特定频道
             is_global = application.target_scope == "global"
@@ -381,12 +397,19 @@ class BannerService:
     ) -> BannerReviewApplication:
         """拒绝申请并返回会话独立的审核快照。"""
         try:
+            await resolve_business_id(self.session, reviewer_id)
             application = await self._get_pending_for_review(application_id)
+            await resolve_business_id(self.session, application.applicant_id)
 
             now = utc_now()
             application.status = ApplicationStatus.REJECTED.value
             application.reviewed_at = now
             application.reviewer_id = reviewer_id
+            application.fluxer_reviewer_id = (
+                await resolve_business_id(self.session, reviewer_id)
+                if is_fluxer_mode()
+                else None
+            )
             application.reject_reason = reason
 
             result = BannerReviewApplication.from_application(application)
@@ -413,6 +436,7 @@ class BannerService:
             waitlist_item = await self.waitlist_repo.pop(channel_id)
             if waitlist_item is None:
                 break
+            await resolve_business_id(self.session, waitlist_item.applicant_id)
             await self.carousel_repo.add(
                 thread_id=waitlist_item.thread_id,
                 channel_id=waitlist_item.channel_id,

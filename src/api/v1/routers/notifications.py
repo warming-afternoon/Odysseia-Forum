@@ -1,3 +1,4 @@
+from identity.principal import current_identity_id
 import logging
 from typing import Annotated, Any
 
@@ -36,7 +37,7 @@ async def list_notifications(
     current_user: dict[str, Any] = Depends(get_current_user),
 ) -> NotificationList:
     """分页返回作品更新与作者新作通知。"""
-    user_id = int(current_user["id"])
+    user_id = current_identity_id(current_user)
     async with AsyncSessionFactory() as session:
         notification_repository = NotificationRepository(session)
         (
@@ -138,7 +139,7 @@ async def get_unread_count(
     """返回当前用户全部动态通知的未读数量。"""
     async with AsyncSessionFactory() as session:
         count = await NotificationRepository(session).unread_count(
-            int(current_user["id"])
+            current_identity_id(current_user)
         )
     return UnreadCountResponse(unread_count=count)
 
@@ -155,7 +156,7 @@ async def mark_thread_read(
     """幂等标记用户在指定作品下的全部动态通知。"""
     async with AsyncSessionFactory() as session:
         count = await NotificationRepository(session).mark_thread_read(
-            int(current_user["id"]), thread_id
+            current_identity_id(current_user), thread_id
         )
         await session.commit()
     return MarkReadResponse(thread_id=thread_id, marked_read=count)
@@ -172,7 +173,7 @@ async def mark_all_read(
     """幂等标记当前用户的全部动态通知。"""
     async with AsyncSessionFactory() as session:
         count = await NotificationRepository(session).mark_all_read(
-            int(current_user["id"])
+            current_identity_id(current_user)
         )
         await session.commit()
     return MarkReadResponse(marked_read=count)
@@ -195,7 +196,7 @@ async def mark_one_read(
     """读取书单审核等不关联作品的通知时可单独标记。"""
     async with AsyncSessionFactory() as session:
         count = await NotificationRepository(session).mark_one_read(
-            int(current_user["id"]), notification_id
+            current_identity_id(current_user), notification_id
         )
         await session.commit()
     return MarkReadResponse(marked_read=count)

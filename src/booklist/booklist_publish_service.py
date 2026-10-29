@@ -50,6 +50,7 @@ class BooklistPublishService:
         guild_id: int,
         thread_id: int,
         discord_user_id: int,
+        fluxer_user_id: str | None = None,
     ) -> None:
         """
         发布（或更新）书单到 Discord 讨论帖。
@@ -62,7 +63,13 @@ class BooklistPublishService:
         self._ensure_configured()
 
         record = await self.publish_repo.upsert(
-            booklist_id, guild_id, thread_id, discord_user_id
+            booklist_id,
+            guild_id,
+            thread_id,
+            discord_user_id,
+            **(
+                {"fluxer_user_id": fluxer_user_id} if fluxer_user_id is not None else {}
+            ),
         )
         if record.id is None:  # pragma: no cover - 主键必定已生成
             raise RuntimeError(f"书单 {booklist_id} 发布记录缺少主键")
