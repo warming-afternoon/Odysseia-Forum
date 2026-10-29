@@ -63,6 +63,8 @@ class TestTagSnapshot(unittest.IsolatedAsyncioTestCase):
             func=func,
             hashlib=hashlib,
             load_discord_sources=load_sources,
+            is_fluxer_mode=lambda: False,
+            resolve_business_id=AsyncMock(side_effect=lambda _session, actor: actor),
         )
         root = Path(__file__).resolve().parents[2]
         tree = ast.parse(
