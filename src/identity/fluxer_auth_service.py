@@ -1,10 +1,11 @@
-"""持久 NATS 认证连接与有界、可失效的哈希会话缓存。"""
+"""持久 NATS 认证连接与有界、选择性失效的哈希会话缓存。"""
 
 import asyncio
 import hashlib
 import json
 import math
 import os
+import re
 import time
 import uuid
 
@@ -12,7 +13,7 @@ from fastapi import HTTPException
 
 
 class FluxerAuthService:
-    """只信任权威 RPC 返回的主体；缓存故障和依赖故障均返回 503。"""
+    """会话与用户 epoch 只影响对应主体，全局代次仅用于启动及重连。"""
 
     PREFIX = "forum:fluxer:auth:v1"
 
@@ -23,21 +24,22 @@ class FluxerAuthService:
         self.ready = False
         self.start_lock = asyncio.Lock()
         self.misses = asyncio.Semaphore(64)
+        self.reset_task = None
+        self.pending_bindings = {}
+        self.closing = False
 
     async def start(self):
-        """连接、订阅失效事件并轮换缓存命名空间后才开放认证。"""
+        """订阅失效事件、轮换断线代次并恢复投影后才开放认证。"""
+        if self.reset_task and self.reset_task is not asyncio.current_task():
+            await self.reset_task
         async with self.start_lock:
             if self.connection is not None and self.ready:
                 return
             if self.connection is not None:
                 raise HTTPException(503, "Fluxer 认证连接恢复中")
+            self.closing = False
             try:
-                connect = self.connector
-                if connect is None:
-                    import nats
-
-                    connect = nats.connect
-                self.connection = await connect(
+                options = dict(
                     servers=os.environ.get(
                         "INTEGRATION_NATS_URL", "nats://127.0.0.1:4222"
                     ).split(","),
@@ -49,6 +51,17 @@ class FluxerAuthService:
                     disconnected_cb=self.disconnected,
                     reconnected_cb=self.reconnected,
                 )
+                if self.connector:
+                    self.connection = await asyncio.wait_for(
+                        self.connector(**options), timeout=5
+                    )
+                else:
+                    from nats.aio.client import Client
+
+                    self.connection = Client()
+                    await asyncio.wait_for(
+                        self.connection.connect(**options), timeout=5
+                    )
                 for subject in (
                     "events.auth.v1.session_invalidated",
                     "events.auth.v1.user_invalidated",
@@ -60,58 +73,149 @@ class FluxerAuthService:
                 )
                 await self.connection.flush(timeout=3)
                 await self.redis.incr(self.PREFIX + ":generation")
+                for event in list(self.pending_bindings.values()):
+                    await self.apply_binding(event)
+                    if self.pending_bindings.get(event["discord_user_id"]) is event:
+                        self.pending_bindings.pop(event["discord_user_id"], None)
                 self.ready = True
             except Exception as exc:
                 self.ready = False
-                if self.connection:
-                    await self.connection.close()
-                    self.connection = None
+                connection, self.connection = self.connection, None
+                if connection:
+                    await connection.close()
                 raise HTTPException(503, "Fluxer 认证服务暂不可用") from exc
 
     async def disconnected(self):
-        """连接断开期间不使用可能漏掉失效事件的缓存。"""
+        """断线期间不接受可能漏掉失效通知的缓存。"""
         self.ready = False
 
     async def reconnected(self):
-        """重连后整个缓存命名空间失效，阻止断线期间的撤销继续生效。"""
+        """重连才轮换全局代次，恢复未完成投影失败时重建连接。"""
         try:
             await self.redis.incr(self.PREFIX + ":generation")
+            for event in list(self.pending_bindings.values()):
+                await self.apply_binding(event)
+                if self.pending_bindings.get(event["discord_user_id"]) is event:
+                    self.pending_bindings.pop(event["discord_user_id"], None)
             self.ready = True
         except Exception:
+            await self.request_reset()
+
+    async def request_reset(self):
+        """失败后排队关闭旧连接，下次请求可重新连接而不是永久锁在 503。"""
+        self.ready = False
+        if self.closing or (self.reset_task and not self.reset_task.done()):
+            return
+        self.reset_task = asyncio.create_task(self.reset_connection())
+
+    async def reset_connection(self):
+        """在订阅回调之外关闭连接，避免等待自身回调造成死锁。"""
+        async with self.start_lock:
             self.ready = False
+            connection, self.connection = self.connection, None
+            if connection:
+                await connection.close()
 
     async def invalidated(self, message):
-        """全局代次失效同时阻断在途旧请求回填，事件无需扫描 token。"""
+        """原子推进目标 epoch，事件序号只用作未知用户的在途回填屏障。"""
         try:
-            await self.redis.incr(self.PREFIX + ":generation")
-            if message and message.subject == "events.identity.v1.binding_changed":
-                from sqlalchemy.dialects.postgresql import insert
-                from models.discord_identity import DiscordIdentity
-                from shared.database import AsyncSessionFactory
-
-                event = json.loads(message.data)
-                async with AsyncSessionFactory() as session:
-                    statement = insert(DiscordIdentity).values(
-                        discord_user_id=str(event["discord_user_id"]),
-                        user_id=str(event["user_id"]),
-                        version=int(event["version"]),
-                    )
-                    await session.execute(
-                        statement.on_conflict_do_update(
-                            index_elements=[DiscordIdentity.discord_user_id],
-                            set_={
-                                "user_id": statement.excluded.user_id,
-                                "version": statement.excluded.version,
-                            },
-                            where=DiscordIdentity.version < statement.excluded.version,
-                        )
-                    )
-                    await session.commit()
+            event = json.loads(message.data)
+            subject = message.subject
+            user_id = event.get("user_id")
+            session_hash = event.get("session_id_hash")
+            if subject == "events.auth.v1.session_invalidated":
+                if not isinstance(session_hash, str) or not re.fullmatch(
+                    r"[A-Za-z0-9_-]{1,128}", session_hash
+                ):
+                    raise ValueError("invalid session event")
+                keys = [self.PREFIX + ":session_epoch:" + session_hash]
+            elif subject in {
+                "events.auth.v1.user_invalidated",
+                "events.identity.v1.binding_changed",
+            }:
+                if not isinstance(user_id, str) or not re.fullmatch(
+                    r"[1-9][0-9]{0,18}", user_id
+                ):
+                    raise ValueError("invalid user event")
+                keys = [self.PREFIX + ":user_epoch:" + user_id]
+            else:
+                return
+            if subject == "events.identity.v1.binding_changed":
+                discord_id = event.get("discord_user_id")
+                if (
+                    not isinstance(discord_id, str)
+                    or not re.fullmatch(r"[1-9][0-9]{0,18}", discord_id)
+                    or type(event.get("version")) is not int
+                    or event["version"] < 1
+                ):
+                    raise ValueError("invalid binding event")
+                pending = self.pending_bindings.get(discord_id)
+                if not pending or pending["version"] <= event["version"]:
+                    self.pending_bindings[discord_id] = event
+            # 每个目标保存最后事件序号；无关事件不会让其他主体缓存失效。
+            await self.redis.eval(
+                """local sequence=redis.call('INCR',KEYS[1]);
+                for i=2,#KEYS do redis.call('SET',KEYS[i],sequence,'EX',3700) end; return sequence""",
+                1 + len(keys),
+                self.PREFIX + ":event_sequence",
+                *keys,
+            )
+            if subject == "events.identity.v1.binding_changed":
+                current_event = self.pending_bindings[discord_id]
+                await self.apply_binding(current_event)
+                if self.pending_bindings.get(discord_id) is current_event:
+                    self.pending_bindings.pop(discord_id, None)
         except Exception:
-            self.ready = False
+            await self.request_reset()
+
+    async def apply_binding(self, event):
+        """绑定和权威用户资料在同一事务更新，失败事件保留以供重连重试。"""
+        from sqlalchemy.dialects.postgresql import insert
+        from models.discord_identity import DiscordIdentity
+        from models.user import User
+        from shared.database import AsyncSessionFactory
+
+        result = await self.call_rpc(
+            "rpc.identity.v1.profiles", user_ids=[event["user_id"]]
+        )
+        profiles = result.get("profiles", [])
+        if (
+            len(profiles) != 1
+            or profiles[0].get("user_id") != event["user_id"]
+            or not isinstance(profiles[0].get("username"), str)
+        ):
+            raise HTTPException(503, "绑定用户资料暂不可用")
+        profile = profiles[0]
+        async with AsyncSessionFactory() as session:
+            values = {
+                "id": event["user_id"],
+                "username": profile["username"],
+                "display_name": profile.get("display_name"),
+                "avatar_url": profile.get("avatar_url"),
+            }
+            user = insert(User).values(**values)
+            await session.execute(
+                user.on_conflict_do_update(index_elements=[User.id], set_=values)
+            )
+            statement = insert(DiscordIdentity).values(
+                discord_user_id=event["discord_user_id"],
+                user_id=event["user_id"],
+                version=event["version"],
+            )
+            await session.execute(
+                statement.on_conflict_do_update(
+                    index_elements=[DiscordIdentity.discord_user_id],
+                    set_={
+                        "user_id": statement.excluded.user_id,
+                        "version": statement.excluded.version,
+                    },
+                    where=DiscordIdentity.version < statement.excluded.version,
+                )
+            )
+            await session.commit()
 
     async def service_info(self, message):
-        """仅对版本化请求提供认证与身份投影状态。"""
+        """只对版本化请求返回当前服务状态。"""
         try:
             request = json.loads(message.data)
             valid = request.get("version") == 1 and isinstance(
@@ -137,15 +241,19 @@ class FluxerAuthService:
             return
 
     async def rpc(self, subject, **fields):
-        """以固定超时执行服务请求，不记录任何原始凭证。"""
+        """普通入口确保连接就绪，再发送有界版本化服务请求。"""
         await self.start()
+        return await self.call_rpc(subject, **fields)
+
+    async def call_rpc(self, subject, **fields):
+        """内部投影恢复不递归取得启动锁，首次登录创建允许二十五秒。"""
         try:
             message = await self.connection.request(
                 subject,
                 json.dumps(
-                    {"version": 1, "request_id": str(uuid.uuid4()), **fields}
+                    {"version": 1, "request_id": uuid.uuid4().hex, **fields}
                 ).encode(),
-                timeout=5,
+                timeout=25 if subject == "rpc.auth.v1.external.exchange" else 5,
             )
             reply = json.loads(message.data)
             if reply.get("ok") is True and isinstance(reply.get("data"), dict):
@@ -169,7 +277,7 @@ class FluxerAuthService:
             raise HTTPException(503, "Fluxer 认证服务暂不可用") from exc
 
     async def resolve(self, token):
-        """正缓存最长从请求开始计时一小时，明确无效只缓存五秒。"""
+        """正缓存从请求开始最多一小时，读写同时检查目标 epoch 防止撤销竞态。"""
         started = time.time()
         if (
             not isinstance(token, str)
@@ -178,24 +286,31 @@ class FluxerAuthService:
         ):
             return None
         await self.start()
-        digest = hashlib.sha256(token.encode()).hexdigest()
         generation_key = self.PREFIX + ":generation"
+        sequence_key = self.PREFIX + ":event_sequence"
+        digest = hashlib.sha256(token.encode()).hexdigest()
         try:
             generation = str(await self.redis.get(generation_key) or "0")
+            request_sequence = int(await self.redis.get(sequence_key) or 0)
             key = f"{self.PREFIX}:{generation}:{digest}"
             cached = await self.redis.eval(
-                """if (redis.call('GET',KEYS[1]) or '0') ~= ARGV[1] then return nil end
-                return redis.call('GET',KEYS[2])""",
+                """if (redis.call('GET',KEYS[1]) or '0')~=ARGV[1] then return nil end
+                local raw=redis.call('GET',KEYS[2]); if not raw then return nil end
+                local snapshot=cjson.decode(raw); if snapshot.user~=cjson.null then
+                    local user_epoch=tonumber(redis.call('GET',ARGV[2]..':user_epoch:'..snapshot.user.user_id) or '0');
+                    local session_epoch=tonumber(redis.call('GET',ARGV[2]..':session_epoch:'..snapshot.user.session_id_hash) or '0');
+                    if user_epoch~=snapshot.user_epoch or session_epoch~=snapshot.session_epoch then redis.call('DEL',KEYS[2]); return nil end
+                end; return raw""",
                 2,
                 generation_key,
                 key,
                 generation,
+                self.PREFIX,
             )
             if cached:
                 snapshot = json.loads(cached)
                 if self.ready and snapshot["expires_at"] > started:
                     return snapshot["user"]
-            # 等待队列有时间边界，攻击者不能堆积无限外部请求。
             try:
                 await asyncio.wait_for(self.misses.acquire(), timeout=0.1)
             except TimeoutError as exc:
@@ -206,16 +321,17 @@ class FluxerAuthService:
                 self.misses.release()
             if user is not None and (
                 not isinstance(user.get("user_id"), str)
+                or not re.fullmatch(r"[1-9][0-9]{0,18}", user["user_id"])
                 or not isinstance(user.get("session_id_hash"), str)
-                or not user.get("session_id_hash")
-                or not user.get("user_id", "").isdecimal()
-                or user.get("user_id") == "0"
+                or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", user["session_id_hash"])
                 or not isinstance(user.get("username"), str)
                 or (
                     user.get("discord_user_id") is not None
                     and (
                         not isinstance(user["discord_user_id"], str)
-                        or not user["discord_user_id"].isdecimal()
+                        or not re.fullmatch(
+                            r"[1-9][0-9]{0,18}", user["discord_user_id"]
+                        )
                     )
                 )
             ):
@@ -224,16 +340,22 @@ class FluxerAuthService:
             ttl = math.floor(expires_at - time.time())
             if not self.ready or ttl < 1:
                 raise HTTPException(503, "Fluxer 认证结果已过期")
-            # 检查代次与写入在 Redis 中原子完成，撤销事件不能被旧 RPC 覆盖。
             accepted = await self.redis.eval(
-                """if (redis.call('GET',KEYS[1]) or '0') ~= ARGV[1] then return 0 end
-                redis.call('SET',KEYS[2],ARGV[2],'EX',ARGV[3]); return 1""",
+                """if (redis.call('GET',KEYS[1]) or '0')~=ARGV[1] then return 0 end
+                local snapshot=cjson.decode(ARGV[2]); snapshot.user_epoch=0; snapshot.session_epoch=0;
+                if snapshot.user~=cjson.null then
+                    snapshot.user_epoch=tonumber(redis.call('GET',ARGV[4]..':user_epoch:'..snapshot.user.user_id) or '0');
+                    snapshot.session_epoch=tonumber(redis.call('GET',ARGV[4]..':session_epoch:'..snapshot.user.session_id_hash) or '0');
+                    if snapshot.user_epoch>tonumber(ARGV[5]) or snapshot.session_epoch>tonumber(ARGV[5]) then return 0 end
+                end; redis.call('SET',KEYS[2],cjson.encode(snapshot),'EX',ARGV[3]); return 1""",
                 2,
                 generation_key,
                 key,
                 generation,
                 json.dumps({"user": user, "expires_at": expires_at}),
                 ttl,
+                self.PREFIX,
+                request_sequence,
             )
             if not accepted:
                 raise HTTPException(503, "认证状态已变化，请重试")
@@ -241,11 +363,15 @@ class FluxerAuthService:
         except HTTPException:
             raise
         except Exception as exc:
+            await self.request_reset()
             raise HTTPException(503, "认证缓存暂不可用") from exc
 
     async def close(self):
-        """关闭持久连接，进程退出时不留下订阅。"""
+        """退出时结束恢复任务和持久连接，不留下后台订阅。"""
+        self.closing = True
         self.ready = False
-        if self.connection:
-            await self.connection.close()
-            self.connection = None
+        if self.reset_task:
+            await self.reset_task
+        connection, self.connection = self.connection, None
+        if connection:
+            await connection.close()

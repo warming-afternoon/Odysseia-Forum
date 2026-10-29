@@ -1268,15 +1268,26 @@ async def claim_session(request: Request, body: dict):
 
 @router.post("/logout")
 async def revoke_session(request: Request):
-    """撤销当前权威会话并立即轮换缓存代次。"""
+    """撤销当前权威会话并仅失效该会话缓存。"""
     if not is_fluxer_mode():
         raise HTTPException(404, "未启用 Fluxer 登录")
     header = request.headers.get("Authorization", "")
     if not header.startswith("Bearer flx_"):
         raise HTTPException(401, "需要当前会话")
     service = get_auth_service()
+    identity = await service.resolve(header[7:].strip())
     result = await service.rpc(
         "rpc.auth.v1.session.revoke_current", token=header[7:].strip()
     )
-    await service.invalidated(None)
+    from types import SimpleNamespace
+
+    if identity:
+        await service.invalidated(
+            SimpleNamespace(
+                subject="events.auth.v1.session_invalidated",
+                data=json.dumps(
+                    {"session_id_hash": identity["session_id_hash"]}
+                ).encode(),
+            )
+        )
     return JSONResponse(result, headers={"Cache-Control": "no-store"})

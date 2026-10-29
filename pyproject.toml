@@ -31,9 +31,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+    "fakeredis[lua]>=2.34.0",
     "pytest",
     "pytest-asyncio",
-    "ruff"
+    "ruff",
 ]
 
 [tool.setuptools.packages.find]

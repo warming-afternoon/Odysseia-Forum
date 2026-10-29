@@ -53,6 +53,7 @@ async def test_live_nats_resolve_invalidation_and_reconnect(monkeypatch, auth_se
     await responder.flush()
     service = auth_service.service
     service.connection = None
+    service.connector = None
     service.ready = False
     try:
         await service.start()
@@ -65,12 +66,12 @@ async def test_live_nats_resolve_invalidation_and_reconnect(monkeypatch, auth_se
         )
         await responder.flush()
         for _ in range(100):
-            if auth_service.values[service.PREFIX + ":generation"] == "3":
+            if auth_service.sync.get(service.PREFIX + ":event_sequence") == "1":
                 break
             await asyncio.sleep(0.01)
         await service.resolve("flx_live_test")
         assert len(calls) == 2
-        previous_generation = auth_service.values[service.PREFIX + ":generation"]
+        previous_generation = auth_service.sync.get(service.PREFIX + ":generation")
         # 仅断开本测试客户端的传输，broker 与其他代理的连接保持运行。
         await service.connection._process_op_err(
             ConnectionResetError("isolated client disconnect")
@@ -83,14 +84,14 @@ async def test_live_nats_resolve_invalidation_and_reconnect(monkeypatch, auth_se
         for _ in range(500):
             if (
                 service.ready
-                and auth_service.values[service.PREFIX + ":generation"]
+                and auth_service.sync.get(service.PREFIX + ":generation")
                 != previous_generation
             ):
                 break
             await asyncio.sleep(0.01)
         assert service.ready
         assert (
-            auth_service.values[service.PREFIX + ":generation"] != previous_generation
+            auth_service.sync.get(service.PREFIX + ":generation") != previous_generation
         )
         await service.resolve("flx_live_test")
         assert len(calls) == 3

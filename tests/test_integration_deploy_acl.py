@@ -60,6 +60,13 @@ async def test_actual_deployment_acls_and_forum_pull():
         inbox_prefix=b"_INBOX.admin",
         error_cb=on_error,
     )
+    worker = await nats.connect(
+        endpoint,
+        user="fluxer-worker",
+        password=passwords["WORKER"],
+        inbox_prefix=b"_INBOX.worker",
+        error_cb=on_error,
+    )
     try:
 
         async def resolve(message):
@@ -73,7 +80,36 @@ async def test_actual_deployment_acls_and_forum_pull():
             timeout=2,
         )
         assert json.loads(result.data)["data"]["user_id"] == "200"
+
+        async def forum_health(message):
+            await message.respond(
+                b'{"ok":true,"data":{"service":"forum","ready":true}}'
+            )
+
+        await forum.subscribe("rpc.forum.v1.service_info", cb=forum_health)
+        await forum.flush()
+        health = await bot.request(
+            "rpc.forum.v1.service_info",
+            b'{"version":1,"request_id":"bot_health_test_1"}',
+            timeout=2,
+        )
+        assert json.loads(health.data)["data"]["ready"] is True
+        received = asyncio.Event()
+
+        async def worker_event(message):
+            received.set()
+
+        await forum.subscribe("events.auth.v1.user_invalidated", cb=worker_event)
+        await forum.flush()
+        await worker.publish(
+            "events.auth.v1.user_invalidated",
+            b'{"event_id":"worker-test","user_id":"200"}',
+        )
+        await worker.flush()
+        await asyncio.wait_for(received.wait(), timeout=2)
         errors.clear()
+        await worker.subscribe("rpc.auth.v1.session.resolve")
+        await worker.flush()
         await forum.publish("rpc.identity.v1.ensure_discord", b"{}")
         await bot.publish("rpc.auth.v1.external.exchange", b"{}")
         await bot.subscribe("events.auth.v1.session_invalidated")
@@ -97,6 +133,10 @@ async def test_actual_deployment_acls_and_forum_pull():
         assert any(
             "$js.api.stream.create.forbidden" in item.lower() for item in errors
         ), errors
+        assert any(
+            "rpc.auth.v1.session.resolve" in item and "subscription" in item.lower()
+            for item in errors
+        )
         # 真正使用预建消费者的拉取与 ACK 权限，不请求创建流或消费者。
         js_admin = admin.jetstream()
         stream = await js_admin.stream_info("ODYSSEIA_CONTENT")
@@ -116,3 +156,4 @@ async def test_actual_deployment_acls_and_forum_pull():
         await bot.close()
         await integration.close()
         await admin.close()
+        await worker.close()
