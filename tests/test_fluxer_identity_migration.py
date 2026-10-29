@@ -27,7 +27,7 @@ def migration_engine():
     try:
         with engine.begin() as conn:
             for table, columns in REFERENCES.items():
-                fields = ["id BIGSERIAL PRIMARY KEY"] if table != "author" else []
+                fields = ["id BIGSERIAL PRIMARY KEY"] if table not in {"author", "tag_vote"} else []
                 fields += [
                     f"{column} BIGINT" + (" PRIMARY KEY" if table == "author" else "")
                     for column in columns

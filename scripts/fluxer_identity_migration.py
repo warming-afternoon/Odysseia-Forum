@@ -42,6 +42,11 @@ def main():
             print(json.dumps({"imported": count}))
         if args.action == "backfill":
             changed = 0
+            for _ in range(args.max_batches):
+                count = service.backfill_vote_keys(args.batch_size)
+                changed += count
+                if not count:
+                    break
             for table, columns in REFERENCES.items():
                 for column in columns:
                     for _ in range(args.max_batches):

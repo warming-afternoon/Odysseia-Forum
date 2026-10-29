@@ -41,6 +41,10 @@ def upgrade():
     op.execute(
         "CREATE TABLE discord_identity (discord_user_id VARCHAR PRIMARY KEY, user_id VARCHAR NOT NULL UNIQUE, version BIGINT NOT NULL DEFAULT 1)"
     )
+    # 投票代理键先只添加可空列和新行默认值，历史行由分批 CLI 填充。
+    op.add_column("tag_vote", sa.Column("id", sa.BigInteger(), nullable=True))
+    op.execute("CREATE SEQUENCE fluxer_tag_vote_id_seq OWNED BY tag_vote.id")
+    op.execute("ALTER TABLE tag_vote ALTER COLUMN id SET DEFAULT nextval('fluxer_tag_vote_id_seq')")
     # 删除已有实体外键，历史迁移不改写。
     for table in sa.inspect(op.get_bind()).get_table_names():
         for constraint in sa.inspect(op.get_bind()).get_foreign_keys(table):
