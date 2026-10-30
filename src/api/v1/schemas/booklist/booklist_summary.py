@@ -91,7 +91,7 @@ class BooklistSummary(BaseModel):
 
     @field_serializer("owner_id")
     def serialize_owner_id(self, value: int | str) -> str:
-        """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失"""
+        """将书单所有者 ID 序列化为字符串，避免 JavaScript 精度丢失"""
         return str(value)
 
     @field_serializer("tournament_channel_id")

@@ -12,6 +12,7 @@ class ProvisioningJournal:
     """每个成功结果独立事务落盘，输出损坏或进程退出不重复分配身份。"""
 
     def __init__(self, path):
+        """取得独占文件锁并打开逐条同步提交的恢复日志。"""
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.lock = self.path.with_suffix(self.path.suffix + ".lock").open("a+b")

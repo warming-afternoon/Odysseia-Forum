@@ -11,11 +11,16 @@ class User(SQLModel, table=True):
     __tablename__ = "user"
 
     id: str = Field(primary_key=True)
+    """Fluxer 权威用户 ID，同时作为统一作者身份。"""
 
     username: str
+    """Fluxer 原生唯一用户名。"""
 
     display_name: str | None = None
+    """Fluxer 原生显示名称，可为空。"""
 
     avatar_url: str | None = None
+    """Fluxer 原生头像地址，可为空。"""
 
     updated_at: datetime = Field(default_factory=utc_now)
+    """本地用户资料投影的更新时间。"""

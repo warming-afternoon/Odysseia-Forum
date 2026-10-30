@@ -96,9 +96,11 @@ class TagProposal(SQLModel, table=True):
         index=True,
         description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
     )
+    """Fluxer 统一用户 ID；对应 Discord 来源字段保留审计。"""
 
     fluxer_owner_id: str | None = Field(
         default=None,
         index=True,
         description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
     )
+    """Fluxer 统一用户 ID；对应 Discord 来源字段保留审计。"""

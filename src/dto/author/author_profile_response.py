@@ -8,8 +8,8 @@ from dto.author.author_stats import AuthorStats
 class AuthorProfileResponse(BaseModel):
     """作者档案详情及统计数据的响应模型。"""
 
-    id: int | str = Field(description="作者的 Discord 用户 ID")
-    """作者的 Discord 用户 ID"""
+    id: int | str = Field(description="当前身份模式下的作者 ID")
+    """当前身份模式下的作者 ID"""
 
     name: str = Field(description="作者的唯一用户名")
     """作者的唯一用户名"""
@@ -28,7 +28,7 @@ class AuthorProfileResponse(BaseModel):
 
     @field_serializer("id")
     def serialize_id(self, value: int | str) -> str:
-        """将 Discord ID 序列化为字符串，避免 JavaScript 精度丢失。"""
+        """将作者 ID 序列化为字符串，避免 JavaScript 精度丢失。"""
         return str(value)
 
     model_config = ConfigDict(from_attributes=True)

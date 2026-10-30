@@ -10,7 +10,7 @@ class UserPreferencesResponse(BaseModel):
     包含用户在论坛搜索中的所有个性化设置，用于定制化搜索体验
     """
 
-    user_id: int | str = Field(description="Discord 用户 ID")
+    user_id: int | str = Field(description="当前身份模式下的用户 ID")
     """用户ID"""
 
     # 频道选择

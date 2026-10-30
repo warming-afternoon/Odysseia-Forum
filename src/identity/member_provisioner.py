@@ -31,6 +31,7 @@ class MemberProvisioner:
     """不抓取 Discord 数据，不创建会话，不接受客户端指定的 Fluxer ID。"""
 
     def __init__(self, rpc, journal, concurrency=8, attempts=3):
+        """校验并发与重试边界，复用持久日志和 RPC 客户端。"""
         if not 1 <= concurrency <= 32 or not 1 <= attempts <= 5:
             raise ValueError("INVALID_BOUNDS")
         self.rpc = rpc

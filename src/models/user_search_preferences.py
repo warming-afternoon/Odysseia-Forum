@@ -94,11 +94,14 @@ class UserSearchPreferences(SQLModel, table=True):
         index=True,
         description="Fluxer 统一用户 ID；原始 Discord 字段保留审计",
     )
+    """Fluxer 统一用户 ID；对应 Discord 来源字段保留审计。"""
 
     fluxer_include_authors: list[str] | None = Field(
         default=None, sa_column=Column(JSON), description="Fluxer 作者 ID 列表"
     )
+    """Fluxer 作者筛选列表；保留对应 Discord 来源列表供审计。"""
 
     fluxer_exclude_authors: list[str] | None = Field(
         default=None, sa_column=Column(JSON), description="Fluxer 作者 ID 列表"
     )
+    """Fluxer 作者筛选列表；保留对应 Discord 来源列表供审计。"""

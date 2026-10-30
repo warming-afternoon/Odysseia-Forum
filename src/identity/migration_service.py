@@ -9,6 +9,7 @@ class MigrationService:
     """只处理 Fluxer 权威导出，不生成或猜测统一用户 ID。"""
 
     def __init__(self, engine):
+        """复用显式提供的数据库引擎执行迁移批次。"""
         self.engine = engine
 
     def import_batch(self, records):

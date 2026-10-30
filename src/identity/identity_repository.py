@@ -9,6 +9,7 @@ class IdentityRepository:
     """未命中的绑定不会被猜测为另一个身份空间的 ID。"""
 
     def __init__(self, session):
+        """复用调用方会话批量读取本地权威投影。"""
         self.session = session
 
     async def discord_to_fluxer(self, discord_ids):

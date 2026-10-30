@@ -11,7 +11,7 @@ class BooklistDTO(BaseModel):
     """Booklist 的轻量 DTO。仅包含标量字段，不包含关系。"""
 
     id: Optional[int] = Field(default=None, description="主键 ID")
-    owner_id: int | str | None = Field(description="创建该书单的用户 Discord ID")
+    owner_id: int | str | None = Field(description="当前身份模式下创建书单的用户 ID")
     title: str = Field(description="书单标题")
     description: Optional[str] = Field(default=None, description="书单简介")
     cover_image_url: Optional[str] = Field(default=None, description="书单封面")

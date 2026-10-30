@@ -9,6 +9,7 @@ class ProvisioningRpcClient:
     """只支持身份预建与批量读取，不能铸造登录会话。"""
 
     def __init__(self, url, password):
+        """保存独立 Bot 连接配置，连接由执行入口显式建立。"""
         self.url = url
         self.password = password
         self.connection = None

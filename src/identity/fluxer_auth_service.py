@@ -18,6 +18,7 @@ class FluxerAuthService:
     PREFIX = "forum:fluxer:auth:v1"
 
     def __init__(self, redis, connector=None):
+        """初始化可复用的认证连接、恢复状态与请求并发边界。"""
         self.redis = redis
         self.connector = connector
         self.connection = None
