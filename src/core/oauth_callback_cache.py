@@ -1,117 +1,160 @@
-"""Redis OAuth 回调幂等缓存。
-
-总体流程：用 OAuth code 的不可逆指纹作为键，一个短锁负责阻止重复交换 code；
-状态缓存先保存不含 access token 的 Discord 用户信息，再保存最终身份组结果。
-并发回调可以复用这些状态，因此不会因为二次交换一次性 code 而触发 invalid_grant。
-"""
+"""在 Redis 中绑定 Discord OAuth 回调、处理进度和一次性交付结果。"""
 
 import asyncio
-import logging
-from typing import Optional
+import hashlib
 
 import orjson
 from redis.asyncio import Redis
 
-logger = logging.getLogger(__name__)
+OAUTH_STATE_TTL_SECONDS = 600
+OAUTH_OWNER_TTL_SECONDS = 60
+LOGIN_CLAIM_TTL_SECONDS = 60
 
-OAUTH_STATE_TTL_SECONDS = 10 * 60
-OAUTH_LOCK_TTL_SECONDS = 30
+_BEGIN = """
+local ttl = redis.call('PTTL', KEYS[1])
+local state = redis.call('GET', KEYS[1])
+if ttl <= 0 or (state ~= ARGV[1] and state ~= ARGV[2] and state ~= ARGV[3]) then
+    return {'invalid'}
+end
+
+local transaction = redis.call('HGET', KEYS[2], 'transaction')
+if not transaction then
+    if state == ARGV[3] or redis.call('EXISTS', KEYS[4]) == 1
+        or redis.call('EXISTS', KEYS[5]) == 1 then
+        return {'invalid'}
+    end
+    redis.call('SET', KEYS[1], ARGV[3], 'PX', ttl)
+    redis.call('HSET', KEYS[2], 'transaction', ARGV[4])
+    redis.call('EXPIRE', KEYS[2], ARGV[6])
+    redis.call('SET', KEYS[3], ARGV[5], 'PX', math.min(ttl, tonumber(ARGV[7])))
+    return {'new'}
+end
+if transaction ~= ARGV[4] or state ~= ARGV[3] then
+    return {'invalid'}
+end
+
+local delivery = redis.call('HGET', KEYS[2], 'delivery')
+if delivery then
+    local claim_key = redis.call('HGET', KEYS[2], 'claim_key')
+    if claim_key and redis.call('EXISTS', claim_key) == 0 then
+        return {'expired'}
+    end
+    return {'complete', delivery}
+end
+if redis.call('EXISTS', KEYS[3]) == 1 then
+    return {'busy'}
+end
+local progress = redis.call('HGET', KEYS[2], 'progress')
+if not progress then
+    return {'expired'}
+end
+redis.call('SET', KEYS[3], ARGV[5], 'PX', math.min(ttl, tonumber(ARGV[7])))
+return {'resume', progress}
+"""
+
+_SAVE = """
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl <= 0 or redis.call('EXISTS', KEYS[2]) == 0 or redis.call('GET', KEYS[3]) ~= ARGV[1] then
+    return 0
+end
+if ARGV[2] == 'progress' then
+    redis.call('HSET', KEYS[2], 'progress', ARGV[3])
+    redis.call('PEXPIRE', KEYS[3], math.min(ttl, tonumber(ARGV[6])))
+    return 1
+end
+if ARGV[4] ~= '' then
+    local claim_ttl = math.min(ttl, tonumber(ARGV[5]))
+    if not redis.call('SET', KEYS[4], ARGV[4], 'PX', claim_ttl, 'NX') then
+        return 0
+    end
+    redis.call('HSET', KEYS[2], 'claim_key', KEYS[4])
+end
+redis.call('HSET', KEYS[2], 'delivery', ARGV[3])
+redis.call('HDEL', KEYS[2], 'progress')
+redis.call('DEL', KEYS[3])
+return 1
+"""
+
+_RELEASE = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+    return redis.call('DEL', KEYS[1])
+end
+return 0
+"""
 
 
 class OAuthCallbackCache:
-    """保存 OAuth 回调的安全中间状态并协调重复请求。"""
+    """协调同一浏览器、state 和 code 绑定的回调。"""
 
     def __init__(self, redis_client: Redis):
         """使用现有 Redis 客户端初始化缓存。"""
         self._redis = redis_client
 
-    @staticmethod
-    def _state_key(code_fingerprint: str) -> str:
-        """生成 OAuth 状态缓存键。"""
-        return f"auth:oauth:state:{code_fingerprint}"
-
-    @staticmethod
-    def _lock_key(code_fingerprint: str) -> str:
-        """生成 OAuth 处理锁缓存键。"""
-        return f"auth:oauth:lock:{code_fingerprint}"
-
-    async def get_state(self, code_fingerprint: str) -> Optional[dict]:
-        """读取 OAuth 回调已保存的处理状态。"""
-        try:
-            raw = await self._redis.get(self._state_key(code_fingerprint))
-            return orjson.loads(raw) if raw else None
-        except Exception:
-            logger.warning(
-                "读取OAuth幂等缓存失败 code_fingerprint=%s",
-                code_fingerprint,
-                exc_info=True,
-            )
-            return None
-
-    async def store_state(self, code_fingerprint: str, state: dict) -> None:
-        """保存不含 Discord access token 的 OAuth 处理状态。"""
-        # 状态只保留十分钟，覆盖浏览器重复跳转而不长期保存登录材料
-        try:
-            await self._redis.setex(
-                self._state_key(code_fingerprint),
+    async def begin(
+        self, state_key: str, binding: str, mode: str, code: str, owner: str
+    ) -> tuple[str, dict | None]:
+        """原子认领首次回调，或等待同一事务的处理进度。"""
+        # 兼容升级前未使用的 state，同时把模式和 code 固定在第一次认领中。
+        bound_browser = f"{binding}:{mode}"
+        claimed_state = f"{bound_browser}:{code}"
+        transaction = f"{state_key}:{bound_browser}"
+        deadline = asyncio.get_running_loop().time() + 10
+        while True:
+            outcome, *payload = await self._redis.eval(
+                _BEGIN,
+                5,
+                state_key,
+                f"forum:oauth:code:{code}",
+                f"forum:oauth:owner:{code}",
+                f"auth:oauth:state:{code}",
+                f"auth:oauth:lock:{code}",
+                binding,
+                bound_browser,
+                claimed_state,
+                transaction,
+                owner,
                 OAUTH_STATE_TTL_SECONDS,
-                orjson.dumps(state).decode(),
+                OAUTH_OWNER_TTL_SECONDS * 1000,
             )
-        except Exception:
-            logger.warning(
-                "写入OAuth幂等缓存失败 code_fingerprint=%s",
-                code_fingerprint,
-                exc_info=True,
-            )
-
-    async def acquire_lock(self, code_fingerprint: str, attempt_id: str) -> bool:
-        """尝试取得 OAuth code 的单次处理锁。"""
-        # Redis 不可用时降级为直接处理，避免缓存故障拖垮全部登录
-        try:
-            acquired = await self._redis.set(
-                self._lock_key(code_fingerprint),
-                attempt_id,
-                ex=OAUTH_LOCK_TTL_SECONDS,
-                nx=True,
-            )
-            return bool(acquired)
-        except Exception:
-            logger.warning(
-                "获取OAuth幂等锁失败 code_fingerprint=%s，降级为直接处理",
-                code_fingerprint,
-                exc_info=True,
-            )
-            return True
-
-    async def release_lock(self, code_fingerprint: str, attempt_id: str) -> None:
-        """仅释放由当前请求持有的 OAuth 处理锁。"""
-        # Lua 比较锁持有者后再删除，避免误删后续请求取得的新锁
-        script = """
-        if redis.call('get', KEYS[1]) == ARGV[1] then
-            return redis.call('del', KEYS[1])
-        end
-        return 0
-        """
-        try:
-            await self._redis.eval(
-                script, 1, self._lock_key(code_fingerprint), attempt_id
-            )
-        except Exception:
-            logger.warning(
-                "释放OAuth幂等锁失败 code_fingerprint=%s",
-                code_fingerprint,
-                exc_info=True,
-            )
-
-    async def wait_for_state(
-        self, code_fingerprint: str, timeout_seconds: float = 10.0
-    ) -> Optional[dict]:
-        """等待并发回调写入可复用的 OAuth 状态。"""
-        # 短轮询只发生在同一 code 并发提交时，不影响正常登录流量
-        deadline = asyncio.get_running_loop().time() + timeout_seconds
-        while asyncio.get_running_loop().time() < deadline:
-            state = await self.get_state(code_fingerprint)
-            if state:
-                return state
+            if outcome != "busy" or asyncio.get_running_loop().time() >= deadline:
+                return outcome, orjson.loads(payload[0]) if payload else None
             await asyncio.sleep(0.1)
-        return None
+
+    async def save(
+        self,
+        state_key: str,
+        code: str,
+        owner: str,
+        payload: dict,
+        *,
+        delivery: bool = False,
+        claim: dict | None = None,
+    ) -> None:
+        """在事务仍有效时保存进度，或原子发布交付结果及其登录码。"""
+        # 登录码和可见的完成状态一起发布，且 claim 过期不会重建。
+        claim_key = (
+            "forum:login:claim:"
+            + hashlib.sha256(payload["login_code"].encode()).hexdigest()
+            if claim is not None
+            else state_key
+        )
+        saved = await self._redis.eval(
+            _SAVE,
+            4,
+            state_key,
+            f"forum:oauth:code:{code}",
+            f"forum:oauth:owner:{code}",
+            claim_key,
+            owner,
+            "delivery" if delivery else "progress",
+            orjson.dumps(payload),
+            orjson.dumps(claim) if claim is not None else "",
+            LOGIN_CLAIM_TTL_SECONDS * 1000,
+            OAUTH_OWNER_TTL_SECONDS * 1000,
+        )
+        if not saved:
+            raise RuntimeError("OAuth 登录事务已失效")
+
+    async def release(self, code: str, owner: str) -> None:
+        """只释放当前回调持有的处理权，保留 code 与原事务的绑定。"""
+        await self._redis.eval(_RELEASE, 1, f"forum:oauth:owner:{code}", owner)

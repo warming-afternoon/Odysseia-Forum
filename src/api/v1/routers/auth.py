@@ -26,7 +26,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from api.v1.utils.jwt_utils import sign_jwt, verify_jwt
 from core.discord_member_cache_service import DiscordMemberCacheService
 from core.discord_member_verifier import DiscordMemberVerifier
-from core.oauth_callback_cache import OAuthCallbackCache
+from core.oauth_callback_cache import OAUTH_STATE_TTL_SECONDS, OAuthCallbackCache
 from shared.enum.constant_enum import ConstantEnum
 from shared.redis_client import RedisManager
 
@@ -39,6 +39,7 @@ _OAUTH_CALLBACK_CACHE: Optional[OAuthCallbackCache] = None
 
 JWT_TTL_SECONDS = 7 * 24 * 60 * 60
 ROLE_VERIFICATION_TTL_SECONDS = int(ConstantEnum.AUTH_CACHE_TTL)
+FLUXER_EXTERNAL_PROOF_TTL_SECONDS = 120
 
 
 def _public_fluxer_api_url() -> str:
@@ -306,15 +307,18 @@ def _log_oauth_failure(
     )
 
 
-async def _create_login_response(
-    auth_state: dict, request: Request = None
-) -> RedirectResponse:
-    """根据已验证的 OAuth 状态签发登录 JWT。"""
+async def _create_login_delivery(
+    auth_state: dict,
+    exchange_id: str,
+    binding_hash: str,
+    fluxer_mode: bool,
+) -> tuple[dict, dict | None]:
+    """根据已验证的 OAuth 状态准备同一事务的交付结果。"""
     user = auth_state["user"]
-    if is_fluxer_mode():
-        if request is None or not request.cookies.get("forum_login_binding"):
-            raise HTTPException(400, "登录浏览器绑定已过期")
-        verified_at = datetime.now(timezone.utc).isoformat()
+    if fluxer_mode:
+        verified_at = datetime.fromtimestamp(
+            auth_state["roles_verified_at"], timezone.utc
+        ).isoformat()
         avatar = user.get("avatar")
         avatar_url = (
             f"https://cdn.discordapp.com/avatars/{user['id']}/{avatar}.png"
@@ -322,9 +326,6 @@ async def _create_login_response(
             else None
         )
         service = get_auth_service()
-        exchange_id = hashlib.sha256(
-            (request.cookies["forum_login_binding"] + ":" + str(user["id"])).encode()
-        ).hexdigest()
         exchanged = await service.rpc(
             "rpc.auth.v1.external.exchange",
             exchange_id=exchange_id,
@@ -335,11 +336,7 @@ async def _create_login_response(
                 "display_name": user.get("global_name"),
                 "avatar_url": avatar_url,
             },
-            origin={
-                "ip": request.client.host if request.client else "",
-                "user_agent": request.headers.get("user-agent", "")[:512],
-                "client_os": "Forum Browser",
-            },
+            origin=auth_state["origin"],
         )
         # 资料与绑定由 Fluxer 权威返回的 ID 建立，客户端没有提交 ID 的入口。
         from sqlalchemy.dialects.postgresql import insert
@@ -388,9 +385,7 @@ async def _create_login_response(
             proof = None
         login_code = secrets.token_urlsafe(32)
         claim = {
-            "binding": hashlib.sha256(
-                request.cookies["forum_login_binding"].encode()
-            ).hexdigest(),
+            "binding": binding_hash,
             "token": exchanged["token"],
             "user": {
                 "id": exchanged["user_id"],
@@ -406,16 +401,7 @@ async def _create_login_response(
                 password_setup_proof=proof["proof"],
                 proof_expires_in=proof["expires_in"],
             )
-        await RedisManager.get_client().set(
-            "forum:login:claim:" + hashlib.sha256(login_code.encode()).hexdigest(),
-            json.dumps(claim),
-            ex=60,
-            nx=True,
-        )
-        return RedirectResponse(
-            url=f"{_AUTH_CONFIG['frontend_url'].rstrip('/')}/login#login_code={login_code}",
-            status_code=302,
-        )
+        return {"login_code": login_code}, claim
     token = await sign_jwt(
         {
             "id": user["id"],
@@ -426,8 +412,25 @@ async def _create_login_response(
         _AUTH_CONFIG["jwt_secret"],
         JWT_TTL_SECONDS,
     )
+    return {"token": token}, None
+
+
+def _login_response(delivery: dict) -> RedirectResponse:
+    """用事务已保存的交付结果构造前端跳转。"""
+    headers = {"Cache-Control": "no-store"}
+    if "login_code" in delivery:
+        login_code = delivery["login_code"]
+        return RedirectResponse(
+            url=f"{_AUTH_CONFIG['frontend_url'].rstrip('/')}/login#login_code={login_code}",
+            status_code=302,
+            headers=headers,
+        )
+
+    token = delivery["token"]
     response = RedirectResponse(
-        url=f"{_AUTH_CONFIG['frontend_url']}#token={token}", status_code=302
+        url=f"{_AUTH_CONFIG['frontend_url']}#token={token}",
+        status_code=302,
+        headers=headers,
     )
     response.set_cookie(
         key="session",
@@ -473,23 +476,28 @@ async def login(request: Request):
 
     oauth_state = secrets.token_urlsafe(32)
     binding = secrets.token_urlsafe(32)
-    await RedisManager.get_client().set(
+    fluxer_mode = is_fluxer_mode()
+    mode = "fluxer" if fluxer_mode else "legacy"
+    binding_hash = hashlib.sha256(binding.encode()).hexdigest()
+    stored = await RedisManager.get_client().set(
         "forum:oauth:state:" + hashlib.sha256(oauth_state.encode()).hexdigest(),
-        hashlib.sha256(binding.encode()).hexdigest(),
-        ex=600,
+        f"{binding_hash}:{mode}",
+        ex=OAUTH_STATE_TTL_SECONDS,
         nx=True,
     )
+    if not stored:
+        raise HTTPException(503, "暂时无法创建登录事务，请重试")
     params["state"] = oauth_state
     auth_url = f"https://discord.com/api/oauth2/authorize?{urlencode(params)}"
     response = RedirectResponse(url=auth_url, status_code=302)
     response.set_cookie(
         "forum_login_binding",
         binding,
-        max_age=600,
+        max_age=OAUTH_STATE_TTL_SECONDS,
         httponly=True,
         secure=True,
         samesite="none",
-        path="/v2/auth" if is_fluxer_mode() else "/v1/auth",
+        path="/v2/auth" if fluxer_mode else "/v1/auth",
     )
     return response
 
@@ -509,20 +517,6 @@ async def callback(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="认证服务未初始化"
         )
 
-    if request is not None:
-        binding = request.cookies.get("forum_login_binding")
-        if not isinstance(oauth_state, str) or not binding:
-            return _oauth_error_redirect("登录状态无效，请重新登录。", 400)
-        accepted = await RedisManager.get_client().eval(
-            """if redis.call('GET',KEYS[1]) ~= ARGV[1] then return 0 end
-            redis.call('DEL',KEYS[1]); return 1""",
-            1,
-            "forum:oauth:state:" + hashlib.sha256(oauth_state.encode()).hexdigest(),
-            hashlib.sha256(binding.encode()).hexdigest(),
-        )
-        if not accepted:
-            return _oauth_error_redirect("登录状态无效或已使用，请重新登录。", 400)
-
     if not code:
         _log_oauth_failure(
             attempt_id, "missing", "missing_code", started_at, status_code=400
@@ -530,245 +524,260 @@ async def callback(
         return _oauth_error_redirect("缺少 Discord 授权代码，请重新登录。", 400)
 
     code_fingerprint = hashlib.sha256(code.encode()).hexdigest()
-    # 已完成的同 code 回调可以直接重新签发本站 JWT，不再访问 Discord token 接口
-    state = (
-        await _OAUTH_CALLBACK_CACHE.get_state(code_fingerprint)
-        if _OAUTH_CALLBACK_CACHE
-        else None
-    )
-    if state and state.get("stage") == "authenticated":
-        return await _create_login_response(state, request)
+    binding = request.cookies.get("forum_login_binding") if request else None
+    if not isinstance(oauth_state, str) or not oauth_state or not binding:
+        return _oauth_error_redirect("登录状态无效，请重新登录。", 400)
 
-    # 首个回调持有短锁，重复回调等待或复用已写入的安全中间状态
-    lock_acquired = True
-    if _OAUTH_CALLBACK_CACHE:
-        lock_acquired = await _OAUTH_CALLBACK_CACHE.acquire_lock(
-            code_fingerprint, attempt_id
-        )
-        if not lock_acquired and not state:
-            state = await _OAUTH_CALLBACK_CACHE.wait_for_state(code_fingerprint)
-            if not state:
-                _log_oauth_failure(
-                    attempt_id,
-                    code_fingerprint,
-                    "duplicate_wait",
-                    started_at,
-                    status_code=503,
-                )
-                return _oauth_error_redirect(
-                    "同一次授权仍在处理中，请稍后返回登录页面重试。", 503
-                )
-            if state.get("stage") == "authenticated":
-                return await _create_login_response(state, request)
-
+    binding_hash = hashlib.sha256(binding.encode()).hexdigest()
+    state_fingerprint = hashlib.sha256(oauth_state.encode()).hexdigest()
+    state_key = f"forum:oauth:state:{state_fingerprint}"
+    fluxer_mode = is_fluxer_mode()
+    mode = "fluxer" if fluxer_mode else "legacy"
+    exchange_id = hashlib.sha256(
+        f"{mode}:{state_fingerprint}:{binding_hash}:{code_fingerprint}".encode()
+    ).hexdigest()
+    cache = _OAUTH_CALLBACK_CACHE
+    lock_acquired = False
     try:
-        if lock_acquired and _OAUTH_CALLBACK_CACHE:
-            latest_state = await _OAUTH_CALLBACK_CACHE.get_state(code_fingerprint)
-            if latest_state:
-                state = latest_state
-            if state and state.get("stage") == "authenticated":
-                return await _create_login_response(state, request)
+        if cache is None:
+            raise RuntimeError("OAuth 登录事务缓存未初始化")
+        outcome, state = await cache.begin(
+            state_key, binding_hash, mode, code_fingerprint, attempt_id
+        )
+        if outcome in ("invalid", "expired"):
+            return _oauth_error_redirect("登录状态无效或已使用，请重新登录。", 400)
+        if outcome == "busy":
+            return _oauth_error_redirect("同一次授权仍在处理中，请稍后重试。", 503)
+        if outcome == "complete":
+            return _login_response(state)
 
-        # 同一个 HTTP 客户端承载 OAuth 用户查询和成员查询，统一超时边界
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(10.0, connect=5.0)
-        ) as client:
-            # 优先复用已完成 code 交换的安全用户信息
-            user = state.get("user") if state else None
-            if not user:
-                token_data = {
-                    "client_id": _AUTH_CONFIG["client_id"],
-                    "client_secret": _AUTH_CONFIG["client_secret"],
-                    "grant_type": "authorization_code",
-                    "code": code,
-                    "redirect_uri": _oauth_redirect_uri(),
-                }
-                token_response = await client.post(
-                    "https://discord.com/api/oauth2/token",
-                    data=token_data,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                )
-                discord_error, error_description = _safe_discord_error(token_response)
-                if token_response.status_code != 200:
+        if outcome not in ("new", "resume"):
+            raise RuntimeError("OAuth 登录事务状态无效")
+        lock_acquired = True
+        if not state or state["stage"] != "authenticated":
+            # 同一个 HTTP 客户端承载 OAuth 用户查询和成员查询，统一超时边界
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(10.0, connect=5.0)
+            ) as client:
+                # 优先复用已完成 code 交换的安全用户信息
+                user = state.get("user") if state else None
+                if not user:
+                    token_data = {
+                        "client_id": _AUTH_CONFIG["client_id"],
+                        "client_secret": _AUTH_CONFIG["client_secret"],
+                        "grant_type": "authorization_code",
+                        "code": code,
+                        "redirect_uri": _oauth_redirect_uri(),
+                    }
+                    token_response = await client.post(
+                        "https://discord.com/api/oauth2/token",
+                        data=token_data,
+                        headers={"Content-Type": "application/x-www-form-urlencoded"},
+                    )
+                    discord_error, error_description = _safe_discord_error(
+                        token_response
+                    )
+                    if token_response.status_code != 200:
+                        _log_oauth_failure(
+                            attempt_id,
+                            code_fingerprint,
+                            "token_exchange",
+                            started_at,
+                            status_code=token_response.status_code,
+                            discord_error=discord_error,
+                        )
+                        message = (
+                            "Discord 授权链接已经失效或被使用过，请重新登录。"
+                            if discord_error == "invalid_grant"
+                            else "Discord 暂时无法完成授权，请稍后重新登录。"
+                        )
+                        return _oauth_error_redirect(message, 401)
+
+                    try:
+                        token_result = token_response.json()
+                    except ValueError:
+                        _log_oauth_failure(
+                            attempt_id,
+                            code_fingerprint,
+                            "token_response_json",
+                            started_at,
+                            status_code=token_response.status_code,
+                        )
+                        return _oauth_error_redirect(
+                            "Discord 返回了无法识别的授权结果，请稍后重试。", 502
+                        )
+
+                    access_token = token_result.get("access_token")
+                    if not access_token:
+                        _log_oauth_failure(
+                            attempt_id,
+                            code_fingerprint,
+                            "token_missing",
+                            started_at,
+                            status_code=token_response.status_code,
+                            discord_error=error_description,
+                        )
+                        return _oauth_error_redirect(
+                            "Discord 没有返回访问凭证，请重新登录。", 502
+                        )
+
+                    user_response = await client.get(
+                        "https://discord.com/api/users/@me",
+                        headers={"Authorization": f"Bearer {access_token}"},
+                    )
+                    if user_response.status_code != 200:
+                        user_error, _ = _safe_discord_error(user_response)
+                        _log_oauth_failure(
+                            attempt_id,
+                            code_fingerprint,
+                            "user_profile",
+                            started_at,
+                            status_code=user_response.status_code,
+                            discord_error=user_error,
+                        )
+                        return _oauth_error_redirect(
+                            "Discord 用户信息暂时无法读取，请稍后重新登录。", 502
+                        )
+
+                    try:
+                        raw_user = user_response.json()
+                    except ValueError:
+                        _log_oauth_failure(
+                            attempt_id,
+                            code_fingerprint,
+                            "user_profile_json",
+                            started_at,
+                            status_code=user_response.status_code,
+                        )
+                        return _oauth_error_redirect(
+                            "Discord 用户信息格式异常，请稍后重新登录。", 502
+                        )
+
+                    if not raw_user.get("id") or not raw_user.get("username"):
+                        _log_oauth_failure(
+                            attempt_id,
+                            code_fingerprint,
+                            "user_profile_missing_fields",
+                            started_at,
+                            status_code=user_response.status_code,
+                        )
+                        return _oauth_error_redirect(
+                            "Discord 用户信息不完整，请稍后重新登录。", 502
+                        )
+
+                    user = {
+                        "id": str(raw_user["id"]),
+                        "username": str(raw_user["username"]),
+                        "global_name": raw_user.get("global_name"),
+                        "avatar": raw_user.get("avatar"),
+                    }
+                    state = {"stage": "oauth_user", "user": user}
+                    await cache.save(state_key, code_fingerprint, attempt_id, state)
+
+                # 只有仍具备访问身份组的缓存才能跳过 Discord 实时验证
+                cached = await _get_authorized_cached_member(user["id"])
+                member_to_cache = None
+                # Fluxer 的外部断言只接受两分钟内的真实验证时间。
+                if cached and fluxer_mode:
+                    verified_age = time.time() - float(cached["roles_verified_at"])
+                    if not 0 <= verified_age < FLUXER_EXTERNAL_PROOF_TTL_SECONDS:
+                        cached = None
+                if cached:
+                    roles = [str(role_id) for role_id in cached.get("roles", [])]
+                    roles_verified_at = float(cached["roles_verified_at"])
+                else:
+                    if not _MEMBER_VERIFIER:
+                        raise RuntimeError("Discord 成员验证器未初始化")
+                    verification = await _MEMBER_VERIFIER.verify_member(
+                        user["id"], attempt_id, client
+                    )
+                    if verification.outcome == "not_member":
+                        _log_oauth_failure(
+                            attempt_id,
+                            code_fingerprint,
+                            "guild_member",
+                            started_at,
+                            status_code=verification.status_code,
+                            user_id=user["id"],
+                            token_alias=verification.token_alias,
+                        )
+                        await _delete_cached_member(user["id"], "oauth_not_member")
+                        return _oauth_error_redirect(
+                            "你的账号目前不在论坛 Discord 服务器中。", 403
+                        )
+                    if verification.outcome == "unavailable":
+                        _log_oauth_failure(
+                            attempt_id,
+                            code_fingerprint,
+                            "guild_member_unavailable",
+                            started_at,
+                            status_code=verification.status_code,
+                            user_id=user["id"],
+                            token_alias=verification.token_alias,
+                            retry_after=verification.retry_after,
+                        )
+                        return _oauth_error_redirect(
+                            "Discord 身份组服务暂时不可用，请稍后返回登录页面重试。",
+                            503,
+                        )
+
+                    member = verification.member or {}
+                    roles = [str(role_id) for role_id in member.get("roles", [])]
+                    member_user = member.get("user", {})
+                    roles_verified_at = time.time()
+                    member_to_cache = {
+                        "roles": roles,
+                        "user": member_user,
+                        "roles_verified_at": roles_verified_at,
+                    }
+
+                if not _has_required_role(roles):
                     _log_oauth_failure(
                         attempt_id,
                         code_fingerprint,
-                        "token_exchange",
+                        "required_role",
                         started_at,
-                        status_code=token_response.status_code,
-                        discord_error=discord_error,
-                    )
-                    message = (
-                        "Discord 授权链接已经失效或被使用过，请重新登录。"
-                        if discord_error == "invalid_grant"
-                        else "Discord 暂时无法完成授权，请稍后重新登录。"
-                    )
-                    return _oauth_error_redirect(message, 401)
-
-                try:
-                    token_result = token_response.json()
-                except ValueError:
-                    _log_oauth_failure(
-                        attempt_id,
-                        code_fingerprint,
-                        "token_response_json",
-                        started_at,
-                        status_code=token_response.status_code,
-                    )
-                    return _oauth_error_redirect(
-                        "Discord 返回了无法识别的授权结果，请稍后重试。", 502
-                    )
-
-                access_token = token_result.get("access_token")
-                if not access_token:
-                    _log_oauth_failure(
-                        attempt_id,
-                        code_fingerprint,
-                        "token_missing",
-                        started_at,
-                        status_code=token_response.status_code,
-                        discord_error=error_description,
-                    )
-                    return _oauth_error_redirect(
-                        "Discord 没有返回访问凭证，请重新登录。", 502
-                    )
-
-                user_response = await client.get(
-                    "https://discord.com/api/users/@me",
-                    headers={"Authorization": f"Bearer {access_token}"},
-                )
-                if user_response.status_code != 200:
-                    user_error, _ = _safe_discord_error(user_response)
-                    _log_oauth_failure(
-                        attempt_id,
-                        code_fingerprint,
-                        "user_profile",
-                        started_at,
-                        status_code=user_response.status_code,
-                        discord_error=user_error,
-                    )
-                    return _oauth_error_redirect(
-                        "Discord 用户信息暂时无法读取，请稍后重新登录。", 502
-                    )
-
-                try:
-                    raw_user = user_response.json()
-                except ValueError:
-                    _log_oauth_failure(
-                        attempt_id,
-                        code_fingerprint,
-                        "user_profile_json",
-                        started_at,
-                        status_code=user_response.status_code,
-                    )
-                    return _oauth_error_redirect(
-                        "Discord 用户信息格式异常，请稍后重新登录。", 502
-                    )
-
-                if not raw_user.get("id") or not raw_user.get("username"):
-                    _log_oauth_failure(
-                        attempt_id,
-                        code_fingerprint,
-                        "user_profile_missing_fields",
-                        started_at,
-                        status_code=user_response.status_code,
-                    )
-                    return _oauth_error_redirect(
-                        "Discord 用户信息不完整，请稍后重新登录。", 502
-                    )
-
-                user = {
-                    "id": str(raw_user["id"]),
-                    "username": str(raw_user["username"]),
-                    "global_name": raw_user.get("global_name"),
-                    "avatar": raw_user.get("avatar"),
-                }
-                state = {"stage": "oauth_user", "user": user}
-                if _OAUTH_CALLBACK_CACHE:
-                    await _OAUTH_CALLBACK_CACHE.store_state(code_fingerprint, state)
-
-            # 只有仍具备访问身份组的缓存才能跳过 Discord 实时验证
-            cached = await _get_authorized_cached_member(user["id"])
-            member_to_cache = None
-            if cached:
-                roles = [str(role_id) for role_id in cached.get("roles", [])]
-                member_user = cached.get("user", {})
-                roles_verified_at = float(cached["roles_verified_at"])
-            else:
-                if not _MEMBER_VERIFIER:
-                    raise RuntimeError("Discord 成员验证器未初始化")
-                verification = await _MEMBER_VERIFIER.verify_member(
-                    user["id"], attempt_id, client
-                )
-                if verification.outcome == "not_member":
-                    _log_oauth_failure(
-                        attempt_id,
-                        code_fingerprint,
-                        "guild_member",
-                        started_at,
-                        status_code=verification.status_code,
+                        status_code=403,
                         user_id=user["id"],
-                        token_alias=verification.token_alias,
                     )
-                    await _delete_cached_member(user["id"], "oauth_not_member")
-                    return _oauth_error_redirect(
-                        "你的账号目前不在论坛 Discord 服务器中。", 403
-                    )
-                if verification.outcome == "unavailable":
-                    _log_oauth_failure(
-                        attempt_id,
-                        code_fingerprint,
-                        "guild_member_unavailable",
-                        started_at,
-                        status_code=verification.status_code,
-                        user_id=user["id"],
-                        token_alias=verification.token_alias,
-                        retry_after=verification.retry_after,
+                    await _delete_cached_member(
+                        user["id"], "oauth_missing_required_role"
                     )
                     return _oauth_error_redirect(
-                        "Discord 身份组服务暂时不可用，请稍后返回登录页面重试。", 503
+                        "你的账号缺少访问论坛所需的身份组。", 403
                     )
 
-                member = verification.member or {}
-                roles = [str(role_id) for role_id in member.get("roles", [])]
-                member_user = member.get("user", {})
-                roles_verified_at = time.time()
-                member_to_cache = {
+                # 实时验证完整通过后才写入一天成员缓存
+                if member_to_cache:
+                    await _cache_member(user["id"], member_to_cache)
+
+                # 保留可信身份组验证时间，便于重试下游交付。
+                state = {
+                    "stage": "authenticated",
+                    "user": user,
                     "roles": roles,
-                    "user": member_user,
                     "roles_verified_at": roles_verified_at,
                 }
+                if fluxer_mode:
+                    state["origin"] = {
+                        "ip": request.client.host if request.client else "",
+                        "user_agent": request.headers.get("user-agent", "")[:512],
+                        "client_os": "Forum Browser",
+                    }
+                await cache.save(state_key, code_fingerprint, attempt_id, state)
 
-            if not _has_required_role(roles):
-                _log_oauth_failure(
-                    attempt_id,
-                    code_fingerprint,
-                    "required_role",
-                    started_at,
-                    status_code=403,
-                    user_id=user["id"],
-                )
-                await _delete_cached_member(user["id"], "oauth_missing_required_role")
-                return _oauth_error_redirect("你的账号缺少访问论坛所需的身份组。", 403)
-
-            # 实时验证完整通过后才写入一天成员缓存
-            if member_to_cache:
-                await _cache_member(user["id"], member_to_cache)
-
-            # 最终缓存只包含本站签发 JWT 所需信息，不保存 Discord access token
-            authenticated_state = {
-                "stage": "authenticated",
-                "user": user,
-                "roles": roles,
-                "member_user": member_user,
-                "roles_verified_at": roles_verified_at,
-            }
-            if _OAUTH_CALLBACK_CACHE:
-                await _OAUTH_CALLBACK_CACHE.store_state(
-                    code_fingerprint, authenticated_state
-                )
-
-            return await _create_login_response(authenticated_state, request)
+        delivery, claim = await _create_login_delivery(
+            state, exchange_id, binding_hash, fluxer_mode
+        )
+        await cache.save(
+            state_key,
+            code_fingerprint,
+            attempt_id,
+            delivery,
+            delivery=True,
+            claim=claim,
+        )
+        return _login_response(delivery)
     except Exception as exc:
         logger.exception(
             "OAuth回调处理异常 attempt_id=%s code_fingerprint=%s exception=%s",
@@ -785,8 +794,11 @@ async def callback(
         return _oauth_error_redirect("认证服务暂时出现异常，请稍后重新登录。", 503)
     finally:
         # 即使中途跳回登录页也释放本请求持有的锁
-        if lock_acquired and _OAUTH_CALLBACK_CACHE:
-            await _OAUTH_CALLBACK_CACHE.release_lock(code_fingerprint, attempt_id)
+        if lock_acquired:
+            try:
+                await cache.release(code_fingerprint, attempt_id)
+            except Exception:
+                logger.warning("释放 OAuth 登录事务失败 attempt_id=%s", attempt_id)
 
 
 def _get_dev_redirect_uri() -> str:
