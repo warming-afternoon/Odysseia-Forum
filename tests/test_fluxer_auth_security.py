@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException, Request
 from identity.fluxer_auth_service import FluxerAuthService
 from api.v1.routers import auth
+from core.oauth_callback_cache import OAuthCallbackCache
 from api.v1.dependencies import security
 
 
@@ -271,7 +272,10 @@ async def test_callback_rejects_missing_or_cross_browser_state(
         auth.RedisManager, "get_client", lambda: auth_service.service.redis
     )
     state_key = "forum:oauth:state:" + hashlib.sha256(b"state").hexdigest()
-    auth_service.sync.set(state_key, hashlib.sha256(b"browser").hexdigest())
+    monkeypatch.setattr(
+        auth, "_OAUTH_CALLBACK_CACHE", OAuthCallbackCache(auth_service.service.redis)
+    )
+    auth_service.sync.set(state_key, hashlib.sha256(b"browser").hexdigest(), ex=600)
     result = await auth.callback(
         "code",
         request("/v1/auth/callback", cookie="forum_login_binding=attacker"),

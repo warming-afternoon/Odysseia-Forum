@@ -1,13 +1,22 @@
 """Discord OAuth 与多 Bot Token 身份验证测试。"""
 
 import asyncio
+import hashlib
 import json
 import logging
 import time
 from collections import deque
+from datetime import datetime, timezone
+from http.cookies import SimpleCookie
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from urllib.parse import parse_qs, urlsplit
 
+import fakeredis.aioredis
 import httpx
 import pytest
+import pytest_asyncio
+from fastapi import HTTPException
 from starlette.requests import Request
 
 from api.v1.routers import auth
@@ -31,40 +40,6 @@ class QueueHttpClient:
         if isinstance(result, httpx.RequestError):
             raise result
         return result
-
-
-class FakeRedis:
-    """提供 OAuth 幂等测试所需的最小 Redis 行为。"""
-
-    def __init__(self):
-        """初始化内存键值。"""
-        self.values: dict[str, str] = {}
-
-    async def get(self, key: str):
-        """读取内存键值。"""
-        return self.values.get(key)
-
-    async def set(self, key: str, value: str, ex: int, nx: bool):
-        """模拟带 NX 的 Redis SET。"""
-        if nx and key in self.values:
-            return None
-        self.values[key] = value
-        return True
-
-    async def setex(self, key: str, ttl: int, value: str):
-        """模拟带过期时间的 Redis SETEX。"""
-        self.values[key] = value
-
-    async def delete(self, key: str):
-        """删除内存键并返回是否存在。"""
-        return int(self.values.pop(key, None) is not None)
-
-    async def eval(self, script: str, key_count: int, key: str, owner: str):
-        """模拟仅由锁持有者释放锁。"""
-        if self.values.get(key) == owner:
-            self.values.pop(key, None)
-            return 1
-        return 0
 
 
 class FakeMemberVerifier:
@@ -168,6 +143,7 @@ def _request_with_cookie() -> Request:
 
 def _configure_auth(monkeypatch) -> None:
     """为路由测试注入最小认证配置。"""
+    monkeypatch.setenv("FORUM_AUTH_MODE", "legacy")
     monkeypatch.setattr(
         auth,
         "_AUTH_CONFIG",
@@ -184,6 +160,36 @@ def _configure_auth(monkeypatch) -> None:
     )
 
 
+@pytest_asyncio.fixture
+async def oauth_redis(monkeypatch):
+    """通过支持 Lua 的 Redis 测试客户端运行完整事务逻辑。"""
+    async with fakeredis.aioredis.FakeRedis(decode_responses=True) as redis:
+        monkeypatch.setattr(auth.RedisManager, "get_client", lambda: redis)
+        monkeypatch.setattr(auth, "_OAUTH_CALLBACK_CACHE", OAuthCallbackCache(redis))
+        yield redis
+
+
+async def _start_oauth(*, path: str = "/v1/auth/callback"):
+    """用登录入口签发的 state 和 Cookie 构造回调请求。"""
+    login_response = await auth.login(None)
+    state = parse_qs(urlsplit(login_response.headers["location"]).query)["state"][0]
+    cookie = SimpleCookie(login_response.headers["set-cookie"])["forum_login_binding"]
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": path,
+            "client": ("192.0.2.10", 12345),
+            "headers": [
+                (b"cookie", f"{cookie.key}={cookie.value}".encode()),
+                (b"user-agent", b"first-browser"),
+                (b"origin", b"https://forum.example"),
+            ],
+        }
+    )
+    return request, state
+
+
 def _stub_unread_query(monkeypatch) -> None:
     """避免 checkauth 测试访问真实数据库。"""
     import core.follow_repository
@@ -198,13 +204,11 @@ def _stub_unread_query(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_member_cache_refuses_missing_required_role(monkeypatch):
+async def test_member_cache_refuses_missing_required_role(monkeypatch, oauth_redis):
     """缓存写入层拒绝保存缺少论坛身份组的成员快照。"""
     _configure_auth(monkeypatch)
-    fake_redis = FakeRedis()
     cache_key = "user:discord:123"
-    fake_redis.values[cache_key] = "stale-value"
-    monkeypatch.setattr(auth.RedisManager, "get_client", lambda: fake_redis)
+    await oauth_redis.set(cache_key, "stale-value")
 
     await auth._cache_member(
         "123",
@@ -215,7 +219,7 @@ async def test_member_cache_refuses_missing_required_role(monkeypatch):
         },
     )
 
-    assert cache_key not in fake_redis.values
+    assert not await oauth_redis.exists(cache_key)
 
 
 @pytest.mark.asyncio
@@ -328,11 +332,11 @@ async def test_token_pool_falls_back_when_bot_cannot_find_guild():
 
 
 @pytest.mark.asyncio
-async def test_duplicate_oauth_callback_exchanges_code_once(monkeypatch, caplog):
+async def test_duplicate_oauth_callback_exchanges_code_once(
+    monkeypatch, caplog, oauth_redis
+):
     """并发提交同一 code 时只调用一次 Discord token 接口。"""
     _configure_auth(monkeypatch)
-    fake_redis = FakeRedis()
-    monkeypatch.setattr(auth, "_OAUTH_CALLBACK_CACHE", OAuthCallbackCache(fake_redis))
     monkeypatch.setattr(
         auth,
         "_MEMBER_VERIFIER",
@@ -365,7 +369,34 @@ async def test_duplicate_oauth_callback_exchanges_code_once(monkeypatch, caplog)
     caplog.set_level(logging.INFO)
     raw_code = "single-use-oauth-code"
 
-    responses = await asyncio.gather(auth.callback(raw_code), auth.callback(raw_code))
+    request, state = await _start_oauth()
+    other_request, other_state = await _start_oauth()
+    state_key = "forum:oauth:state:" + hashlib.sha256(state.encode()).hexdigest()
+    await oauth_redis.pexpire(state_key, 15_000)
+    responses = await asyncio.gather(
+        auth.callback(raw_code, request, state),
+        auth.callback(raw_code, request, state),
+    )
+    assert 0 < await oauth_redis.pttl(state_key) <= 15_000
+    assert responses[0].headers["location"].startswith("https://forum.example#token=")
+    assert responses[0].headers["location"] == responses[1].headers["location"]
+
+    for code, browser, callback_state in (
+        (raw_code, other_request, other_state),
+        (raw_code, other_request, state),
+        (raw_code, request, other_state),
+        ("different-code", request, state),
+    ):
+        rejected = await auth.callback(code, browser, callback_state)
+        assert "status=400" in rejected.headers["location"]
+
+    rejected = await auth.callback(raw_code)
+    assert "status=400" in rejected.headers["location"]
+
+    await oauth_redis.pexpire(state_key, 1)
+    await asyncio.sleep(0.01)
+    rejected = await auth.callback(raw_code, request, state)
+    assert "status=400" in rejected.headers["location"]
 
     assert FakeOAuthHttpClient.token_request_count == 1
     assert all(response.status_code == 302 for response in responses)
@@ -375,10 +406,11 @@ async def test_duplicate_oauth_callback_exchanges_code_once(monkeypatch, caplog)
 
 
 @pytest.mark.asyncio
-async def test_oauth_role_failure_does_not_block_same_code_retry(monkeypatch, caplog):
+async def test_oauth_role_failure_does_not_block_same_code_retry(
+    monkeypatch, caplog, oauth_redis
+):
     """缺少身份组不写长缓存，同一 code 可复用用户资料重新验证。"""
     _configure_auth(monkeypatch)
-    fake_redis = FakeRedis()
     verifier = QueueMemberVerifier(
         [
             DiscordMemberVerificationDto(
@@ -414,7 +446,6 @@ async def test_oauth_role_failure_does_not_block_same_code_retry(monkeypatch, ca
     async def record_invalidation(user_id: str, reason: str):
         invalidations.append((user_id, reason))
 
-    monkeypatch.setattr(auth, "_OAUTH_CALLBACK_CACHE", OAuthCallbackCache(fake_redis))
     monkeypatch.setattr(auth, "_MEMBER_VERIFIER", verifier)
     monkeypatch.setattr(auth, "_get_cached_member", stale_unauthorized_member)
     monkeypatch.setattr(auth, "_cache_member", record_cache_write)
@@ -426,8 +457,9 @@ async def test_oauth_role_failure_does_not_block_same_code_retry(monkeypatch, ca
     caplog.set_level(logging.INFO)
     raw_code = "role-restored-code"
 
-    failed_response = await auth.callback(raw_code)
-    successful_response = await auth.callback(raw_code)
+    request, state = await _start_oauth()
+    failed_response = await auth.callback(raw_code, request, state)
+    successful_response = await auth.callback(raw_code, request, state)
 
     assert failed_response.headers["location"].startswith(
         "https://forum.example/login?"
@@ -442,6 +474,192 @@ async def test_oauth_role_failure_does_not_block_same_code_retry(monkeypatch, ca
     assert ("123", "cached_missing_required_role") in invalidations
     assert ("123", "oauth_missing_required_role") in invalidations
     assert "OAuth登录成功" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached_age", [30, 180])
+async def test_fluxer_callback_reuses_exchange_and_one_time_claim(
+    monkeypatch, oauth_redis, cached_age
+):
+    """Fluxer 重试保留原始断言、请求来源与一次性交付结果。"""
+    import shared.database
+
+    _configure_auth(monkeypatch)
+    monkeypatch.setenv("FORUM_AUTH_MODE", "fluxer")
+    monkeypatch.setenv(
+        "FORUM_V2_DISCORD_REDIRECT_URI", "https://api.example/v2/auth/callback"
+    )
+    cached_verified_at = time.time() - cached_age
+    verified_member = {"roles": ["allowed-role"], "user": {"id": "123"}}
+    monkeypatch.setattr(
+        auth,
+        "_get_cached_member",
+        AsyncMock(
+            return_value={**verified_member, "roles_verified_at": cached_verified_at}
+        ),
+    )
+    write_member_cache = AsyncMock()
+    monkeypatch.setattr(auth, "_cache_member", write_member_cache)
+    verifier = FakeMemberVerifier(
+        DiscordMemberVerificationDto(
+            outcome="verified", member=verified_member, status_code=200
+        )
+    )
+    monkeypatch.setattr(auth, "_MEMBER_VERIFIER", verifier)
+    FakeOAuthHttpClient.token_request_count = 0
+    monkeypatch.setattr(
+        auth.httpx, "AsyncClient", lambda *args, **kwargs: FakeOAuthHttpClient()
+    )
+
+    rpc = AsyncMock(
+        side_effect=[
+            HTTPException(503, "模拟权威交换响应丢失"),
+            {"token": "flx_test", "user_id": "200"},
+            {"proof": "test_proof", "expires_in": 120},
+        ]
+    )
+    monkeypatch.setattr(auth, "get_auth_service", lambda: SimpleNamespace(rpc=rpc))
+    session = AsyncMock()
+    session.execute.return_value = MagicMock(
+        scalar_one_or_none=MagicMock(return_value=None)
+    )
+    session_context = MagicMock()
+    session_context.__aenter__.return_value = session
+    monkeypatch.setattr(shared.database, "AsyncSessionFactory", lambda: session_context)
+
+    request, state = await _start_oauth(path="/v2/auth/callback")
+    code = f"fluxer-code-{cached_age}"
+    failed = await auth.callback(code, request, state)
+    assert "status=503" in failed.headers["location"]
+
+    # 模拟原浏览器在回包丢失后更换网络和请求头，再并发重试。
+    retried = Request(
+        {
+            **request.scope,
+            "client": ("192.0.2.20", 12345),
+            "headers": [
+                (key, b"retry-browser" if key == b"user-agent" else value)
+                for key, value in request.scope["headers"]
+            ],
+        }
+    )
+    first, second = await asyncio.gather(
+        auth.callback(code, retried, state), auth.callback(code, request, state)
+    )
+    assert first.headers["location"] == second.headers["location"]
+    assert first.headers["cache-control"] == "no-store"
+    assert FakeOAuthHttpClient.token_request_count == 1
+    exchange, retry, prove = rpc.await_args_list
+    assert exchange.args == retry.args == ("rpc.auth.v1.external.exchange",)
+    assert exchange.kwargs == retry.kwargs
+    if cached_age >= 120:
+        assert verifier.call_count == 1
+        verified_at = write_member_cache.await_args.args[1]["roles_verified_at"]
+    else:
+        assert verifier.call_count == 0
+        verified_at = cached_verified_at
+    assert (
+        exchange.kwargs["verified_at"]
+        == datetime.fromtimestamp(verified_at, timezone.utc).isoformat()
+    )
+    assert prove.kwargs["verified_at"] == exchange.kwargs["verified_at"]
+    assert prove.kwargs["operation_id"] == exchange.kwargs["exchange_id"]
+    assert exchange.kwargs["origin"]["user_agent"] == "first-browser"
+
+    login_code = parse_qs(urlsplit(first.headers["location"]).fragment)["login_code"][0]
+    claim_key = "forum:login:claim:" + hashlib.sha256(login_code.encode()).hexdigest()
+    assert 0 < await oauth_redis.pttl(claim_key) <= 60_000
+    other_request, _ = await _start_oauth(path="/v2/auth/callback")
+    with pytest.raises(HTTPException, match="登录码失效或已使用"):
+        await auth.claim_session(other_request, {"login_code": login_code})
+
+    claim_response = await auth.claim_session(request, {"login_code": login_code})
+    assert json.loads(claim_response.body)["token"] == "flx_test"
+    with pytest.raises(HTTPException, match="登录码失效或已使用"):
+        await auth.claim_session(request, {"login_code": login_code})
+    consumed = await auth.callback(code, request, state)
+    assert "status=400" in consumed.headers["location"]
+    assert not await oauth_redis.exists(claim_key)
+    assert rpc.await_count == 3
+
+
+@pytest.mark.asyncio
+async def test_oauth_expired_owner_can_only_resume_saved_progress(oauth_redis):
+    """处理权过期只能恢复安全进度，原持有者不能迟到写入。"""
+    cache = OAuthCallbackCache(oauth_redis)
+    for code, expected in (("uncertain", "expired"), ("saved", "resume")):
+        state_key = f"forum:oauth:state:{code}"
+        await oauth_redis.set(state_key, "binding:legacy", ex=600)
+        assert await cache.begin(state_key, "binding", "legacy", code, "first") == (
+            "new",
+            None,
+        )
+
+        progress = {"stage": "oauth_user", "user": {"id": "123"}}
+        if expected == "resume":
+            await cache.save(state_key, code, "first", progress)
+        await oauth_redis.pexpire(f"forum:oauth:owner:{code}", 1)
+        await asyncio.sleep(0.01)
+        outcome, saved = await cache.begin(
+            state_key, "binding", "legacy", code, "second"
+        )
+        assert outcome == expected
+        assert saved == (progress if expected == "resume" else None)
+        with pytest.raises(RuntimeError, match="登录事务已失效"):
+            await cache.save(state_key, code, "first", progress)
+
+
+@pytest.mark.asyncio
+async def test_oauth_claim_expiry_does_not_reopen_delivery(oauth_redis):
+    """登录码过期后仍保留事务已完成的状态。"""
+    cache = OAuthCallbackCache(oauth_redis)
+    state_key = "forum:oauth:state:short-claim"
+    await oauth_redis.set(state_key, "binding:fluxer", px=5000)
+    outcome, _ = await cache.begin(state_key, "binding", "fluxer", "code", "first")
+    assert outcome == "new"
+    delivery = {"login_code": "short-claim"}
+    await cache.save(
+        state_key,
+        "code",
+        "first",
+        delivery,
+        delivery=True,
+        claim={"binding": "binding"},
+    )
+    claim_key = "forum:login:claim:" + hashlib.sha256(b"short-claim").hexdigest()
+    assert (
+        0 < await oauth_redis.pttl(claim_key) <= await oauth_redis.pttl(state_key) + 25
+    )
+
+    await oauth_redis.pexpire(claim_key, 1)
+    await asyncio.sleep(0.01)
+    assert await oauth_redis.exists(state_key)
+    outcome, saved = await cache.begin(state_key, "binding", "fluxer", "code", "second")
+    assert (outcome, saved) == ("expired", None)
+
+
+@pytest.mark.asyncio
+async def test_oauth_callback_rejects_legacy_cache_and_redis_failure(
+    monkeypatch, oauth_redis
+):
+    """旧 code 缓存和 Redis 故障都不能跳过事务绑定。"""
+    _configure_auth(monkeypatch)
+    request, state = await _start_oauth()
+    code = "legacy-cache-code"
+    code_hash = hashlib.sha256(code.encode()).hexdigest()
+    await oauth_redis.set(f"auth:oauth:state:{code_hash}", '{"stage":"authenticated"}')
+    discord_client = MagicMock()
+    monkeypatch.setattr(auth.httpx, "AsyncClient", discord_client)
+
+    rejected = await auth.callback(code, request, state)
+    assert "status=400" in rejected.headers["location"]
+
+    monkeypatch.setattr(
+        oauth_redis, "eval", AsyncMock(side_effect=ConnectionError("Redis 暂不可用"))
+    )
+    unavailable = await auth.callback(code, request, state)
+    assert "status=503" in unavailable.headers["location"]
+    discord_client.assert_not_called()
 
 
 @pytest.mark.asyncio
