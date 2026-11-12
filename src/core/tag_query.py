@@ -100,6 +100,7 @@ def tag_filters(
                 .join(Tag, Tag.id == WorkNativeTagSource.tag_id)
                 .where(
                     WorkNativeTagBinding.work_id == target_column,
+                    WorkNativeTagSource.platform == "discord",
                     Tag.id.in_(ids),
                     Tag.deleted_at.is_(None),
                 )

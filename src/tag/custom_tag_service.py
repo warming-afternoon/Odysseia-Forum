@@ -2,7 +2,7 @@ import hashlib
 import unicodedata
 from datetime import timedelta
 
-from sqlalchemy import func, or_, select, text
+from sqlalchemy import and_, func, or_, select, text
 
 from core.tag_access_service import TagAccessService
 from identity.runtime import uses_canonical_storage
@@ -136,6 +136,7 @@ class CustomTagService:
         access_fields = (
             (
                 "id",
+                "work_id",
                 "guild_id",
                 "channel_id",
                 "author_id",
@@ -166,7 +167,15 @@ class CustomTagService:
         await self.session.execute(
             text("SELECT pg_advisory_xact_lock_shared(73902141)")
         )
-        target = await self.repo(model).one(key == target_id, lock=lock, refresh=True)
+        # 已关联作品的旧入口只锁 Work，不持 Thread 锁等待作品恢复或来源同步。
+        linked_work = kind == "thread" and target.work_id is not None
+        if linked_work and lock:
+            from models.work import Work
+
+            await self.repo(Work).one(Work.id == target.work_id, lock=True, refresh=True)
+        target = await self.repo(model).one(
+            key == target_id, lock=lock and not linked_work, refresh=True
+        )
         if target is None:
             raise TagError("not_found", "目标不存在", 404)
         if tuple(getattr(target, field) for field in access_fields) != access_state:
@@ -206,12 +215,17 @@ class CustomTagService:
                     roles, self.access.config.get("abyss")
                 ),
             }
+        self.work_principal = principal
         from fastapi import HTTPException
 
         try:
             target = await WorkService(self.session).visible(target_id, principal)
         except HTTPException as exc:
             raise TagError("not_found", str(exc.detail), exc.status_code) from exc
+        access_state = (
+            target.author_id, target.source_visible, target.is_nsfw,
+            target.is_abyss, target.deleted_at, target.source_thread_id,
+        )
         allowed = target.author_id == principal["id"] or principal["is_admin"]
         if (manage and not allowed) or (audit and not principal["is_admin"]):
             raise TagError("forbidden", "需要作者或管理权限", 403)
@@ -223,6 +237,11 @@ class CustomTagService:
         )
         if target is None or target.deleted_at:
             raise TagError("not_found", "作品不存在", 404)
+        if access_state != (
+            target.author_id, target.source_visible, target.is_nsfw,
+            target.is_abyss, target.deleted_at, target.source_thread_id,
+        ):
+            raise TagError("concurrent_conflict", "作品访问权限已变化，请刷新后重试")
         return "work", target.id, target, allowed
 
     def logical_target(self, model, kind, target_id):
@@ -267,6 +286,7 @@ class CustomTagService:
                         )
                         .where(
                             WorkNativeTagBinding.work_id == target.id,
+                            WorkNativeTagSource.platform == "discord",
                             Tag.deleted_at.is_(None),
                         )
                     )
@@ -324,11 +344,12 @@ class CustomTagService:
                     )
                     .where(
                         WorkNativeTagBinding.work_id == target_id,
+                        WorkNativeTagSource.platform == "discord",
                         Tag.deleted_at.is_(None),
                     )
                 )
             ).all()
-        native = [tag for tag, _ in native_rows]
+        native = list({tag.id: tag for tag, _ in native_rows}.values())
         native_source = {tag.id: str(source_id) for tag, source_id in native_rows}
         tags = await self.repo(Tag).rows(Tag.id.in_(bindings), Tag.deleted_at.is_(None))
         self.tag_cache.update({tag.id: tag for tag in tags})
@@ -382,6 +403,11 @@ class CustomTagService:
                     my_vote=mine.get(binding.id, 0),
                 )
             )
+        # Fluxer 旧来源仅作为内部追溯，不在作品界面形成第二种标签。
+        if kind == "work":
+            for item in result:
+                if item["source"] == "fluxer":
+                    item["source"] = "custom"
         all_ids = {t.id for t in tags + native}
         conflicts = await self.repo(TagRelation).rows(
             TagRelation.kind == "excludes",
@@ -407,6 +433,10 @@ class CustomTagService:
         tags = await self.repo(Tag).rows(Tag.id.in_(desired))
         if len(tags) != len(desired) or any(t.deleted_at for t in tags):
             raise TagError("tags_changed", "标签已发生变化，请刷新后重试")
+        if kind == "work" and any(
+            tag.is_abyss and tag.id not in current for tag in tags
+        ) and not (self.work_principal and self.work_principal["can_view_abyss"]):
+            raise TagError("forbidden", "无权添加深渊标签", 403)
         self.tag_cache.update({tag.id: tag for tag in tags})
         native = await self.native_tags(kind, target)
         native_ids = {t.id for t in native}
@@ -421,7 +451,7 @@ class CustomTagService:
         validate_selection(
             set(current),
             desired,
-            len(native),
+            len(native_ids - desired),
             eligible,
             [(r.source_id, r.target_id) for r in relations],
         )
@@ -461,6 +491,7 @@ class CustomTagService:
         binding = await self.repo(TagBinding).add(
             target_type=kind,
             target_id=tid,
+            work_id=tid if kind == "work" else None,
             tag_id=tag_id,
             actor_id=actor,
             fluxer_actor_id=canonical_actor,
@@ -541,6 +572,7 @@ class CustomTagService:
         proposal = await self.repo(TagProposal).add(
             target_type=kind,
             target_id=tid,
+            work_id=tid if kind == "work" else None,
             tag_id=tag_id,
             applicant_id=actor,
             fluxer_applicant_id=canonical_actor if uses_canonical_storage() else None,
@@ -586,7 +618,7 @@ class CustomTagService:
     async def proposals(self, actor, payload):
         """提供作者审核队列或申请人自己的申请历史。"""
         kind, tid, _, allowed = await self.target(actor, payload, lock=False)
-        conditions = [TagProposal.target_type == kind, TagProposal.target_id == tid]
+        conditions = [self.logical_target(TagProposal, kind, tid)]
         if payload.get("review_queue"):
             if not allowed:
                 raise TagError("forbidden", "无审核权限", 403)
@@ -678,6 +710,8 @@ class CustomTagService:
             TagBinding.id == int(payload["binding_id"]),
             self.logical_target(TagBinding, kind, tid),
             TagBinding.ended_at.is_(None),
+            lock=True,
+            refresh=True,
         )
         if binding is not None and binding.binding_source != "local":
             raise TagError("readonly_tag", "DC 原生绑定不可投票", 403)
@@ -725,7 +759,8 @@ class CustomTagService:
                 await self.end(binding, actor, "downvote")
                 if not await self.blocked(kind, tid, binding.tag_id):
                     await self.repo(TagProposalBlock).add(
-                        target_type=kind, target_id=tid, tag_id=binding.tag_id
+                        target_type=kind, target_id=tid, tag_id=binding.tag_id,
+                        work_id=tid if kind == "work" else None,
                     )
         await self.session.flush()
         return await self.snapshot(actor, kind, tid, target)
@@ -1012,12 +1047,23 @@ class CustomTagService:
             tid = int(payload["target_id"])
         else:
             kind, tid, _, _ = await self.target(actor, payload, audit=True, lock=False)
+        condition = and_(
+            OperationLog.target_type == kind, OperationLog.target_id == tid
+        )
+        if kind == "work":
+            # 仅合并明确标注内部帖子编号的旧日志，避免误认外部雪花编号。
+            old_threads = select(Thread.id).where(Thread.work_id == tid)
+            condition = or_(
+                condition,
+                and_(
+                    OperationLog.target_type == "thread",
+                    OperationLog.target_id.in_(old_threads),
+                    OperationLog.detail["target_id_kind"].as_string() == "internal",
+                ),
+            )
         statement = (
             select(OperationLog)
-            .where(
-                OperationLog.target_type == kind,
-                OperationLog.target_id == tid,
-            )
+            .where(condition)
             .order_by(OperationLog.id.desc())
             .offset(payload.get("offset", 0))
             .limit(100)

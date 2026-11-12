@@ -63,7 +63,7 @@ class WorkDiscoveryService:
             select(WorkNativeTagBinding.work_id, WorkNativeTagSource.tag_id).join(
                 WorkNativeTagSource,
                 WorkNativeTagSource.id == WorkNativeTagBinding.source_id,
-            ),
+            ).where(WorkNativeTagSource.platform == "discord"),
         ).subquery()
 
     async def similar(self, work_id, limit, apply_preferences, command):
