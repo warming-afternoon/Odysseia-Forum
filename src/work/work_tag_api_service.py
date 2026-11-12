@@ -45,14 +45,21 @@ class WorkTagApiService:
                 raise HTTPException(exc.status, exc.detail) from exc
         return {"tag_id": str(tag_id), "bound": command.operation == "bind"}
 
-    async def tags(self, q: str, command: WorkCommandQo):
+    async def tags(self, q: str, command: WorkCommandQo, offset=0, limit=100):
         """供作品挂标选择，过滤不可见的深渊标签。"""
         principal = command.actor
         async with self.sessions() as session:
             rows = await WorkTagRepository(session).candidates(
-                q, principal["can_view_abyss"]
+                q, principal["can_view_abyss"], offset=offset, limit=limit
             )
-            return {"items": [{"id": str(row.id), "name": row.name} for row in rows]}
+            from core.tag_presentation import tag_data, load_discord_sources
+
+            sources = await load_discord_sources(session, [row.id for row in rows[:limit]])
+            items = [tag_data(row, sources) for row in rows[:limit]]
+            for item in items:
+                if item["source"] == "fluxer":
+                    item["source"] = "custom"
+            return {"items": items, "has_more": len(rows) > limit}
 
     async def work_tag_governance(
         self,

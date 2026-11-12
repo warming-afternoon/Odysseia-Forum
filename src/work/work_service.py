@@ -136,7 +136,11 @@ class WorkService:
                     WorkNativeTagSource.id == WorkNativeTagBinding.source_id,
                 )
                 .join(Tag, Tag.id == WorkNativeTagSource.tag_id)
-                .where(WorkNativeTagBinding.work_id.in_(ids), Tag.deleted_at.is_(None))
+                .where(
+                    WorkNativeTagBinding.work_id.in_(ids),
+                    WorkNativeTagSource.platform == "discord",
+                    Tag.deleted_at.is_(None),
+                )
             )
         ).all()
         for work_id, tag_id, name in native:
@@ -146,7 +150,7 @@ class WorkService:
                         "id": str(tag_id),
                         "name": name,
                         "readonly": True,
-                        "source": "fluxer",
+                        "source": "discord",
                     }
                 )
         result = []

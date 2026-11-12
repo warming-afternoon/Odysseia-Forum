@@ -34,6 +34,7 @@ async def current_member(request: Request):
         sensitive
         or request.url.path.startswith("/v2/admin/")
         or request.url.path.endswith("/modlog")
+        or request.url.path.endswith("/tag-audit")
     )
     principal = request.scope.get("state", {}).get(VERIFIED_JWT_PAYLOAD_STATE_KEY)
     if principal is None or sensitive:

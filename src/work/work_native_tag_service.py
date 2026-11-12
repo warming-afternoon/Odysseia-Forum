@@ -16,6 +16,9 @@ class WorkNativeTagService:
 
     async def apply(self, thread, event):
         """缺少 tags 字段不清空，显式空列表移除全部该主来源绑定。"""
+        # 作品标签由 Forum 管理，旧原生事件不得恢复作者已移除的标签。
+        if thread.platform == "fluxer":
+            return
         if thread.role != "main" or "tags" not in event:
             return
         snapshots = event["tags"]

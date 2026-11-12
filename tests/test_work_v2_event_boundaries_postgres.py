@@ -8,10 +8,10 @@ import os
 import pytest
 from sqlalchemy import select, func
 
-from models import Thread
+from models import Thread, Tag
 from models.work import Work
 from models.work_native_tag_binding import WorkNativeTagBinding
-from models.work_native_tag_source import WorkNativeTagSource
+from models.tag_binding import TagBinding
 from models.work_task import WorkTask
 from work.work_event_service import WorkEventService
 from test_work_v2_postgres import factory, principal, client, seed_thread  # noqa: F401
@@ -85,48 +85,31 @@ async def test_native_move_immediately_hides_work_and_detail(
         assert work.is_nsfw and work.is_abyss
 
 
-async def test_native_tag_add_rename_remove_and_missing_snapshot(factory):
-    """原生标签显式快照增删，缺字段不清空，旧版本不能恢复已删来源。"""
+async def test_native_tag_events_never_override_local_work_tags(factory):
+    """原生增删或旧版本快照均不覆盖作者管理的作品标签与票数。"""
     async with factory() as session:
         service = WorkEventService(session, FORUMS)
-        assert await service.apply(
-            native_event(
-                1,
-                tags=[
-                    {"id": "777", "name": "剧情", "emoji": {"id": None, "name": "📖"}}
-                ],
-            )
-        )
+        assert await service.apply(native_event(1, tags=[{"id": "777", "name": "剧情"}]))
+        thread = (
+            await session.execute(select(Thread).where(Thread.thread_id == 950))
+        ).scalar_one()
+        tag = Tag(name="作者标签", source="custom", category=3)
+        session.add(tag)
         await session.flush()
-        binding = (await session.execute(select(WorkNativeTagBinding))).scalar_one()
-        source = await session.get(WorkNativeTagSource, binding.source_id)
-        assert source.external_id == "777" and source.name == "剧情"
+        binding = TagBinding(
+            target_type="work", target_id=thread.work_id,
+            work_id=thread.work_id, tag_id=tag.id, upvotes=7,
+        )
+        session.add(binding)
+        await session.flush()
         assert await service.apply(native_event(2))
-        assert (
-            await session.execute(
-                select(func.count()).select_from(WorkNativeTagBinding)
-            )
-        ).scalar_one() == 1
-        assert await service.apply(
-            native_event(3, tags=[{"id": "777", "name": "长篇", "emoji": {}}])
-        )
-        await session.refresh(source)
-        assert source.name == "长篇"
+        assert await service.apply(native_event(3, tags=[{"id": "777", "name": "长篇"}]))
         assert await service.apply(native_event(5, tags=[]))
+        assert not await service.apply(native_event(4, tags=[{"id": "777", "name": "旧标签"}]))
+        await session.refresh(binding)
+        assert binding.ended_at is None and binding.upvotes == 7
         assert (
-            await session.execute(
-                select(func.count()).select_from(WorkNativeTagBinding)
-            )
-        ).scalar_one() == 0
-        assert (
-            await service.apply(native_event(4, tags=[{"id": "777", "name": "旧标签"}]))
-            is False
-        )
-        await session.commit()
-        assert (
-            await session.execute(
-                select(func.count()).select_from(WorkNativeTagBinding)
-            )
+            await session.execute(select(func.count()).select_from(WorkNativeTagBinding))
         ).scalar_one() == 0
 
 

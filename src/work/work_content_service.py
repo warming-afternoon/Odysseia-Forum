@@ -28,7 +28,7 @@ class WorkContentService:
             or not body["title"].strip()
             or (not isinstance(body.get("description", ""), str))
             or set(body)
-            - {"title", "description", "attachments", "is_nsfw", "is_abyss"}
+            - {"title", "description", "attachments", "is_nsfw", "is_abyss", "tag_ids"}
         ):
             raise HTTPException(422, "无效作品字段")
         if body.get("is_abyss") and (not principal["can_view_abyss"]):
@@ -72,7 +72,25 @@ class WorkContentService:
             (isinstance(item["id"], str) for item in attachments)
         ):
             raise HTTPException(422, "创建时最多10个新预上传附件，不能引用其他消息附件")
+        tag_values = body.get("tag_ids", [])
+        if not isinstance(tag_values, list) or len(tag_values) > 12 or any(
+            isinstance(value, bool)
+            or not isinstance(value, (str, int))
+            or len(str(value)) > 19
+            or not str(value).isascii()
+            or not str(value).isdigit()
+            or not 0 < int(value) < 2**63
+            for value in tag_values
+        ):
+            raise HTTPException(422, "标签必须是至多12个有效编号")
+        tag_ids = {int(value) for value in tag_values}
         async with self.sessions() as session:
+            from tag.custom_tag_service import CustomTagService
+            from shared.tag_error import TagError
+            from sqlalchemy import text
+
+            # 标签与作品、任务同一事务保存，池维护期间不得产生失效绑定。
+            await session.execute(text("SELECT pg_advisory_xact_lock_shared(73902141)"))
             work = Work(
                 title=body["title"],
                 description=body.get("description", "")
@@ -90,6 +108,17 @@ class WorkContentService:
             )
             session.add(work)
             await session.flush()
+            tag_service = CustomTagService(session, principal.get("config", {}))
+            tag_service.work_principal = principal
+            try:
+                await tag_service.validate("work", work, {}, tag_ids)
+                for tag_id in sorted(tag_ids):
+                    await tag_service.attach(
+                        int(principal["discord_user_id"]), "work", work.id,
+                        tag_id, "submission",
+                    )
+            except TagError as exc:
+                raise HTTPException(exc.status, exc.detail) from exc
             task = WorkTask(
                 work_id=work.id,
                 kind="create_main",
