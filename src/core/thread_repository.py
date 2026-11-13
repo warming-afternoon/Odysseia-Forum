@@ -207,8 +207,11 @@ class ThreadRepository:
         self, thread_data: dict, tags: list[Tag]
     ) -> ThreadSyncMutationResult:
         """添加或更新帖子及标签并返回明确的变更结果。"""
+        # 快照入口统一保护计数，不让异常源值进入后续增量累计。
+        thread_data = dict(thread_data)
+        if "reply_count" in thread_data:
+            thread_data["reply_count"] = max(thread_data["reply_count"] or 0, 0)
         if is_fluxer_mode():
-            thread_data = dict(thread_data)
             source_author = thread_data.get("author_id")
             thread_data["fluxer_author_id"] = (
                 await resolve_business_id(self.session, source_author)
@@ -284,7 +287,8 @@ class ThreadRepository:
             "reply_count",
             "last_active_at",
         ):
-            setattr(db_thread, key, thread_data[key])
+            value = thread_data[key]
+            setattr(db_thread, key, max(value or 0, 0) if key == "reply_count" else value)
         db_thread.not_found_count = 0
         await self.session.flush()
         tags_changed = await TagBindingRepository(self.session).sync_native(
@@ -359,7 +363,7 @@ class ThreadRepository:
             .where(Thread.platform == "discord", Thread.thread_id == thread_id)  # type: ignore
             .values(
                 last_active_at=last_active_at,
-                reply_count=reply_count,
+                reply_count=max(reply_count or 0, 0),
             )
         )
         await self.session.execute(stmt)
@@ -410,7 +414,7 @@ class ThreadRepository:
         # 构建 reply_count 的 CASE 表达式
         reply_count_case = case(
             {
-                thread_id: Thread.reply_count + data["increment"]
+                thread_id: func.greatest(Thread.reply_count + data["increment"], 0)
                 for thread_id, data in updates.items()
             },
             value=Thread.thread_id,
