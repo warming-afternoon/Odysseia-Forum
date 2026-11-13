@@ -37,7 +37,7 @@ class WorkReactionProjectionService:
                 for key, value in totals.items()
             ])
         # 尚未同步完整列表的旧帖保留已知计数，不凭空生成历史表情。
-        highest = max(totals.values(), default=max((row[2] or 0 for row in rows), default=0))
+        highest = max(totals.values(), default=max((max(row[2] or 0, 0) for row in rows), default=0))
         statement = insert(WorkStatistics).values(work_id=work_id, reaction_count=highest)
         await self.session.execute(statement.on_conflict_do_update(
             index_elements=[WorkStatistics.work_id], set_={"reaction_count": highest},

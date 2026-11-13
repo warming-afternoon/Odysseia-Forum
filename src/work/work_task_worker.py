@@ -466,25 +466,33 @@ class WorkTaskWorker:
             }
             await BindingProjectionService(session).apply(event)
         elif task.kind == "projection":
+            # 先锁定作品再读取全部帖子，避免并行投影用旧快照覆盖新统计。
+            await session.execute(
+                text("SELECT pg_advisory_xact_lock(:id)"), {"id": task.work_id}
+            )
             counts = (
                 await session.execute(
                     select(
-                        func.coalesce(func.max(Thread.reaction_count), 0),
-                        func.coalesce(func.sum(Thread.reply_count), 0),
+                        func.coalesce(func.sum(func.greatest(Thread.reply_count, 0)), 0),
+                        func.count().filter(Thread.reply_count < 0),
                     ).where(
                         Thread.work_id == task.work_id,
-                        Thread.role == "main",
                         Thread.deleted_at.is_(None),
-                    )
+                    ).execution_options(all_platforms=True)
                 )
             ).one()
+            if counts[1]:
+                logger.warning(
+                    "作品 %s 存在 %s 个负回复计数帖子，投影按零计入，原始数据待对账",
+                    task.work_id, counts[1],
+                )
             statement = insert(WorkStatistics).values(
-                work_id=task.work_id, reaction_count=counts[0], reply_count=counts[1]
+                work_id=task.work_id, reply_count=counts[0]
             )
             await session.execute(
                 statement.on_conflict_do_update(
                     index_elements=[WorkStatistics.work_id],
-                    set_={"reaction_count": counts[0], "reply_count": counts[1]},
+                    set_={"reply_count": counts[0]},
                 )
             )
             from work.work_reaction_projection_service import WorkReactionProjectionService
