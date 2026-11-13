@@ -2,15 +2,17 @@
 
 from dto.work.work_command_qo import WorkCommandQo
 from fastapi import HTTPException
-from sqlalchemy import select, func, or_, delete, text
+from sqlalchemy import select, func, or_, delete, text, case, cast, Float
 from urllib.parse import urlsplit
 from models.work import Work
+from models.work_statistics import WorkStatistics
 from models.thread import Thread
 from models.user import User
 from models.booklist_publish import BooklistPublish
 from core.tag_query import load_custom_tags, require_current_tag_ids, tag_filters
 from models.user_collection import UserCollection
 from shared.time_utils import utc_now
+from shared.utc_datetime import _serialize_dt_as_utc
 from models.booklist import Booklist
 from models.booklist_item import BooklistItem
 from work.work_repository import WorkRepository
@@ -129,7 +131,9 @@ class WorkBooklistService:
                 "is_default": row.is_default,
                 "item_count": row.item_count,
             }
+            identifier = row.id
             await session.commit()
+            self.schedule_publish_sync(identifier)
             return result
 
     async def booklist_item(
@@ -163,7 +167,9 @@ class WorkBooklistService:
                     await session.delete(existing)
                     row.item_count = max(0, row.item_count - 1)
                     row.updated_at = utc_now()
+                identifier = row.id
                 await session.commit()
+                self.schedule_publish_sync(identifier)
                 return {"collected": False}
             work = await service.visible(work_id, principal)
             item = (
@@ -206,7 +212,9 @@ class WorkBooklistService:
                 for key, value in body.items():
                     setattr(item, key, value)
             row.updated_at = utc_now()
+            identifier = row.id
             await session.commit()
+            self.schedule_publish_sync(identifier)
             return {"collected": command.operation != "remove"}
 
     @staticmethod
@@ -260,9 +268,9 @@ class WorkBooklistService:
 
     @staticmethod
     def validate_item(body):
-        """校验条目推荐语和排序值，拒绝其他字段。"""
+        """校验条目推荐语、排序值与参赛时间，拒绝其他字段。"""
         # 分别限制推荐语类型与有符号排序值范围。
-        if set(body) - {"comment", "display_order"}:
+        if set(body) - {"comment", "display_order", "tournament_participated_at"}:
             raise HTTPException(422, "无效条目字段")
         if "comment" in body and body["comment"] is not None:
             if not isinstance(body["comment"], str) or len(body["comment"]) > 800:
@@ -272,6 +280,23 @@ class WorkBooklistService:
             or not -2147483648 <= body["display_order"] <= 2147483647
         ):
             raise HTTPException(422, "无效排序值")
+        if (
+            "tournament_participated_at" in body
+            and body["tournament_participated_at"] is not None
+        ):
+            from datetime import datetime, timezone
+
+            value = body["tournament_participated_at"]
+            try:
+                if not isinstance(value, str):
+                    raise ValueError("参赛时间格式错误")
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                body["tournament_participated_at"] = (
+                    parsed.astimezone(timezone.utc).replace(tzinfo=None)
+                    if parsed.tzinfo else parsed
+                )
+            except ValueError as exc:
+                raise HTTPException(422, "无效参赛时间") from exc
         return body
 
     @staticmethod
@@ -292,7 +317,6 @@ class WorkBooklistService:
             ).scalar_one_or_none()
         if (
             row is None
-            or row.is_tournament
             or (
                 row.fluxer_owner_id != principal["id"] and (manage or not row.is_public)
             )
@@ -411,6 +435,10 @@ class WorkBooklistService:
                 author=authors.get(row.fluxer_owner_id)
                 if mine or not row.is_anonymous
                 else None,
+                tournament_channel_id=(
+                    str(row.tournament_channel_id)
+                    if row.tournament_channel_id is not None else None
+                ),
                 custom_tags=tags.get(row.id, []),
                 publish_info=None,
                 can_manage=mine,
@@ -446,13 +474,14 @@ class WorkBooklistService:
         include_tag_ids=None,
         exclude_tag_ids=None,
         tag_logic="and",
+        is_tournament=False,
     ):
         """在权限过滤后按指定顺序查询并投影分页结果。"""
         principal = command.actor
         async with self.sessions() as session:
             filters = [
                 Booklist.merged_into_id.is_(None),
-                Booklist.is_tournament.is_(False),
+                Booklist.is_tournament == is_tournament,
             ]
             filters.append(
                 Booklist.fluxer_owner_id == principal["id"]
@@ -578,20 +607,36 @@ class WorkBooklistService:
             base = (
                 select(BooklistItem, Work)
                 .join(Work, Work.id == BooklistItem.work_id)
+                .outerjoin(WorkStatistics, WorkStatistics.work_id == Work.id)
                 .where(BooklistItem.booklist_id == row.id, *filters)
             )
             total = (
                 await session.execute(select(func.count()).select_from(base.subquery()))
             ).scalar_one()
-            sort = (
-                BooklistItem.display_order
-                if row.default_sort_method == "display_order"
-                else BooklistItem.created_at
-            )
+            # 赛事和普通书单均保留原排序含义，热度及计数使用作品聚合值。
+            sort = {
+                "display_order": BooklistItem.display_order,
+                "join_time": BooklistItem.created_at,
+                "created_at": Work.created_at,
+                "last_active_at": Work.last_active_at,
+                "reaction_count": func.coalesce(WorkStatistics.reaction_count, 0),
+                "reply_count": func.coalesce(WorkStatistics.reply_count, 0),
+                "collection_count": func.coalesce(WorkStatistics.collection_count, 0),
+            }.get(row.default_sort_method, BooklistItem.created_at)
+            if row.default_sort_method == "hot":
+                from shared.enum.search_config_type import SearchConfigDefaults
+
+                reactions = func.coalesce(WorkStatistics.reaction_count, 0)
+                sort = func.log(
+                    case((reactions > 1, cast(reactions, Float)), else_=1.0)
+                ) / 2.302585092994046
+                sort += func.extract("epoch", Work.created_at).cast(Float) / float(
+                    SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value
+                )
             pairs = (
                 await session.execute(
                     base.order_by(
-                        sort.asc() if row.default_sort_order == "asc" else sort.desc(),
+                        sort.asc() if row.default_sort_order == "asc" and row.default_sort_method != "hot" else sort.desc(),
                         BooklistItem.id.desc(),
                     )
                     .offset(offset)
@@ -611,7 +656,11 @@ class WorkBooklistService:
                         "work": work,
                         "comment": item.comment,
                         "display_order": item.display_order,
-                        "added_at": item.created_at,
+                        "added_at": _serialize_dt_as_utc(item.created_at),
+                        "tournament_participated_at": (
+                            _serialize_dt_as_utc(item.tournament_participated_at)
+                            if item.tournament_participated_at else None
+                        ),
                     }
                     for (item, _), work in zip(pairs, projected)
                 ],
@@ -621,7 +670,7 @@ class WorkBooklistService:
             }
 
     async def delete_booklist(self, booklist_id, command):
-        """校验管理权限后删除普通书单及其关联。"""
+        """校验作者权限后删除书单或赛事，并撤回已发布的关联。"""
         async with self.sessions() as session:
             await self.collection_lock(session, command.actor)
             row = await self.access(session, booklist_id, command.actor, manage=True)
@@ -634,7 +683,25 @@ class WorkBooklistService:
                     UserCollection.target_type == 2, UserCollection.target_id == row.id
                 )
             )
-            await BooklistRepository(session).delete_booklist(row.id)
+            publication = (
+                await session.execute(
+                    select(BooklistPublish).where(BooklistPublish.booklist_id == row.id)
+                )
+            ).scalar_one_or_none()
+            identifier = row.id
+            target = (
+                f"https://discord.com/channels/{publication.guild_id}/{publication.thread_id}"
+                if publication else None
+            )
+            await BooklistRepository(session).delete_booklist(identifier)
+            if target:
+                from booklist.booklist_publish_service import BooklistPublishService
+
+                config = command.actor.get("config", {}).get("integration", {}).get("booklist_publish", {})
+                BooklistPublishService(
+                    session, base_url=config.get("base_url", ""),
+                    api_key=config.get("api_key", ""),
+                ).schedule_unpublish(identifier, target)
             return {"deleted": True}
 
     @staticmethod
@@ -758,7 +825,9 @@ class WorkBooklistService:
                         added.append(str(work.id))
                     row.item_count += len(added)
             row.updated_at = utc_now()
+            identifier = row.id
             await session.commit()
+            self.schedule_publish_sync(identifier)
             return {"added_work_ids": added, "added_count": len(added)}
 
     async def sync_item(self, command):
@@ -860,6 +929,8 @@ class WorkBooklistService:
                     item.comment = metadata["comment"]
                     rows[item.booklist_id].updated_at = utc_now()
             await session.commit()
+            for bid in sorted(added | removed | (canonical_targets if metadata else set())):
+                self.schedule_publish_sync(bid)
             return {
                 "work_id": str(work_id),
                 "added_to_booklist_ids": sorted(added),
@@ -915,3 +986,48 @@ class WorkBooklistService:
                 row.collection_count = max(0, row.collection_count - len(existing))
             await session.commit()
             return {"collected": collected}
+
+    @staticmethod
+    def schedule_publish_sync(booklist_id):
+        """沿用书单变更后的延迟发布同步，不在事务中调用外部服务。"""
+        import asyncio
+        from booklist.booklist_service import _delayed_publish_sync
+
+        # 同步函数自行检查是否配置、是否已发布及身份绑定是否仍有效。
+        asyncio.create_task(_delayed_publish_sync(booklist_id))
+
+    async def publication(self, booklist_id, command):
+        """由实时认证的书单作者发起 Discord 发布或撤回。"""
+        from booklist.booklist_publish_service import BooklistPublishService
+        from shared.thread_link_parser import ThreadLinkParser
+
+        config = command.actor.get("config", {}).get("integration", {}).get("booklist_publish", {})
+        if not config.get("base_url"):
+            raise HTTPException(503, "书单发布服务未配置")
+        body = dict(command.values)
+        if command.operation == "publish":
+            if set(body) != {"thread_url"} or not isinstance(body["thread_url"], str):
+                raise HTTPException(422, "需要 Discord 讨论帖链接")
+            try:
+                guild_id, thread_id = ThreadLinkParser.parse_thread_url(body["thread_url"])
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
+        async with self.sessions() as session:
+            row = await self.access(session, booklist_id, command.actor)
+            if row.fluxer_owner_id != command.actor["id"]:
+                raise HTTPException(403, "无权发布此书单")
+            identifier = row.id
+            if command.operation == "publish" and (not row.is_public or row.is_default):
+                raise HTTPException(409, "仅可发布公开的非默认书单")
+            service = BooklistPublishService(
+                session, base_url=config["base_url"], api_key=config.get("api_key", "")
+            )
+            if command.operation == "publish":
+                await service.publish(
+                    identifier, guild_id, thread_id,
+                    int(command.actor["discord_user_id"]),
+                    fluxer_user_id=command.actor["id"],
+                )
+                return {"publish_status": 1, "message": "书单发布请求已提交"}
+            await service.unpublish(identifier)
+            return {"publish_status": 0, "message": "书单已取消发布"}

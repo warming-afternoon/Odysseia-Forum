@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from dto.discord_reactions_dto import DiscordReactionsDTO
 from typing import TYPE_CHECKING
 
 import discord
@@ -69,15 +70,14 @@ class ReactionBatchService:
             try:
                 first_msg = await channel.get_partial_message(thread_id).fetch()
                 # 取最高单反应计数作为帖子的 reaction 指标（标签投票场景下即最高票数）
-                reaction_count = (
-                    max(r.count for r in first_msg.reactions)
-                    if first_msg.reactions
-                    else 0
-                )
+                reaction_snapshot = DiscordReactionsDTO.from_discord(first_msg.reactions)
+                reaction_count = reaction_snapshot.reaction_count
                 async with self.session_factory() as session:
                     repo = ThreadRepository(session)
                     update_succeeded = await repo.update_thread_reaction_count(
-                        thread_id, reaction_count
+                        thread_id, reaction_count,
+                        reactions=reaction_snapshot.reactions,
+                        reaction_emojis=reaction_snapshot.reaction_emojis,
                     )
                     await session.commit()
                     if not update_succeeded:

@@ -79,3 +79,13 @@ class ChannelRepository:
             .order_by(Channel.channel_id)
         )
         return list(result.scalars())
+
+    async def get_guild_mapping(self, channel_ids: list[int]) -> dict[int, int]:
+        """批量读取频道服务器编号，用于原生频道链接展示。"""
+        # 单次查询全部目标，轮播逐项组装时不再访问数据库。
+        result = await self.session.execute(
+            select(Channel.channel_id, Channel.guild_id).where(
+                Channel.channel_id.in_(channel_ids)
+            )
+        )
+        return dict(result.all())

@@ -11,10 +11,10 @@ class BannerReviewApplication:
     id: int
     """申请记录的数据库主键，区别于帖子或频道的 Discord ID"""
 
-    thread_id: int
+    thread_id: int | None
     """申请展示的目标 Discord ID；根据 target_type 表示帖子或频道"""
 
-    channel_id: int
+    channel_id: int | None
     """帖子所属频道 ID；频道型申请为目标频道 ID，不代表展示范围"""
 
     applicant_id: int
@@ -27,7 +27,7 @@ class BannerReviewApplication:
     """展示范围：global 表示全频道，其他值为具体频道 ID 字符串"""
 
     target_type: int
-    """目标类型：1 表示论坛帖子，2 表示频道，对应 TargetType 枚举"""
+    """目标类型：1 表示旧论坛帖子，2 表示频道，3 表示统一作品"""
 
     status: str
     """申请状态：pending、approved 或 rejected，对应 ApplicationStatus 枚举"""
@@ -49,6 +49,9 @@ class BannerReviewApplication:
 
     review_thread_id: int | None
     """原审核消息所在 Discord 子区的 ID；尚未回填时为 None"""
+
+    work_id: int | None = None
+    """统一作品编号，与原生帖子编号分离。"""
 
     @classmethod
     def from_application(

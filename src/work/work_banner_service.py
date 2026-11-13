@@ -1,12 +1,20 @@
 """首页推荐领域服务。"""
 
 from dto.work.work_command_qo import WorkCommandQo
-from sqlalchemy import select, func, or_, text
+from sqlalchemy import select, func, text
 from fastapi import HTTPException
 from models import BannerApplication, BannerCarousel, BannerWaitlist, User
 from banner.banner_service import BannerService
 from shared.time_utils import utc_now
-from models.thread import Thread
+from core.thread_repository import ThreadRepository
+from core.channel_repository import ChannelRepository
+from core.banner_carousel_repository import BannerCarouselRepository
+from core.preferences_repository import PreferencesRepository
+from identity.canonical_user_id import CanonicalUserId
+from work.work_preferences_service import search_preference_guild
+from api.v2.schemas.work_search_request import WorkSearchRequest
+from core.banner_title_filter_repository import BannerTitleFilterRepository
+from shared.redis_client import RedisManager
 from work.work_repository import WorkRepository
 from work.work_service import WorkService
 
@@ -21,46 +29,54 @@ class WorkBannerService:
     async def banner(self, command: WorkCommandQo):
         """作品 Banner 受内容偏好约束，频道赛事 Banner 保持现有展示权限。"""
         principal = command.actor
-        from models.banner_carousel import BannerCarousel
 
         async with self.sessions() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(BannerCarousel)
-                        .where(
-                            BannerCarousel.start_time <= utc_now(),
-                            BannerCarousel.end_time > utc_now(),
-                        )
-                        .order_by(BannerCarousel.position)
-                    )
-                )
-                .scalars()
-                .all()
+            # 展示范围与内容反选分离，选择某频道仍包含全局推荐位。
+            prefs = await PreferencesRepository(session).get_user_preferences(
+                CanonicalUserId(principal.id), search_preference_guild(principal)
             )
-            thread_ids = [row.thread_id for row in rows if row.target_type == 1]
-            mappings = dict(
-                (
-                    await session.execute(
-                        select(Thread.thread_id, Thread.work_id).where(
-                            Thread.platform == "discord",
-                            Thread.thread_id.in_(thread_ids),
-                        )
-                    )
-                ).all()
+            channel_ids = list(command.values.get("channel_ids") or [])
+            if not channel_ids and prefs:
+                channel_ids = list(prefs.preferred_channels or [])
+            rows = await BannerCarouselRepository(session).get_visible_work_banners(
+                [int(value) for value in channel_ids]
+            )
+            mappings = await ThreadRepository(session).get_discord_work_mappings(
+                [row.thread_id for row in rows if row.target_type == 1]
             )
             work_ids = list(
                 {value for value in mappings.values() if value is not None}
                 | {row.work_id for row in rows if row.work_id is not None}
             )
+            # Banner 不继承包含条件或搜索排序，只沿用旧有反选规则。
+            exclusions = WorkSearchRequest(
+                apply_preferences=False,
+                exclude_authors=[CanonicalUserId(str(value)) for value in (prefs.exclude_authors or [])] if prefs else [],
+                exclude_tags=(prefs.exclude_tags or []) if prefs else [],
+                exclude_keywords=prefs.exclude_keywords if prefs else None,
+                exclude_keyword_exemption_markers=prefs.exclude_keyword_exemption_markers if prefs else None,
+            )
             works, _ = await WorkRepository(session).page(
-                principal, 0, 100, work_ids=work_ids
+                principal, 0, max(1, len(work_ids)), work_ids=work_ids, advanced=exclusions
+            )
+            excluded_banner_ids = set()
+            if prefs and prefs.exclude_keywords:
+                excluded_banner_ids = await BannerTitleFilterRepository(session).get_excluded_ids(
+                    titles={row.id: row.title for row in rows if row.target_type == 2},
+                    exclude_keywords=prefs.exclude_keywords,
+                    exemption_markers=prefs.exclude_keyword_exemption_markers,
+                    redis_client=RedisManager._client,
+                )
+            channels = await ChannelRepository(session).get_guild_mapping(
+                [row.thread_id for row in rows if row.target_type == 2]
             )
             projected = {
                 work["id"]: work for work in await WorkService(session).project(works)
             }
             items = []
             for row in rows:
+                if row.id in excluded_banner_ids:
+                    continue
                 if row.target_type == 2:
                     items.append(
                         {
@@ -69,9 +85,9 @@ class WorkBannerService:
                             "title": row.title,
                             "platform": "discord",
                             "guild_id": str(
-                                principal["forums"].get("discord_guild_id", "")
+                                channels.get(row.thread_id) or principal["forums"].get("discord_guild_id", "")
                             ),
-                            "channel_id": str(row.channel_id or row.thread_id),
+                            "channel_id": str(row.thread_id),
                             "image_url": row.cover_image_url,
                         }
                     )
@@ -152,8 +168,86 @@ class WorkBannerService:
                 status="pending",
             )
             session.add(row)
+            await session.flush()
+            result = self.application_dto(row)
             await session.commit()
-            return self.application_dto(row)
+        await self.enqueue_review(int(result["id"]))
+        return result
+
+    async def enqueue_review(self, application_id: int):
+        """申请事实先提交，审核消息投递失败由持久申请补偿重试。"""
+        import json
+        import logging
+
+        # 仅发送申请编号，Bot 在投递时重新读取真实状态。
+        try:
+            await RedisManager.get_client().lpush(
+                "banner:review:queue", json.dumps({"application_id": application_id})
+            )
+        except Exception:
+            logging.getLogger(__name__).warning(
+                "Banner审核消息待补偿: %s", application_id, exc_info=True
+            )
+
+    async def apply_discord(self, command: WorkCommandQo):
+        """解析旧 Discord 目标，作品映射为 Work，频道保留原申请流程。"""
+        import os
+        from shared.thread_link_parser import ThreadLinkParser
+        from banner.channel_sync import ChannelSyncService
+
+        actor = command.actor
+        values = command.values
+        allowed = {item["id"] for item in self.available_scopes(actor)}
+        scope = str(values.get("target_scope", "global"))
+        if scope not in allowed:
+            raise HTTPException(422, "请选择允许的展示范围")
+        parsed = ThreadLinkParser.parse_thread_link(
+            str(values.get("thread_link", "")), int(actor.forums.get("discord_guild_id") or 0)
+        )
+        if not parsed:
+            raise HTTPException(422, "请输入有效 Discord 帖子或频道链接")
+        guild_id, target_id = parsed
+        if not 0 < guild_id < 2**63 or not 0 < target_id < 2**63:
+            raise HTTPException(422, "Discord 编号超出范围")
+        async with self.sessions() as session:
+            thread = await ThreadRepository(session).get_discord_banner_target(target_id)
+            if thread:
+                if thread.guild_id != guild_id:
+                    raise HTTPException(422, "Discord 链接服务器不匹配")
+                work_id = thread.work_id
+                if not work_id:
+                    raise HTTPException(409, "该帖子尚未映射为作品")
+            else:
+                # 频道按原有按需索引及自定义封面规则处理。
+                token = os.environ.get("BOT_TOKEN", "").strip()
+                channel_sync = ChannelSyncService(token) if token else None
+                channel = await ChannelRepository(session).get_by_channel_id(target_id)
+                if channel is None and channel_sync:
+                    channel = await channel_sync.fetch_and_index(session, target_id)
+                if channel is None or channel.guild_id != guild_id:
+                    raise HTTPException(422, "Discord 频道不存在或服务器不匹配")
+                if channel.channel_type in {10, 11, 12}:
+                    raise HTTPException(409, "帖子尚未映射为作品，不能作为频道申请")
+                service = BannerService(session)
+                await service.app_repo.lock_applicant(int(actor.discord_user_id))
+                existing = await service.app_repo.get_pending_channel_application(
+                    actor.id, target_id, scope
+                )
+                if existing:
+                    return self.application_dto(existing)
+                result = await service.validate_and_create_application(
+                    target_id=target_id, guild_id=guild_id,
+                    applicant_id=int(actor.discord_user_id),
+                    cover_image_url=values.get("cover_image_url"), target_scope=scope,
+                    enforce_applicant_limit=True,
+                )
+                if not result.success or not result.application:
+                    raise HTTPException(422, result.message)
+                response = self.application_dto(result.application)
+        if thread:
+            return await self.apply(work_id, command)
+        await self.enqueue_review(int(response["id"]))
+        return response
 
     async def applications(
         self, command: WorkCommandQo, offset: int, limit: int, *, admin=False
@@ -286,8 +380,9 @@ class WorkBannerService:
                         reject_reason=f"同一申请人的 Banner 申请 #{row.id} 已通过审核，本申请自动拒绝。",
                     )
                 )
+            result = self.application_dto(row, placement)
             await session.commit()
-            return self.application_dto(row, placement)
+            return result
 
     async def lock_owner(self, session, owner: str):
         """跨协议共享同一业务申请人锁，身份合并后仍保持单一占位。"""

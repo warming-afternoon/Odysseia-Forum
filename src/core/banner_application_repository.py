@@ -179,3 +179,39 @@ class BannerApplicationRepository:
             application.review_thread_id = review_thread_id
             return True
         return False
+
+    async def get_undelivered(self, limit: int = 10) -> List[BannerApplication]:
+        """查找尚未投递审核消息的申请，补偿消息队列中断。"""
+        rows = await self.session.execute(
+            select(BannerApplication).where(
+                BannerApplication.status == ApplicationStatus.PENDING.value,
+                BannerApplication.review_message_id.is_(None),
+            ).order_by(BannerApplication.id).limit(limit)
+        )
+        return list(rows.scalars().all())
+
+    async def get_work_review_history(self, work_id: int) -> list[BannerApplication]:
+        """读取作品最近已投递的审核记录，兼容回填作品编号的旧申请。"""
+        # 仅展示已有审核消息的历史，避免把当前待审申请作为历史证据。
+        result = await self.session.execute(
+            select(BannerApplication).where(
+                BannerApplication.work_id == work_id,
+                BannerApplication.status != ApplicationStatus.PENDING.value,
+                BannerApplication.review_message_id.is_not(None),
+            ).order_by(BannerApplication.applied_at.desc()).limit(10)
+        )
+        return list(result.scalars().all())
+
+    async def get_pending_channel_application(self, owner_id: str, target_id: int, scope: str):
+        """读取同一申请人对同一频道和展示范围的待审申请。"""
+        # 由调用方先锁定申请人，再检查重复申请。
+        result = await self.session.execute(
+            select(BannerApplication).where(
+                BannerApplication.fluxer_owner_id == owner_id,
+                BannerApplication.thread_id == target_id,
+                BannerApplication.target_type == 2,
+                BannerApplication.target_scope == scope,
+                BannerApplication.status == ApplicationStatus.PENDING.value,
+            )
+        )
+        return result.scalars().first()

@@ -39,6 +39,9 @@ class WorkRepository:
         channel_platform=None,
         extra_filters=(),
         random_order=False,
+        ranking_expression=None,
+        ranking_source=None,
+        count_total=True,
     ):
         """先执行既有 grouped AND/OR 搜索及访问过滤，再排序分页。"""
         filters, abyss_column, abyss_channels = self.visibility_filters(
@@ -72,6 +75,8 @@ class WorkRepository:
         if fts.has_exclude:
             filters.append(~fts.exclude_condition)
         base = select(Work).outerjoin(WorkStatistics, WorkStatistics.work_id == Work.id)
+        if ranking_source is not None:
+            base = base.join(ranking_source, ranking_source.c.work_id == Work.id)
         ranking = SearchService(self.session, None)
         if options:
             filters.extend(
@@ -100,11 +105,13 @@ class WorkRepository:
                     )
                 )
             )
-        total = (
-            await self.session.execute(
-                select(func.count()).select_from(base.where(*filters).subquery())
-            )
-        ).scalar_one()
+        total = 0
+        if count_total:
+            total = (
+                await self.session.execute(
+                    select(func.count()).select_from(base.where(*filters).subquery())
+                )
+            ).scalar_one()
         statement = base.where(*filters)
         method = (
             (
@@ -121,7 +128,9 @@ class WorkRepository:
             display_count=func.coalesce(WorkStatistics.display_count, 0),
             created_at=Work.created_at,
         )
-        if random_order:
+        if ranking_expression is not None:
+            sort = ranking_expression
+        elif random_order:
             sort = func.random()
         elif method == "comprehensive":
             displays = (

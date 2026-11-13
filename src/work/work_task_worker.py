@@ -469,7 +469,7 @@ class WorkTaskWorker:
             counts = (
                 await session.execute(
                     select(
-                        func.coalesce(func.sum(Thread.reaction_count), 0),
+                        func.coalesce(func.max(Thread.reaction_count), 0),
                         func.coalesce(func.sum(Thread.reply_count), 0),
                     ).where(
                         Thread.work_id == task.work_id,
@@ -487,6 +487,9 @@ class WorkTaskWorker:
                     set_={"reaction_count": counts[0], "reply_count": counts[1]},
                 )
             )
+            from work.work_reaction_projection_service import WorkReactionProjectionService
+
+            await WorkReactionProjectionService(session).refresh(task.work_id)
         elif task.kind in ("create_main", "create_child"):
             # 先串行作品，再写会触发作品投影的帖子，避免与分类事务反序等待。
             await session.execute(text("SELECT pg_advisory_xact_lock(:id)"), {"id": task.work_id})

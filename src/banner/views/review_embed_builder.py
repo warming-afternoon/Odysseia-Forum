@@ -30,6 +30,8 @@ class ReviewEmbedBuilder:
             scope_text = "全频道"
         else:
             channels_dict = config.get("available_channels", {})
+            if isinstance(channels_dict, list):
+                channels_dict = {str(item.get("id")): item.get("name", "") for item in channels_dict if isinstance(item, dict)}
             scope_text = channels_dict.get(target_scope, f"频道 {target_scope}")
 
         embed = discord.Embed(
@@ -45,7 +47,11 @@ class ReviewEmbedBuilder:
         is_channel = application.target_type == TargetType.CHANNEL.value
         target_label = "频道" if is_channel else "帖子"
 
-        if guild_id:
+        if application.target_type == 3:
+            frontend = str(config.get("frontend_url", "")).rstrip("/")
+            value = f"{frontend}/works/{application.work_id}" if frontend else str(application.work_id)
+            embed.add_field(name="作品", value=value, inline=False)
+        elif guild_id:
             target_link = (
                 f"https://discord.com/channels/{guild_id}/{application.thread_id}"
             )
@@ -195,7 +201,10 @@ class ReviewEmbedBuilder:
             return
 
         # 根据 target_type 构建链接
-        if application.target_type == TargetType.CHANNEL.value:
+        if application.target_type == 3:
+            frontend = str(getattr(bot, "config", {}).get("auth", {}).get("frontend_url", "")).rstrip("/")
+            thread_url = f"{frontend}/works/{application.work_id}" if frontend else ""
+        elif application.target_type == TargetType.CHANNEL.value:
             # 频道链接：guild/channel_id
             thread_url = (
                 f"https://discord.com/channels/{guild.id}/{application.thread_id}"
@@ -237,7 +246,7 @@ class ReviewEmbedBuilder:
         embed.add_field(name="申请ID", value=str(application.id), inline=True)
         embed.add_field(
             name="帖子链接",
-            value=f"[点击查看]({thread_url})",
+            value=f"[点击查看]({thread_url})" if thread_url else f"作品 {application.work_id}",
             inline=False,
         )
         if application.reject_reason:

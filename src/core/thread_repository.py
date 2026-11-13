@@ -378,13 +378,16 @@ class ThreadRepository:
         await self.session.commit()
 
     async def update_thread_reaction_count(
-        self, thread_id: int, reaction_count: int
+        self, thread_id: int, reaction_count: int, reactions=None, reaction_emojis=None
     ) -> bool:
         """更新帖子的反应数。如果更新成功（至少影响了一行），则返回 True，否则返回 False。"""
+        values = {"reaction_count": reaction_count}
+        if reactions is not None:
+            values.update(reactions=reactions, reaction_emojis=reaction_emojis or {})
         stmt = (
             update(Thread)
-            .where(Thread.platform == "discord", Thread.thread_id == thread_id)  # type: ignore
-            .values(reaction_count=reaction_count)
+            .where(Thread.platform == "discord", Thread.thread_id == thread_id)
+            .values(**values)
         )
         result = await self.session.execute(stmt)
         return result.rowcount > 0
@@ -741,3 +744,23 @@ class ThreadRepository:
             exemption_markers,
             redis_client,
         )
+
+    async def get_discord_work_mappings(self, thread_ids: list[int]) -> dict[int, int]:
+        """批量读取 Discord 帖子与作品映射，不把其他平台编号混入旧链接。"""
+        # 即使原生编号碰巧相同，也只接受明确属于 Discord 的来源行。
+        result = await self.session.execute(
+            sqlalchemy_select(Thread.thread_id, Thread.work_id).where(
+                Thread.platform == "discord", Thread.thread_id.in_(thread_ids)
+            )
+        )
+        return dict(result.all())
+
+    async def get_discord_banner_target(self, thread_id: int) -> Thread | None:
+        """读取 Discord 申请目标，交由服务检查服务器和作品归属。"""
+        # 不复用跨平台原生编号查询，避免把 Fluxer 帖子误当作旧 Discord 帖子。
+        result = await self.session.execute(
+            sqlalchemy_select(Thread).where(
+                Thread.platform == "discord", Thread.thread_id == thread_id
+            )
+        )
+        return result.scalars().first()

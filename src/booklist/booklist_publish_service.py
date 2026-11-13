@@ -140,6 +140,11 @@ class BooklistPublishService:
             return
 
         if is_fluxer_mode():
+            # 改为私密时撤回已发布的预览，不继续导出书单内容。
+            booklist = await self.booklist_repo.get_booklist(booklist_id)
+            if booklist is None or not booklist.is_public or booklist.is_default:
+                await self.unpublish(booklist_id)
+                return
             if not record.fluxer_user_id or not record.discord_user_id:
                 return
             mapping = await IdentityRepository(self.session).fluxer_to_discord(
@@ -298,6 +303,12 @@ class BooklistPublishService:
         discord_user_id: int,
     ) -> dict:
         """组装发给 书单发布 API 的 JSON payload"""
+        if is_fluxer_mode():
+            from work.work_booklist_publication_service import WorkBooklistPublicationService
+
+            return await WorkBooklistPublicationService(session).build(
+                booklist_id, guild_id, thread_id, discord_user_id
+            )
         repo = BooklistRepository(session)
         booklist = await repo.get_booklist(booklist_id)
         if not booklist:

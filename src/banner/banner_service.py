@@ -327,8 +327,24 @@ class BannerService:
                 self.session, application.applicant_id, source="discord"
             )
 
-            # 根据 target_type 获取标题
-            if application.target_type == TargetType.CHANNEL.value:
+            # 作品审核保留业务归属，不能把内部编号当 Discord 帖子读取。
+            if application.target_type == 3:
+                from models.work import Work
+
+                work = await self.session.get(Work, application.work_id)
+                if not work or work.deleted_at or not work.source_visible:
+                    raise ValueError("作品不存在或当前不可见")
+                owner = application.fluxer_owner_id or application.fluxer_applicant_id
+                if work.author_id != owner:
+                    raise ValueError("作品归属已变更，请重新申请")
+                if work.source_platform == "fluxer" and not work.source_thread_id:
+                    raise ValueError("作品主帖仍在同步")
+                if not application.cover_image_url and not work.images:
+                    raise ValueError("作品没有可用首图")
+                if await self.has_ongoing_banner(application.applicant_id):
+                    raise ValueError(self.APPLICANT_LIMIT_MESSAGE)
+                target_title = work.title
+            elif application.target_type == TargetType.CHANNEL.value:
                 channel_result = await self.session.execute(
                     select(Channel).where(Channel.channel_id == application.thread_id)
                 )

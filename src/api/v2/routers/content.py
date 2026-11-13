@@ -89,3 +89,13 @@ async def tasks(work_id: int, principal=Depends(current_member)):
             actor=WorkActorDTO.from_principal(principal), values={}, operation=None
         ),
     )
+
+
+@router.post("/images/refresh")
+async def refresh_images(body: dict = Body(...), principal=Depends(current_member)):
+    """按真实作品来源批量修复失效图片，不接受任意源站地址。"""
+    from work.work_image_service import WorkImageService
+
+    return await WorkImageService(get_session_factory()).refresh(
+        WorkCommandQo(actor=WorkActorDTO.from_principal(principal), values=body)
+    )

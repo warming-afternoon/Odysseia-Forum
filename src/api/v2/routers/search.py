@@ -132,3 +132,41 @@ async def random_works(
         ),
         30,
     )
+
+
+@router.get("/discovery/rails")
+async def discovery_rails(
+    limit: int = Query(10, ge=1, le=50),
+    days: int = Query(30, ge=1, le=90),
+    channel_ids: list[int] | None = Query(None),
+    apply_preferences: bool = True,
+    principal=Depends(current_member),
+):
+    """返回最新、点赞、讨论及收藏四个作品栏目。"""
+    from work.work_rails_service import WorkRailsService
+
+    return await _discovery_result(
+        WorkRailsService(get_session_factory()).fetch(
+            principal, None, limit, 0, days, channel_ids, apply_preferences
+        ), 30,
+    )
+
+
+@router.get("/discovery/rails/{rail_name}")
+async def discovery_rail(
+    rail_name: str,
+    limit: int = Query(10, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    days: int = Query(30, ge=1, le=90),
+    channel_ids: list[int] | None = Query(None),
+    apply_preferences: bool = True,
+    principal=Depends(current_member),
+):
+    """在可见且符合偏好的作品中分页，不截断后再过滤。"""
+    from work.work_rails_service import WorkRailsService
+
+    return await _discovery_result(
+        WorkRailsService(get_session_factory()).fetch(
+            principal, rail_name, limit, offset, days, channel_ids, apply_preferences
+        ), 30,
+    )

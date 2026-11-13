@@ -8,6 +8,7 @@ from api.v2.routers.content import router as content_router
 from api.v2.routers.collections import router as collections_router
 from api.v2.routers.booklists import router as booklists_router
 from api.v2.routers.tags import router as tags_router
+from api.v2.routers.tag_management import router as tag_management_router
 from api.v2.routers.tag_statistics import router as tag_statistics_router
 from api.v2.routers.threads import router as threads_router
 from api.v2.routers.announcements import router as announcements_router
@@ -26,6 +27,7 @@ router.include_router(content_router)
 router.include_router(collections_router)
 router.include_router(booklists_router)
 router.include_router(tags_router)
+router.include_router(tag_management_router)
 router.include_router(tag_statistics_router)
 router.include_router(threads_router)
 router.include_router(announcements_router)

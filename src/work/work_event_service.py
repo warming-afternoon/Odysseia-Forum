@@ -1,11 +1,10 @@
 """平台事件去重、版本裁决和作品投影。"""
 
-from sqlalchemy import select, text, delete
+from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert
 from models.thread import Thread
 from models.work import Work
 from models.work_event import WorkEvent
-from models.work_reaction import WorkReaction
 from shared.time_utils import utc_now
 
 
@@ -162,8 +161,8 @@ class WorkEventService:
                 emoji_data[key] = data
             event["reactions"] = counts
             event["reaction_emojis"] = emoji_data
-        if "reaction_count" not in event and "reactions" in event:
-            event["reaction_count"] = sum(event["reactions"].values())
+        if "reactions" in event:
+            event["reaction_count"] = max(event["reactions"].values(), default=0)
         required = ("event_id", "platform", "thread_id", "state_version")
         if (
             any(key not in event for key in required)
@@ -339,39 +338,10 @@ class WorkEventService:
 
         await WorkNativeTagService(self.session).apply(thread, event)
         await self.session.flush()
-        snapshots = (
-            await self.session.execute(
-                select(Thread.reactions, Thread.reaction_emojis)
-                .where(
-                    Thread.work_id == thread.work_id,
-                    Thread.role == "main",
-                    Thread.deleted_at.is_(None),
-                )
-                .execution_options(all_platforms=True)
-            )
-        ).all()
-        totals = {}
-        displays = {}
-        for snapshot, metadata in snapshots:
-            displays.update(metadata)
-            for emoji, count in snapshot.items():
-                if not isinstance(count, int) or count < 0:
-                    raise ValueError("无效表情聚合")
-                totals[emoji] = totals.get(emoji, 0) + count
-        await self.session.execute(
-            delete(WorkReaction).where(WorkReaction.work_id == thread.work_id)
-        )
-        if totals:
-            await self.session.execute(
-                insert(WorkReaction),
-                [
-                    {
-                        "work_id": thread.work_id,
-                        "emoji": emoji,
-                        "emoji_data": displays.get(emoji, {}),
-                        "count": count,
-                    }
-                    for emoji, count in totals.items()
-                ],
-            )
+        from work.work_reaction_projection_service import WorkReactionProjectionService
+
+        await WorkReactionProjectionService(self.session).refresh(thread.work_id)
+        from work.work_growth_reconciliation_service import WorkGrowthReconciliationService
+
+        await WorkGrowthReconciliationService(self.session).observe(thread, event)
         return True
