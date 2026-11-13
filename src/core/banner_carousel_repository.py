@@ -194,3 +194,18 @@ class BannerCarouselRepository:
     async def delete(self, item: BannerCarousel) -> None:
         """从会话中移除一条轮播记录。"""
         await self.session.delete(item)
+
+    async def get_visible_work_banners(self, channel_ids: list[int]):
+        """按展示范围读取生效轮播，不改变作品接口的排序和过滤语义。"""
+        now = utc_now()
+        filters = [BannerCarousel.start_time <= now, BannerCarousel.end_time > now]
+        # 有频道选择时保留对应频道与全局，没有选择时读取全部现有范围。
+        if channel_ids:
+            filters.append(or_(
+                BannerCarousel.channel_id.is_(None),
+                BannerCarousel.channel_id.in_(channel_ids),
+            ))
+        result = await self.session.execute(
+            select(BannerCarousel).where(*filters).order_by(BannerCarousel.position)
+        )
+        return list(result.scalars().all())

@@ -29,11 +29,13 @@ class CustomTagService:
     """协调标签池、绑定、审核和投票的完整数据库事务。"""
 
     def __init__(self, session, config, access=None):
+        """复用事务、配置与权限服务，按入口选择标签展示规则。"""
         self.session = session
         self.access = access or TagAccessService(config)
         self.tag_cache = {}
         self.source_cache = {}
         self.work_principal = None
+        self.unified_local_tags = False
 
     def repo(self, model):
         """获取当前事务内的单表仓储。"""
@@ -41,7 +43,10 @@ class CustomTagService:
 
     def tag_data(self, tag):
         """返回已批量加载来源的标准概念。"""
-        return tag_data(tag, self.source_cache)
+        result = tag_data(tag, self.source_cache)
+        if self.unified_local_tags and result["source"] == "fluxer":
+            result["source"] = "custom"
+        return result
 
     async def merge(self, actor, payload):
         """仅 BOT 管理员预检或执行同名概念合并。"""
@@ -130,7 +135,7 @@ class CustomTagService:
             else Booklist.id
         )
         target = await self.repo(model).one(key == target_id)
-        if target is None:
+        if target is None or (kind == "booklist" and target.merged_into_id is not None):
             raise TagError("not_found", "目标不存在", 404)
         # 保存标量快照，避免 populate_existing 原地刷新后丢失授权依据。
         access_fields = (
@@ -145,7 +150,7 @@ class CustomTagService:
                 "not_found_count",
             )
             if kind == "thread"
-            else ("id", "owner_id", "fluxer_owner_id", "is_public")
+            else ("id", "owner_id", "fluxer_owner_id", "is_public", "merged_into_id")
         )
         access_state = tuple(getattr(target, field) for field in access_fields)
         if uses_canonical_storage():
@@ -433,7 +438,7 @@ class CustomTagService:
         tags = await self.repo(Tag).rows(Tag.id.in_(desired))
         if len(tags) != len(desired) or any(t.deleted_at for t in tags):
             raise TagError("tags_changed", "标签已发生变化，请刷新后重试")
-        if kind == "work" and any(
+        if (kind == "work" or self.unified_local_tags) and any(
             tag.is_abyss and tag.id not in current for tag in tags
         ) and not (self.work_principal and self.work_principal["can_view_abyss"]):
             raise TagError("forbidden", "无权添加深渊标签", 403)
@@ -774,7 +779,11 @@ class CustomTagService:
             conditions.append(Tag.is_abyss.is_(False))
         # 按实体当前来源筛选后再分页，转换标签仍属于自定义标签。
         if source := payload.get("source"):
-            conditions.append(Tag.source == source)
+            conditions.append(
+                Tag.source.in_(("custom", "fluxer"))
+                if self.unified_local_tags and source == "custom"
+                else Tag.source == source
+            )
         if payload.get("include_deleted"):
             if not self.access.bot_admin(actor):
                 raise TagError("forbidden", "仅 BOT 管理员可查询已删除标签", 403)
@@ -856,7 +865,7 @@ class CustomTagService:
                 raise TagError(
                     "tags_changed", "已合并标签不可恢复，请刷新后选择当前标签"
                 )
-        if tag is not None and tag.source in ("discord", "fluxer"):
+        if tag is not None and (tag.source == "discord" or (tag.source == "fluxer" and not self.unified_local_tags)):
             if action in ("delete", "restore") or (
                 "name" in payload and payload["name"] != tag.name
             ):
@@ -870,6 +879,7 @@ class CustomTagService:
         before = (
             {
                 "name": tag.name,
+                "source": tag.source,
                 "description": tag.description,
                 "is_abyss": tag.is_abyss,
                 "category": tag.category,
@@ -891,7 +901,7 @@ class CustomTagService:
             name = unicodedata.normalize(
                 "NFC", payload.get("name", tag.name if tag else "")
             ).strip()
-            if tag is not None and tag.source in ("discord", "fluxer"):
+            if tag is not None and (tag.source == "discord" or (tag.source == "fluxer" and not self.unified_local_tags)):
                 name = tag.name
             category = payload.get("category", tag.category if tag else None)
             if (
@@ -901,7 +911,7 @@ class CustomTagService:
                     category not in range(1, 8)
                     and not (
                         tag
-                        and (tag.originated_from_discord or tag.source == "discord")
+                        and (tag.originated_from_discord or tag.source == "discord" or (self.unified_local_tags and tag.source == "fluxer"))
                         and category is None
                     )
                 )
@@ -911,9 +921,11 @@ class CustomTagService:
                 )
             duplicate = (
                 await self.repo(Tag).one(
-                    Tag.source == "custom", Tag.name == name, Tag.category == category
+                    Tag.source.in_(("custom", "fluxer")) if self.unified_local_tags else Tag.source == "custom",
+                    Tag.name == name, Tag.category == category,
+                    Tag.id != tag.id if tag is not None else True,
                 )
-                if category is not None and (tag is None or tag.source == "custom")
+                if category is not None and (tag is None or tag.source == "custom" or (self.unified_local_tags and tag.source == "fluxer"))
                 else None
             )
             if (
@@ -929,6 +941,13 @@ class CustomTagService:
                     if tag and (tag.originated_from_discord or tag.source == "discord")
                     else None,
                 )
+            if tag and self.unified_local_tags and tag.source == "fluxer" and category is None:
+                conflict = await self.repo(Tag).one(
+                    Tag.source == "fluxer", Tag.name == name,
+                    Tag.deleted_at.is_(None), Tag.id != tag.id,
+                )
+                if conflict:
+                    raise TagError("tag_exists", "同名标签已存在，请先分类或合并", tag_id=str(conflict.id))
             if tag is None:
                 tag = await self.repo(Tag).add(
                     name=name,
@@ -939,6 +958,9 @@ class CustomTagService:
                 )
             else:
                 tag.name, tag.category = name, category
+                if self.unified_local_tags and tag.source == "fluxer" and category is not None:
+                    # 已分类旧实体按普通概念维护，原生来源映射和旧编号不变。
+                    tag.source = "custom"
                 tag.description = description
                 if "is_abyss" in payload:
                     tag.is_abyss = is_abyss
@@ -971,6 +993,13 @@ class CustomTagService:
                     raise TagError("deleted_tag", "请先恢复已删除标签")
                 tag.enabled = True
             elif action == "restore":
+                if self.unified_local_tags and tag.source == "fluxer":
+                    conflict = await self.repo(Tag).one(
+                        Tag.source == "fluxer", Tag.name == tag.name,
+                        Tag.deleted_at.is_(None), Tag.id != tag.id,
+                    )
+                    if conflict:
+                        raise TagError("tag_exists", "同名标签已存在，请选择当前标签", tag_id=str(conflict.id))
                 tag.deleted_at, tag.enabled = None, True
             elif not tag.deleted_at:
                 tag.deleted_at = utc_now()
@@ -1024,6 +1053,7 @@ class CustomTagService:
             before=before,
             after={
                 "name": tag.name,
+                "source": tag.source,
                 "description": tag.description,
                 "is_abyss": tag.is_abyss,
                 "category": tag.category,

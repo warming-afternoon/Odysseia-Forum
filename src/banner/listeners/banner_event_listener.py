@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import TYPE_CHECKING
 
 import discord
@@ -36,6 +37,7 @@ class BannerEventListener(commands.Cog):
         self.bot = bot
         self.session_factory = session_factory
         self.config = config
+        self._next_review_recovery = 0.0
         # 与 Bot 启动使用相同凭据，为未入库频道提供按需索引。
         bot_token = os.environ.get("BOT_TOKEN", "").strip()
         self.channel_sync = ChannelSyncService(bot_token) if bot_token else None
@@ -60,6 +62,18 @@ class BannerEventListener(commands.Cog):
         try:
             result = await redis.brpop("banner:review:queue", timeout=5)  # type: ignore[return-type]
             if result is None:
+                # 消息队列丢失或发送失败时，以持久申请事实补偿投递。
+                if time.monotonic() >= self._next_review_recovery:
+                    self._next_review_recovery = time.monotonic() + 60
+                    from core.banner_application_repository import BannerApplicationRepository
+
+                    async with self.session_factory() as session:
+                        rows = await BannerApplicationRepository(session).get_undelivered()
+                        identifiers = [row.id for row in rows]
+                    for identifier in identifiers:
+                        await BannerReviewMessageService(
+                            self.bot, self.session_factory, self.config
+                        ).send(identifier)
                 return
             _, payload = result
             data = json.loads(payload)

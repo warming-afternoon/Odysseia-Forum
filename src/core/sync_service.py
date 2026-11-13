@@ -1,3 +1,4 @@
+from dto.discord_reactions_dto import DiscordReactionsDTO
 import asyncio
 import datetime
 import logging
@@ -158,9 +159,8 @@ class SyncService:
         excerpt = ""
         thumbnail_urls: List[str] = []
 
-        reaction_count = (
-            max([r.count for r in first_msg.reactions]) if first_msg.reactions else 0
-        )
+        reaction_snapshot = DiscordReactionsDTO.from_discord(first_msg.reactions)
+        reaction_count = reaction_snapshot.reaction_count
 
         first_msg_content = first_msg.content or ""
 
@@ -261,8 +261,8 @@ class SyncService:
                         )
 
                 if potential_reaction_numbers:
-                    reaction_count_ori = max(potential_reaction_numbers)
-                    reaction_count += reaction_count_ori
+                    # 历史摘要缺少逐表情身份，不混入当前最高表情计数。
+                    logger.debug("重建帖历史摘要计数不纳入当前反应列表 thread_id=%s", thread_id)
 
                 # 从摘要中删除元数据行
                 reaction_line_pattern = rf"^-#\s*{emoji_pattern}\s*\d+.*$"
@@ -293,6 +293,8 @@ class SyncService:
             author_id=final_author_id,
             created_at=final_created_at,
             reaction_count=reaction_count,
+            reactions=reaction_snapshot.reactions,
+            reaction_emojis=reaction_snapshot.reaction_emojis,
             first_message_excerpt=excerpt or "",
             thumbnail_urls=thumbnail_urls,
         )

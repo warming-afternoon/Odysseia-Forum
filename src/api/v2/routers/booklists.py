@@ -39,6 +39,7 @@ async def booklists_page(
     include_tag_ids: list[RequestId] | None = Query(None, max_length=100),
     exclude_tag_ids: list[RequestId] | None = Query(None, max_length=100),
     tag_logic: Literal["and", "or"] = "and",
+    is_tournament: bool = False,
     owner_id: str | None = None,
     mark_work_id: int | None = Query(None, gt=0, le=9223372036854775807),
     keywords: str | None = Query(None, max_length=600),
@@ -62,6 +63,7 @@ async def booklists_page(
         include_tag_ids=include_tag_ids,
         exclude_tag_ids=exclude_tag_ids,
         tag_logic=tag_logic,
+        is_tournament=is_tournament,
     )
 
 
@@ -182,5 +184,23 @@ async def booklist_item(
             operation={"PUT": "add", "PATCH": "edit", "DELETE": "remove"}[
                 request.method
             ],
+        ),
+    )
+
+
+@router.post("/booklists/{booklist_id}/publication")
+@router.delete("/booklists/{booklist_id}/publication")
+async def booklist_publication(
+    booklist_id: int,
+    request: Request,
+    body: dict = Body(default={}),
+    principal=Depends(current_member),
+):
+    """保留 Discord 发布目的地并复用当前绑定与书单作者权限。"""
+    return await WorkBooklistService(get_session_factory()).publication(
+        booklist_id,
+        WorkCommandQo(
+            actor=WorkActorDTO.from_principal(principal), values=body,
+            operation="publish" if request.method == "POST" else "unpublish",
         ),
     )

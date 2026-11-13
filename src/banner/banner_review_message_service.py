@@ -37,7 +37,16 @@ class BannerReviewMessageService:
                 if application.review_message_id is not None:
                     return application
                 cover = application.cover_image_url
-                if application.target_type == TargetType.CHANNEL.value:
+                if application.target_type == 3:
+                    from models.work import Work
+
+                    work = await session.get(Work, application.work_id)
+                    if cover is None and work and work.images:
+                        cover = work.images[0]
+                    history = await BannerApplicationRepository(session).get_work_review_history(
+                        application.work_id
+                    )
+                elif application.target_type == TargetType.CHANNEL.value:
                     result = await session.execute(
                         select(Channel).where(
                             Channel.channel_id == application.thread_id
@@ -57,11 +66,14 @@ class BannerReviewMessageService:
                         )
                         if thread and thread.thumbnail_urls:
                             cover = thread.thumbnail_urls[0]
-                history = await BannerApplicationRepository(
-                    session
-                ).get_history_by_thread_id(application.thread_id)
+                if application.target_type != 3:
+                    history = await BannerApplicationRepository(
+                        session
+                    ).get_history_by_thread_id(application.thread_id)
                 embed = ReviewEmbedBuilder.build_review_embed(
-                    application, self.config, guild_id, history or None, cover
+                    application,
+                    {**self.config, "frontend_url": getattr(self.bot, "config", {}).get("auth", {}).get("frontend_url", "")},
+                    guild_id, history or None, cover
                 )
                 ReviewEmbedBuilder.apply_review_result(embed, application)
 

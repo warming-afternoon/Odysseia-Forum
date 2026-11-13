@@ -4,7 +4,9 @@ import json
 from sqlalchemy import delete, select, update, literal
 from sqlalchemy.dialects.postgresql import insert
 
-from models import DiscordTagSource, Tag
+from core.tag_data_repository import TagDataRepository
+from models import DiscordTagSource, Tag, Thread
+from models.work_native_tag_source import WorkNativeTagSource
 from models.tag_alias import TagAlias
 from models.tag_binding import TagBinding
 from models.tag_relation import TagRelation
@@ -13,7 +15,7 @@ from models.tag_proposal_block import TagProposalBlock
 from models.tag_notification_task import TagNotificationTask
 from models.operation_log import OperationLog
 from shared.tag_error import TagError
-from identity.runtime import is_fluxer_mode
+from identity.runtime import uses_canonical_storage
 from identity.business_identity import resolve_business_id
 from shared.tag_rules import validate_graph
 from shared.time_utils import utc_now
@@ -39,6 +41,7 @@ class TagMergeService:
         data = {}
         for key, model, condition in [
             ("sources", DiscordTagSource, DiscordTagSource.tag_id.in_(ids)),
+            ("native_sources", WorkNativeTagSource, WorkNativeTagSource.tag_id.in_(ids)),
             (
                 "bindings",
                 TagBinding,
@@ -56,6 +59,17 @@ class TagMergeService:
             data[key] = list(
                 (await self.session.execute(select(model).where(condition))).scalars()
             )
+        # 一次读取旧帖到作品的映射，避免按绑定逐条查询。
+        thread_ids = {
+            row.target_id
+            for key in ("bindings", "proposals", "blocks")
+            for row in data[key]
+            if row.target_type == "thread"
+        }
+        data["threads"] = await TagDataRepository(self.session, Thread).rows(
+            Thread.id.in_(thread_ids)
+        )
+        self.thread_works = {row.id: row.work_id for row in data["threads"]}
         conflicts = []
         if source.name != target.name:
             conflicts.append("仅允许标准名完全相同的标签合并")
@@ -97,7 +111,11 @@ class TagMergeService:
                 key=lambda x: json.dumps(x, sort_keys=True),
             )
             for key, rows in data.items()
+            if key != "threads"
         }
+        fingerprint["threads"] = sorted(
+            [(row.id, row.work_id) for row in data["threads"]], key=lambda row: row[0]
+        )
         fingerprint["tags"] = [
             t.model_dump(mode="json") for t in sorted(tags, key=lambda t: t.id)
         ]
@@ -126,8 +144,8 @@ class TagMergeService:
     async def execute(self, source_id, target_id, version, actor):
         """保持目标轮次、继承限制并软删除旧概念，不保存跳转字段。"""
         canonical_actor = (
-            await resolve_business_id(self.session, actor)
-            if is_fluxer_mode() and actor
+            await resolve_business_id(self.session, actor, source="discord")
+            if uses_canonical_storage() and actor
             else None
         )
         preview, source, target, data, edges = await self.inspect(source_id, target_id)
@@ -139,7 +157,7 @@ class TagMergeService:
             )
         now = utc_now()
         destinations = {
-            (b.target_type, b.target_id): b
+            self.logical_target(b): b
             for b in data["bindings"]
             if b.tag_id == target_id
         }
@@ -148,7 +166,7 @@ class TagMergeService:
         for old in data["bindings"]:
             if old.tag_id != source_id:
                 continue
-            existing = destinations.get((old.target_type, old.target_id))
+            existing = destinations.get(self.logical_target(old))
             old.ended_at, old.end_reason = now, "tag_merged"
             if (
                 old.binding_source == "discord_sync"
@@ -161,6 +179,10 @@ class TagMergeService:
                 existing = TagBinding(
                     target_type=old.target_type,
                     target_id=old.target_id,
+                    work_id=(
+                        self.logical_target(old)[1]
+                        if self.logical_target(old)[0] == "work" else None
+                    ),
                     tag_id=target_id,
                     binding_source=old.binding_source,
                     discord_source_id=old.discord_source_id,
@@ -168,11 +190,12 @@ class TagMergeService:
                     fluxer_actor_id=canonical_actor,
                 )
                 additions.append(existing)
+                destinations[self.logical_target(old)] = existing
             mapping.append((old, existing))
         await self.session.flush()
         self.session.add_all(additions)
         # 来源和别名迁移不覆盖目标值，重复数据去重。
-        for s in data["sources"]:
+        for s in data["sources"] + data["native_sources"]:
             if s.tag_id == source_id:
                 s.tag_id = target_id
         await self.session.execute(
@@ -202,28 +225,35 @@ class TagMergeService:
                 .values(edge_rows[offset : offset + 1000])
                 .on_conflict_do_nothing()
             )
-        await self.session.execute(
-            insert(TagProposalBlock)
-            .from_select(
-                ["target_type", "target_id", "tag_id", "created_at"],
-                select(
-                    TagProposalBlock.target_type,
-                    TagProposalBlock.target_id,
-                    literal(target_id),
-                    TagProposalBlock.created_at,
-                ).where(TagProposalBlock.tag_id == source_id),
+        block_rows = [
+            {
+                "target_type": block.target_type,
+                "target_id": block.target_id,
+                "work_id": (
+                    self.logical_target(block)[1]
+                    if self.logical_target(block)[0] == "work" else None
+                ),
+                "tag_id": target_id,
+                "created_at": block.created_at,
+            }
+            for block in data["blocks"]
+            if block.tag_id == source_id
+        ]
+        for offset in range(0, len(block_rows), 1000):
+            await self.session.execute(
+                insert(TagProposalBlock)
+                .values(block_rows[offset : offset + 1000])
+                .on_conflict_do_nothing()
             )
-            .on_conflict_do_nothing()
-        )
         # 原限制记录也保留，历史申请不会因合并失去依据。
-        blocked_targets = {(b.target_type, b.target_id) for b in data["blocks"]}
-        bound_targets = {(b.target_type, b.target_id) for b in data["bindings"]}
+        blocked_targets = {self.logical_target(b) for b in data["blocks"]}
+        bound_targets = {self.logical_target(b) for b in data["bindings"]}
         cancelled = []
         for p in data["proposals"]:
             if (
                 p.tag_id == source_id
-                or (p.target_type, p.target_id) in blocked_targets
-                or (p.target_type, p.target_id) in bound_targets
+                or self.logical_target(p) in blocked_targets
+                or self.logical_target(p) in bound_targets
                 or not target.enabled
                 or (p.target_type == "thread" and target.source == "discord")
             ):
@@ -279,3 +309,14 @@ class TagMergeService:
             )
         )
         return target
+
+    def logical_target(self, row):
+        """把已关联作品的旧帖子与新作品入口视为同一治理目标。"""
+        work_id = row.work_id
+        if work_id is None and row.target_type == "work":
+            work_id = row.target_id
+        if work_id is None and row.target_type == "thread":
+            work_id = self.thread_works.get(row.target_id)
+        if work_id is not None:
+            return "work", work_id
+        return row.target_type, row.target_id

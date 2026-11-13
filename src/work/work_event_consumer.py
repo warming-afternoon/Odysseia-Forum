@@ -24,6 +24,7 @@ class WorkEventConsumer:
         self.sessions = session_factory
         self.auth = auth
         self.runners = []
+        self.last_growth_maintenance = 0
 
     async def start(self):
         """分别启动认证和内容持久拉取消费者。"""
@@ -75,11 +76,15 @@ class WorkEventConsumer:
                     try:
                         messages = await subscription.fetch(batch=32, timeout=1)
                     except TimeoutError:
+                        if kind == "content":
+                            await self.maintain_growth(True, js, stream, durable)
                         continue
                     for message in messages:
                         try:
                             await self.process(kind, message, auth)
                             await message.ack_sync(timeout=3)
+                            if kind == "content":
+                                await self.maintain_growth(message.metadata.num_pending == 0, js, stream, durable)
                         except asyncio.CancelledError:
                             raise
                         except Exception:
@@ -118,9 +123,16 @@ class WorkEventConsumer:
                     )
                     if author and not event.get("deleted"):
                         await IdentityProfileService(session, auth.rpc).ensure([author])
-                    await WorkEventService(
-                        session, get_work_config().get("work_forums", {})
-                    ).apply(event)
+                    if message.subject == "events.content.v1.thread.activity":
+                        from work.work_growth_event_service import WorkGrowthEventService
+
+                        await WorkGrowthEventService(
+                            session, get_work_config().get("work_forums", {})
+                        ).apply(event)
+                    else:
+                        await WorkEventService(
+                            session, get_work_config().get("work_forums", {})
+                        ).apply(event)
                 else:
                     existing = await session.get(WorkEvent, event["event_id"])
                     if existing is not None:
@@ -149,3 +161,24 @@ class WorkEventConsumer:
                 await session.commit()
         finally:
             request_identity_mode.reset(marker)
+
+
+    async def maintain_growth(self, allow_rebase, js=None, stream=None, durable=None):
+        """独立事务有界维护；维护失败不使已提交的业务消息重投。"""
+        if time.monotonic() - self.last_growth_maintenance < 60:
+            return
+        self.last_growth_maintenance = time.monotonic()
+        try:
+            from work.work_growth_maintenance_service import WorkGrowthMaintenanceService
+
+            # NAK 延迟消息不一定计入普通 pending，必须连同未确认数检查。
+            if allow_rebase and js is not None:
+                info = await js.consumer_info(stream, durable)
+                allow_rebase = info.num_pending == 0 and info.num_ack_pending == 0
+            else:
+                allow_rebase = False
+            async with self.sessions() as session:
+                await WorkGrowthMaintenanceService(session).run(allow_rebase)
+                await session.commit()
+        except Exception:
+            logger.exception("增长保留清理或近似校准失败")

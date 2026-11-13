@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ThreadMessageSnapshot(BaseModel):
@@ -16,7 +16,13 @@ class ThreadMessageSnapshot(BaseModel):
     """解析后的创建时间（UTC，无时区），重建帖优先使用原始创建时间。"""
 
     reaction_count: int
-    """首楼最高单种反应数量，重建帖还包含第二楼记录的原始反应数量。"""
+    """首楼当前最高单种反应数量。"""
+
+    reactions: dict[str, int] = Field(default_factory=dict)
+    """首帖完整逐表情计数，不包含子帖或推测的历史反应。"""
+
+    reaction_emojis: dict[str, dict] = Field(default_factory=dict)
+    """原生表情标识、名称与动画标志。"""
 
     first_message_excerpt: str
     """普通帖的首楼正文，或重建帖第二楼清理元数据后的摘要。"""

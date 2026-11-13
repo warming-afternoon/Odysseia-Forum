@@ -3,8 +3,6 @@
 from fastapi import HTTPException
 from sqlalchemy import select, func, update
 from models.thread import Thread
-from search.search_service import SearchService
-from shared.enum.search_config_type import SearchConfigDefaults
 from work.work_service import WorkService
 from work.work_moderation_service import WorkModerationService
 from work.work_thread_service import WorkThreadService
@@ -38,35 +36,14 @@ class WorkCardsService:
                 if query.sort_method == "custom"
                 else query.sort_method
             )
-            # 复用搜索排序表达式，并始终用帖子编号稳定处理并列。
-            ranking = SearchService(session, None)
-            if method == "comprehensive":
-                displays = (
-                    await session.execute(
-                        select(func.coalesce(func.sum(Thread.display_count), 0)).where(
-                            *filters
-                        )
-                    )
-                ).scalar_one()
-                statement, sort = ranking._apply_ucb1_ranking(
-                    statement,
-                    displays,
-                    float(SearchConfigDefaults.UCB1_EXPLORATION_FACTOR.value),
-                    float(SearchConfigDefaults.STRENGTH_WEIGHT.value),
-                )
-            elif method == "reddit_hot":
-                statement, sort = ranking._apply_reddit_hot_ranking(
-                    statement, float(SearchConfigDefaults.REDDIT_HOT_TIME_DECAY.value)
-                )
-            else:
-                sort = {
-                    "created_at": Thread.created_at,
-                    "last_active": Thread.last_active_at,
-                    "last_active_at": Thread.last_active_at,
-                    "reaction_count": Thread.reaction_count,
-                    "reply_count": Thread.reply_count,
-                    "collection_count": Thread.collection_count,
-                }[method]
+            # 子卡不展示点赞，也不让旧链接通过综合/热度排序继续使用点赞。
+            sort = {
+                "created_at": Thread.created_at,
+                "last_active": Thread.last_active_at,
+                "last_active_at": Thread.last_active_at,
+                "reply_count": Thread.reply_count,
+                "collection_count": Thread.collection_count,
+            }.get(method, Thread.last_active_at)
             statement = (
                 statement.order_by(
                     (
