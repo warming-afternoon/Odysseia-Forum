@@ -208,7 +208,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let callback_registry = registry.clone();
     let callback_ready = ready.clone();
     let callback_shutdown = shutdown.clone();
-    let nats = async_nats::ConnectOptions::new().event_callback(move |event| {
+    let nats_url = env::var("FORUM_NOTIFICATION_NATS_URL")
+        .map_err(|_| "invalid NATS server address")?;
+    let (nats_options, nats_server) =
+        forum_notification_gateway::nats_config::connection_options(&nats_url)?;
+    let nats = nats_options.event_callback(move |event| {
         let registry = callback_registry.clone();
         let ready = callback_ready.clone();
         let shutdown = callback_shutdown.clone();
@@ -219,7 +223,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let _ = shutdown.send(true);
             }
         }
-    }).connect(env::var("FORUM_NOTIFICATION_NATS_URL")?).await.map_err(|_| "NATS unavailable")?;
+    }).connect(nats_server).await.map_err(|_| "NATS unavailable")?;
     let state = AppState { redis, registry, ready, capacity: Arc::new(Semaphore::new(max_connections)), capacity_limit: max_connections, pending_auth: Arc::new(Semaphore::new(max_pending)), origin: origin.into(), shutdown: stop.clone() };
     for subject in ["events.forum.v1.notification.changed", "events.auth.v1.session_invalidated", "events.auth.v1.user_invalidated", "events.identity.v1.binding_changed"] {
         let sub = nats.subscribe(subject).await?;
