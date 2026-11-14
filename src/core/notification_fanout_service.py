@@ -124,24 +124,21 @@ class NotificationFanoutService:
                 author_discord.is_(None),
             ),
         )
-        result = await self.session.execute(
+        # 在数据库内登记实际插入的接收者，不将大批关注者拉入 Python。
+        from work.notification_outbox import execute_fanout_with_outbox
+
+        statement = (
             insert(Notification)
             .from_select(
                 [
-                    "user_id",
-                    "fluxer_user_id",
-                    "event_type",
-                    "event_source_id",
-                    "event_source_platform",
-                    "thread_id",
-                    "work_id",
-                    "created_at",
+                    "user_id", "fluxer_user_id", "event_type", "event_source_id",
+                    "event_source_platform", "thread_id", "work_id", "created_at",
                 ],
                 recipients,
             )
             .on_conflict_do_nothing()
         )
-        return int(result.rowcount or 0)
+        return await execute_fanout_with_outbox(self.session, statement)
 
     async def _fanout(
         self,
@@ -176,5 +173,9 @@ class NotificationFanoutService:
             )
             .on_conflict_do_nothing()
         )
+        if uses_canonical_storage():
+            from work.notification_outbox import execute_fanout_with_outbox
+
+            return await execute_fanout_with_outbox(self.session, statement)
         result = await self.session.execute(statement)
         return int(result.rowcount or 0)

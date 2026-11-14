@@ -334,10 +334,11 @@ async def test_announcement_recipient_failure_rolls_back_publication(
 
     async def fail_notification(self, statement, *args, **kwargs):
         """保留真实数据库操作，仅在受众 SQL 插入时注入故障。"""
-        if (
-            getattr(statement, "is_insert", False)
-            and statement.table.name == "notification"
-        ):
+        from sqlalchemy.dialects import postgresql
+
+        # V2 将通知 INSERT 包在批量 outbox CTE 的外层 SELECT 中。
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        if "INSERT INTO notification " in sql:
             raise RuntimeError("recipient persistence interrupted")
         return await execute(self, statement, *args, **kwargs)
 

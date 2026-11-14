@@ -125,6 +125,7 @@ class TagWorker:
                 task.status = "cancelled"
                 return
             external_id = proposal.target_id
+            target = None
             if proposal.target_type == "thread":
                 target = await session.get(Thread, proposal.target_id)
                 if target is None:
@@ -147,8 +148,14 @@ class TagWorker:
                         await resolve_business_id(session, proposal.owner_id)
                         == proposal.fluxer_owner_id
                     )
-                delivered = await send(notice) if can_send_discord else False
-                if not delivered:
+                try:
+                    delivered = await send(notice) if can_send_discord else False
+                except Exception:
+                    if not is_fluxer_mode():
+                        raise
+                    # 原生站内通知不应因 Discord 暂时不可用而丢失。
+                    delivered = False
+                if not delivered or is_fluxer_mode():
                     existing = await TagDataRepository(session, Notification).one(
                         (
                             Notification.fluxer_user_id
@@ -164,17 +171,25 @@ class TagWorker:
                         Notification.event_source_id == proposal.id,
                     )
                     if existing is None:
-                        await TagDataRepository(session, Notification).add(
-                            user_id=proposal.owner_id,
-                            fluxer_user_id=proposal.fluxer_owner_id
-                            if is_fluxer_mode()
-                            else None,
-                            event_type="tag_review",
-                            event_source_id=proposal.id,
-                            target_type=proposal.target_type,
-                            target_id=external_id,
-                        )
-                    task.error = "Discord 通知无法送达，已使用站内通知"
+                        notice_fields = {
+                            "user_id": proposal.owner_id,
+                            "fluxer_user_id": proposal.fluxer_owner_id if is_fluxer_mode() else None,
+                            "event_type": "tag_review",
+                            "event_source_id": proposal.id,
+                            "target_type": proposal.target_type,
+                            "target_id": external_id,
+                        }
+                        if is_fluxer_mode():
+                            notice_fields["work_id"] = proposal.work_id or (target.work_id if target else None)
+                            if target is not None:
+                                notice_fields["event_source_platform"] = target.platform
+                        await TagDataRepository(session, Notification).add(**notice_fields)
+                        if is_fluxer_mode():
+                            from work.notification_outbox import enqueue_notification_change
+
+                            await enqueue_notification_change(session, proposal.fluxer_owner_id)
+                    if not delivered:
+                        task.error = "Discord 通知无法送达，已使用站内通知"
                 task.status = "sent"
             except Exception as exc:
                 task.error = type(exc).__name__

@@ -2,7 +2,7 @@
 
 from dto.work.work_actor_dto import WorkActorDTO
 from dto.work.work_command_qo import WorkCommandQo
-from fastapi import Request, APIRouter, Depends
+from fastapi import Request, APIRouter, Depends, Query
 from api.v2.dependencies import current_member
 from work.work_author_service import WorkAuthorService
 from api.v2.dependencies import get_session_factory
@@ -38,9 +38,13 @@ async def follow_author(
 
 
 @router.get("/me/author-follows")
-async def author_follows(principal=Depends(current_member)):
-    """返回统一作者关注资料，不复制关注状态。"""
+async def author_follows(
+    offset: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=100),
+    principal=Depends(current_member),
+):
+    """分页返回统一作者关注资料，不复制关注状态。"""
     return await WorkAuthorService(get_session_factory()).author_follows(
+        offset=offset, limit=limit,
         command=WorkCommandQo(
             actor=WorkActorDTO.from_principal(principal), values={}, operation=None
         )
