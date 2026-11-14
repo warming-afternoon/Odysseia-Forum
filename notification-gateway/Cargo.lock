@@ -363,6 +363,7 @@ dependencies = [
  "async-nats",
  "axum",
  "futures-util",
+ "percent-encoding",
  "redis",
  "serde",
  "serde_json",
