@@ -2,7 +2,7 @@
 
 from dto.work.work_command_qo import WorkCommandQo
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, func
 from shared.time_utils import utc_now
 from models.user import User
 from work.work_repository import WorkRepository
@@ -126,36 +126,34 @@ class WorkAuthorService:
             await session.commit()
         return {"followed": command.operation == "follow"}
 
-    async def author_follows(self, command: WorkCommandQo):
-        """返回统一作者关注资料，不复制关注状态。"""
+    async def author_follows(self, command: WorkCommandQo, offset: int = 0, limit: int = 100):
+        """分页返回统一作者关注资料，按作者去重。"""
         principal = command.actor
         from models.author_follow import AuthorFollow
 
         async with self.sessions() as session:
-            rows = (
-                (
-                    await session.execute(
-                        select(User)
-                        .join(AuthorFollow, AuthorFollow.fluxer_author_id == User.id)
-                        .where(
-                            AuthorFollow.fluxer_user_id == principal["id"],
-                            AuthorFollow.active_flag.is_(True),
-                        )
-                        .order_by(AuthorFollow.followed_at.desc())
-                        .limit(100)
-                    )
+            base = (
+                select(User)
+                .join(AuthorFollow, AuthorFollow.fluxer_author_id == User.id)
+                .where(
+                    AuthorFollow.fluxer_user_id == principal["id"],
+                    AuthorFollow.active_flag.is_(True),
+                    User.merged_into_id.is_(None),
                 )
-                .scalars()
-                .all()
+                .group_by(User.id)
             )
+            total = (await session.execute(select(func.count()).select_from(base.subquery()))).scalar_one()
+            rows = (await session.execute(
+                base.order_by(func.max(AuthorFollow.followed_at).desc(), User.id.desc())
+                .offset(max(0, offset)).limit(min(100, max(1, limit)))
+            )).scalars().all()
             return {
                 "items": [
-                    {
-                        "id": row.id,
-                        "username": row.username,
-                        "display_name": row.display_name,
-                        "avatar_url": row.avatar_url,
-                    }
+                    {"id": row.id, "username": row.username,
+                     "display_name": row.display_name, "avatar_url": row.avatar_url}
                     for row in rows
-                ]
+                ],
+                "total": total,
+                "offset": offset,
+                "limit": limit,
             }

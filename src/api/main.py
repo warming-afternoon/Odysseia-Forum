@@ -421,6 +421,17 @@ async def start_work_tasks():
 
         app.state.work_events = WorkEventConsumer()
         await app.state.work_events.start()
+        if os.environ.get("FORUM_NOTIFICATION_REALTIME_ENABLED", "").lower() == "true":
+            from identity.auth_runtime import get_auth_service
+            from work.notification_outbox_worker import NotificationOutboxWorker
+
+            app.state.notification_outbox = NotificationOutboxWorker(
+                AsyncSessionFactory,
+                get_auth_service(),
+                "events.forum.v1.notification.changed",
+                batch_interval=float(os.environ.get("FORUM_NOTIFICATION_BATCH_INTERVAL", "1.0")),
+            )
+            await app.state.notification_outbox.start()
         from work.work_tag_maintenance import WorkTagMaintenance
         from api.v2.config import get_work_config
 
@@ -437,6 +448,9 @@ async def stop_work_tasks():
 
     if _permission_service:
         await _permission_service.close()
+    notification_outbox = getattr(app.state, "notification_outbox", None)
+    if notification_outbox:
+        await notification_outbox.close()
     maintenance = getattr(app.state, "work_tag_maintenance", None)
     if maintenance:
         await maintenance.close()

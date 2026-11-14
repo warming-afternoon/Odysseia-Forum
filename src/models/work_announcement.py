@@ -50,3 +50,10 @@ class WorkAnnouncement(SQLModel, table=True):
 
     withdrawn_at: datetime | None = None
     """撤回时间，历史保留。"""
+
+    revision: int = Field(default=1, nullable=False)
+    """公告编辑版本，用于条件更新。"""
+
+    edited_by: str | None = None
+    edited_at: datetime | None = None
+    withdrawn_by: str | None = None

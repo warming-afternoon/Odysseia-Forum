@@ -1,3 +1,4 @@
+from models.work_notification_outbox import WorkNotificationOutbox
 from models.work_growth_receipt import WorkGrowthReceipt
 from models.work_growth_reaction_state import WorkGrowthReactionState
 from models.work_growth_daily import WorkGrowthDaily
@@ -87,6 +88,7 @@ __all__ = [
     "WorkEvent",
     "WorkNativeTagBinding",
     "WorkNativeTagSource",
+    "WorkNotificationOutbox",
     "WorkReaction",
     "WorkSourceState",
     "WorkStatistics",

@@ -107,3 +107,31 @@ async def test_discord_ingestion_requires_mapping_and_preserves_system_zero(
     async with factory() as session:
         thread = await session.get(Thread, 100)
         assert thread.author_id == 0 and thread.fluxer_author_id is None
+
+
+@pytest.mark.asyncio
+async def test_fluxer_tag_notice_created_even_when_discord_succeeds(setup_tags, monkeypatch):
+    """V2 站内提醒不因 Discord 投递成功而消失，事务内同时登记实时事件。"""
+    from sqlalchemy import text
+
+    factory, config, call = setup_tags
+    async with factory() as session, session.begin():
+        for discord_id, user_id in [(1, "200"), (3, "300"), (99, "900")]:
+            session.add(User(id=user_id, username=f"user{user_id}"))
+            session.add(DiscordIdentity(discord_user_id=str(discord_id), user_id=user_id, version=1))
+        (await session.get(Booklist, 1)).fluxer_owner_id = "200"
+    monkeypatch.setenv("FORUM_AUTH_MODE", "fluxer")
+    tag = await create(call, "for-review")
+    proposal = await call("propose", 3, target_type="booklist", target_id=1, tag_id=tag["id"])
+    async def delivered(_notice):
+        return True
+    await TagWorker(factory, config).deliver(delivered)
+    async with factory() as session:
+        notice = (await session.execute(select(Notification).where(
+            Notification.event_type == "tag_review", Notification.event_source_id == int(proposal["id"])
+        ))).scalar_one()
+        assert notice.fluxer_user_id == "200"
+        recipients = (await session.execute(text(
+            "SELECT recipient_id FROM work_notification_outbox"
+        ))).scalars().all()
+        assert recipients == ["200"]

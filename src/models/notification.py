@@ -32,6 +32,13 @@ class Notification(SQLModel, table=True):
             name="ck_notification_event_type",
         ),
         Index(
+            "uq_notification_fluxer_event",
+            "fluxer_user_id", "event_type", "event_source_id", "event_source_platform",
+            unique=True,
+            postgresql_where=text("fluxer_user_id IS NOT NULL"),
+            sqlite_where=text("fluxer_user_id IS NOT NULL"),
+        ),
+        Index(
             "ix_notification_user_created",
             "user_id",
             "created_at",

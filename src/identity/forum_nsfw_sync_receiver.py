@@ -60,6 +60,7 @@ class ForumNsfwSyncReceiver:
             ).scalar_one_or_none()
             if user is None or user.merged_into_id:
                 raise HTTPException(403, "Synchronization account unavailable")
+            previous_show_nsfw = user.show_nsfw
             state = await session.get(
                 ForumNsfwSyncState, (payload["user_id"], self.guild_id)
             )
@@ -86,6 +87,10 @@ class ForumNsfwSyncReceiver:
             elif version == state.nsfw_version:
                 # 幂等重试确认同一操作；不要让旧入口的无版本写入伪造同步确认。
                 user.show_nsfw = state.show_nsfw
+            if user.show_nsfw != previous_show_nsfw:
+                from work.notification_outbox import enqueue_notification_change
+
+                await enqueue_notification_change(session, user.id)
             result = {
                 "user_id": user.id,
                 "guild_id": self.guild_id,
