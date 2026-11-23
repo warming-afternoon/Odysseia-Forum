@@ -460,3 +460,9 @@ async def stop_work_tasks():
     worker = getattr(app.state, "work_tasks", None)
     if worker:
         await worker.close()
+
+# 平台网关使用独立协议与按模块签发的主体。
+from platform_gateway.routes import internal as platform_internal_router, router as platform_router
+
+app.include_router(platform_router)
+app.include_router(platform_internal_router)

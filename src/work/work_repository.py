@@ -2,6 +2,7 @@
 
 from types import SimpleNamespace
 from sqlalchemy import select, func, or_, and_, not_, case
+from core.booklist_repository import visible_booklist_conditions
 from models.work import Work
 from models.work_statistics import WorkStatistics
 from models.booklist_item import BooklistItem
@@ -204,12 +205,14 @@ class WorkRepository:
             else Work.is_abyss
         )
         filters = [
-            Work.deleted_at.is_not(None) if deleted_only else Work.deleted_at.is_(None)
+            Work.deleted_at.is_not(None) if deleted_only else Work.deleted_at.is_(None),
+            Work.rating.is_distinct_from("r18g"),
         ]
         if not deleted_only:
             filters.append(Work.source_visible.is_(True))
         if not principal["show_nsfw"]:
             filters.append(Work.is_nsfw.is_(False))
+            filters.append(Work.rating.is_distinct_from("r18"))
         if not principal["can_view_abyss"]:
             filters.append(abyss_column.is_(False))
             abyss_channels = [
@@ -395,6 +398,7 @@ class WorkRepository:
                     .where(
                         Booklist.fluxer_owner_id == principal["id"],
                         Booklist.is_default.is_(True),
+                        *visible_booklist_conditions(principal.get("show_nsfw", False)),
                     )
                 )
             )

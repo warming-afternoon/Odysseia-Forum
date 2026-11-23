@@ -23,6 +23,12 @@ from shared.time_utils import utc_now
 logger = logging.getLogger(__name__)
 
 
+def visible_booklist_conditions(show_nsfw: bool = False):
+    """旧入口可识别全年龄与 R18 资格，R18G 由平台会话授权。"""
+    allowed_ratings = ("general", "r18") if show_nsfw else ("general",)
+    return Booklist.deleted_at.is_(None), Booklist.rating.in_(allowed_ratings)
+
+
 class BooklistRepository:
     """书单仓库，提供书单的CRUD操作"""
 
@@ -108,6 +114,7 @@ class BooklistRepository:
                 )
                 == owner_id,
                 Booklist.is_default,
+                Booklist.deleted_at.is_(None),
             )
         )
         result = await self.session.execute(statement)
@@ -180,24 +187,29 @@ class BooklistRepository:
             await self.session.rollback()
             raise
 
-    async def get_booklist(self, booklist_id: int) -> Optional[Booklist]:
+    async def get_booklist(
+        self, booklist_id: int, *, show_nsfw: bool = False
+    ) -> Optional[Booklist]:
         """
         根据ID获取书单
         """
-        statement = (
-            select(Booklist)
-            .where(Booklist.id == booklist_id)
-            .execution_options(populate_existing=True)
-        )
-        result = await self.session.execute(statement)
-        row = result.scalar_one_or_none()
         seen = set()
-        while row is not None and row.merged_into_id is not None:
-            if row.id in seen:
+        while True:
+            if booklist_id in seen:
                 raise ValueError("书单重定向出现循环")
-            seen.add(row.id)
-            row = await self.session.get(Booklist, row.merged_into_id)
-        return row
+            seen.add(booklist_id)
+            statement = (
+                select(Booklist)
+                .where(
+                    Booklist.id == booklist_id,
+                    *visible_booklist_conditions(show_nsfw),
+                )
+                .execution_options(populate_existing=True)
+            )
+            row = (await self.session.execute(statement)).scalar_one_or_none()
+            if row is None or row.merged_into_id is None:
+                return row
+            booklist_id = row.merged_into_id
 
     async def resolve_booklist_ids(self, ids):
         """批量沿默认书单合并链解析旧ID，保留来源对应关系。"""
@@ -205,9 +217,9 @@ class BooklistRepository:
             return {}
         rows = await self.session.execute(
             text("""WITH RECURSIVE chain(original,id,next,path) AS (
-          SELECT id,id,merged_into_id,ARRAY[id] FROM booklist WHERE id=ANY(CAST(:ids AS INTEGER[]))
+          SELECT id,id,merged_into_id,ARRAY[id] FROM booklist WHERE id=ANY(CAST(:ids AS INTEGER[])) AND deleted_at IS NULL AND rating='general'
           UNION ALL SELECT c.original,b.id,b.merged_into_id,c.path||b.id FROM chain c JOIN booklist b ON b.id=c.next
-          WHERE NOT b.id=ANY(c.path) AND cardinality(c.path)<64)
+          WHERE b.deleted_at IS NULL AND b.rating='general' AND NOT b.id=ANY(c.path) AND cardinality(c.path)<64)
           SELECT original,id FROM chain WHERE next IS NULL"""),
             {"ids": list(set(ids))},
         )
@@ -232,7 +244,11 @@ class BooklistRepository:
             Booklist.view_count,
             Booklist.created_at,
             Booklist.updated_at,
-        ).where(Booklist.id == booklist_id, Booklist.is_public.is_(True))  # type: ignore[attr-defined]
+        ).where(
+            Booklist.id == booklist_id,
+            Booklist.is_public.is_(True),
+            *visible_booklist_conditions(),
+        )
         row = (await self.session.execute(statement)).first()
         if row is None:
             return None
@@ -254,7 +270,8 @@ class BooklistRepository:
     ) -> Optional[Booklist]:
         """根据赛事频道ID查找赛事书单"""
         statement = select(Booklist).where(
-            Booklist.tournament_channel_id == tournament_channel_id
+            Booklist.tournament_channel_id == tournament_channel_id,
+            *visible_booklist_conditions(),
         )
         result = await self.session.execute(statement)
         return result.scalar_one_or_none()
@@ -313,7 +330,7 @@ class BooklistRepository:
             # 锁定并刷新最新原文，ORM 编辑触发统一的搜索向量维护事件。
             statement = (
                 select(Booklist)
-                .where(Booklist.id == booklist_id)
+                .where(Booklist.id == booklist_id, *visible_booklist_conditions())
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
@@ -336,11 +353,22 @@ class BooklistRepository:
             await self.session.rollback()
             raise
 
-    async def delete_booklist(self, booklist_id: int) -> bool:
+    async def delete_booklist(
+        self, booklist_id: int, *, show_nsfw: bool = False
+    ) -> bool:
         """
         删除书单及其所有关联项
         """
         await self._lock_collection_batch(booklist_id)
+        # 平台软删除后保留关系，旧入口只允许硬删除当前可见书单。
+        visible_id = await self.session.scalar(
+            select(Booklist.id).where(
+                Booklist.id == booklist_id,
+                *visible_booklist_conditions(show_nsfw),
+            )
+        )
+        if visible_id is None:
+            return False
         # 删除所有关联项
         statement_items = delete(BooklistItem).where(
             BooklistItem.booklist_id == booklist_id  # type: ignore
@@ -416,7 +444,7 @@ class BooklistRepository:
         await require_current_tag_ids(
             self.session, [*(include_tag_ids or []), *(exclude_tag_ids or [])]
         )
-        query = select(Booklist)
+        query = select(Booklist).where(*visible_booklist_conditions())
         query = query.where(
             *tag_filters(
                 "booklist",
@@ -790,7 +818,11 @@ class BooklistRepository:
         if not thread_ids:
             return set()
 
-        statement = select(BooklistItem.thread_id).where(
+        statement = (
+            select(BooklistItem.thread_id)
+            .join(Booklist, Booklist.id == BooklistItem.booklist_id)
+            .where(*visible_booklist_conditions())
+        ).where(
             and_(
                 (
                     BooklistItem.fluxer_owner_id

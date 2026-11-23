@@ -3,7 +3,6 @@ from typing import Optional
 
 from sqlalchemy import (
     BigInteger,
-    CheckConstraint,
     Column,
     Index,
     String,
@@ -27,9 +26,11 @@ class Notification(SQLModel, table=True):
             "event_source_platform",
             name="uk_notification_user_event_source",
         ),
-        CheckConstraint(
-            "event_type IN ('thread_update', 'author_new_thread', 'tag_review', 'work_announcement')",
-            name="ck_notification_event_type",
+        Index(
+            "ix_notification_unread_work_rules",
+            "fluxer_user_id", "work_id", "rules_version",
+            postgresql_where=text("event_type = 'work_rules' AND read_at IS NULL"),
+            sqlite_where=text("event_type = 'work_rules' AND read_at IS NULL"),
         ),
         Index(
             "uq_notification_fluxer_event",
@@ -65,6 +66,9 @@ class Notification(SQLModel, table=True):
 
     work_id: int | None = Field(default=None, sa_column=Column(BigInteger, index=True))
     """统一作品编号，与 V1 通知共享已读事实。"""
+
+    rules_version: int | None = Field(default=None, sa_column=Column(BigInteger))
+    """规则更新通知对应的作品内版本，确认时只清除该版及更早提醒。"""
 
     id: Optional[int] = Field(
         default=None, primary_key=True, description="通知记录的内部主键"

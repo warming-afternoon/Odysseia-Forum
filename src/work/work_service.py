@@ -43,6 +43,8 @@ class WorkService:
                 )
             )
             or (work.is_nsfw and not principal["show_nsfw"])
+            or work.rating == "r18g"
+            or (work.rating == "r18" and not principal["show_nsfw"])
             or (
                 (
                     work.is_abyss
@@ -65,7 +67,7 @@ class WorkService:
             raise HTTPException(403, "需要作品作者或管理权限")
         return work
 
-    async def project(self, works):
+    async def project(self, works, *, platform_likes=False):
         """每类关联仅一次集合查询，避免列表 N+1。"""
         ids = [work.id for work in works]
         if not ids:
@@ -162,6 +164,17 @@ class WorkService:
                     "metadata_overrides",
                     "classification_revision",
                     "source_visible",
+                    "summary",
+                    "rating",
+                    "published_at",
+                    "updated_at",
+                    "deleted_user_id",
+                    "layout",
+                    "declarations",
+                    "chat_title",
+                    "rules_body",
+                    "rules_version",
+                    "rules_updated_at",
                 }
             )
             data["id"] = str(work.id)
@@ -181,13 +194,21 @@ class WorkService:
                     "reply_count",
                 )
             }
+            if platform_likes:
+                data["statistics"]["platform_like_count"] = (
+                    stats.platform_like_count if stats else 0
+                )
             data["reactions"] = reactions[work.id]
             data["tags"] = tags[work.id]
             result.append(data)
         return result
 
-    async def collect(self, work, principal, collected, booklist_id=None):
+    async def collect(
+        self, work, principal, collected, booklist_id=None, *, verify_visible=None
+    ):
         """收藏沿用默认书单，统一锁避免旧新入口重复创建默认书单。"""
+        discord_id = principal.get("discord_user_id")
+        discord_owner = int(discord_id) if discord_id is not None else None
         # Preserve user -> booklist -> work order, including visibility changes
         # already pending on Work, before any ORM query can autoflush them.
         with self.session.no_autoflush:
@@ -196,24 +217,31 @@ class WorkService:
                 {"key": "default-booklist:" + principal["id"]},
             )
             if booklist_id is not None:
-                from core.booklist_repository import BooklistRepository
+                from core.booklist_repository import BooklistRepository, visible_booklist_conditions
 
                 resolved = await BooklistRepository(self.session).get_booklist(
-                    booklist_id
+                    booklist_id, show_nsfw=principal.get("show_nsfw", False)
                 )
                 if resolved is None:
                     raise HTTPException(404, "书单不存在")
                 booklist_id = resolved.id
-            query = select(Booklist).where(Booklist.fluxer_owner_id == principal["id"])
+            query = select(Booklist).where(
+                Booklist.fluxer_owner_id == principal["id"],
+                Booklist.deleted_at.is_(None),
+                Booklist.merged_into_id.is_(None),
+            )
             if booklist_id is None:
                 query = query.where(Booklist.is_default.is_(True))
             else:
-                query = query.where(Booklist.id == booklist_id)
+                query = query.where(
+                    Booklist.id == booklist_id,
+                    *visible_booklist_conditions(principal.get("show_nsfw", False)),
+                )
             booklist = (
                 (await self.session.execute(query.with_for_update())).scalars().first()
             )
             new_booklist = booklist is None
-            if new_booklist:
+            if new_booklist and (collected or verify_visible is None):
                 if booklist_id is not None:
                     raise HTTPException(404, "书单不存在")
                 booklist = Booklist(
@@ -221,12 +249,16 @@ class WorkService:
                     is_default=True,
                     is_public=False,
                     fluxer_owner_id=principal["id"],
-                    owner_id=int(principal["discord_user_id"]),
+                    owner_id=discord_owner,
                 )
                 self.session.add(booklist)
             await self.session.execute(
                 text("SELECT pg_advisory_xact_lock(:id)"), {"id": work.id}
             )
+        if verify_visible:
+            await verify_visible()
+        if booklist is None:
+            return {"collected": False}
         if new_booklist:
             await self.session.flush()
         item = (
@@ -261,7 +293,7 @@ class WorkService:
                     work_id=work.id,
                     thread_id=main.thread_id if main else None,
                     fluxer_owner_id=principal["id"],
-                    owner_id=int(principal["discord_user_id"]),
+                    owner_id=booklist.owner_id if verify_visible else discord_owner,
                 )
             )
             booklist.item_count += 1

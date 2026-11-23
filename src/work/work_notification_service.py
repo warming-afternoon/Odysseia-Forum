@@ -54,13 +54,15 @@ class WorkNotificationService:
 
     def _visible_query(self, principal):
         """统一列表、计数和已读操作的接收者及可见性范围。"""
-        recipient = or_(
-            Notification.fluxer_user_id == principal["id"],
-            and_(
-                Notification.fluxer_user_id.is_(None),
-                Notification.user_id == int(principal["discord_user_id"]),
-            ),
-        )
+        recipient = Notification.fluxer_user_id == principal["id"]
+        if discord_id := principal.get("discord_user_id"):
+            recipient = or_(
+                recipient,
+                and_(
+                    Notification.fluxer_user_id.is_(None),
+                    Notification.user_id == int(discord_id),
+                ),
+            )
         legacy_work = (
             select(Thread.work_id)
             .where(
@@ -159,6 +161,8 @@ class WorkNotificationService:
                         Work.deleted_at.is_(None),
                         Work.source_visible.is_(True),
                         or_(Work.is_nsfw.is_(False), principal["show_nsfw"]),
+                        Work.rating.is_distinct_from("r18g"),
+                        or_(Work.rating.is_distinct_from("r18"), principal["show_nsfw"]),
                         or_(abyss_column.is_(False), principal["can_view_abyss"]),
                     ),
                 ),
@@ -244,6 +248,9 @@ class WorkNotificationService:
                         )
                     )
                 )
+                if notice.event_type == "work_rules":
+                    title = "作品规则已更新"
+                    body = "请查看并确认当前作品规则"
                 items.append(
                     {
                         "id": str(notice.id),
@@ -265,6 +272,7 @@ class WorkNotificationService:
                         "proposal_id": str(notice.event_source_id)
                         if notice.event_type == "tag_review"
                         else None,
+                        **({"rules_version": notice.rules_version} if notice.event_type == "work_rules" else {}),
                         "read_at": notice.read_at,
                         "created_at": notice.created_at,
                     }

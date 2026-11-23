@@ -110,6 +110,7 @@ class WorkModerationService:
                 source.show_flag = True
             work.source_visible = True
         work.deleted_at = utc_now() if deleted else None
+        work.deleted_user_id = principal["id"] if deleted else None
         work.deletion_reason = "moderation" if deleted else None
         await self.policy_tasks(work.id, principal, "forum_soft_delete", deleted)
         self.session.add(

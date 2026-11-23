@@ -20,7 +20,8 @@ from dto.search import (
     SimilarThreadSourceDTO,
     SimilarThreadSourceTagDTO,
 )
-from models import Author, User, Tag, Thread, TagBinding, BooklistItem
+from core.booklist_repository import visible_booklist_conditions
+from models import Author, User, Tag, Thread, TagBinding, Booklist, BooklistItem
 from search.qo.cleaned_thread_search import CleanedThreadSearchQuery
 from search.qo.thread_search import ThreadSearchQuery
 from shared.channel_mapping_utils import ChannelMappingUtils
@@ -391,7 +392,9 @@ class SearchService:
                 # 查询用户的帖子收藏记录，获取该用户收藏过的所有 thread_id
                 collected_stmt = (
                     select(BooklistItem.thread_id)
+                    .join(Booklist, Booklist.id == BooklistItem.booklist_id)
                     .where(
+                        *visible_booklist_conditions(),
                         (
                             BooklistItem.fluxer_owner_id
                             if uses_canonical_storage()
@@ -506,7 +509,12 @@ class SearchService:
                         )
                         == query.user_id_for_collection_search,
                     ),
-                ).group_by(Thread.id)  # type: ignore
+                )
+                final_select_stmt = (
+                    final_select_stmt.join(Booklist, Booklist.id == BooklistItem.booklist_id)
+                    .where(*visible_booklist_conditions())
+                    .group_by(Thread.id)  # type: ignore
+                )
 
                 # 取最新的收藏时间
                 sort_col = func.max(BooklistItem.created_at)
@@ -617,7 +625,9 @@ class SearchService:
                 BooklistItem,
                 Thread.thread_id == BooklistItem.thread_id,  # type: ignore
             )
+            .join(Booklist, Booklist.id == BooklistItem.booklist_id)
             .where(
+                *visible_booklist_conditions(),
                 (
                     BooklistItem.fluxer_owner_id
                     if uses_canonical_storage()

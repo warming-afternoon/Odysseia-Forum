@@ -16,6 +16,7 @@ from core.booklist_sort_constants import (
     SORT_METHOD_COLUMN_MAP,
 )
 from dto.open_graph import OpenGraphWorkCandidateDTO
+from core.booklist_repository import visible_booklist_conditions
 from models import Author, User, Booklist, BooklistItem, Thread
 from identity.runtime import uses_canonical_storage, is_fluxer_mode
 from shared.enum.search_config_type import SearchConfigDefaults
@@ -401,6 +402,7 @@ class BooklistItemRepository:
             .join(Booklist, Booklist.id == BooklistItem.booklist_id)  # type: ignore[arg-type]
             .where(
                 Booklist.is_tournament.is_(True),  # type: ignore[arg-type]
+                *visible_booklist_conditions(),
                 BooklistItem.thread_id.in_(thread_ids),  # type: ignore[arg-type]
             )
         )

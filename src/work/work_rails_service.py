@@ -1,13 +1,13 @@
 """保持原发现栏目的作品级筛选与净增长排序。"""
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from fastapi import HTTPException
-from sqlalchemy import func, select, or_
+from sqlalchemy import or_
 from api.v2.schemas.work_search_request import WorkSearchRequest
 from core.preferences_repository import PreferencesRepository
 from identity.canonical_user_id import CanonicalUserId
 from models.work import Work
-from models.work_growth_daily import WorkGrowthDaily
+from work.work_growth_scores import growth_scores
 from work.work_preferences_service import search_preference_guild
 from work.work_repository import WorkRepository
 from work.work_service import WorkService
@@ -84,20 +84,7 @@ class WorkRailsService:
                 conditions = list(filters)
                 if metric:
                     # 日增量允许负值，只有净增长为正的作品进入增长榜。
-                    scores = (
-                        select(
-                            WorkGrowthDaily.work_id,
-                            func.sum(WorkGrowthDaily.delta).label("score"),
-                        )
-                        .where(
-                            WorkGrowthDaily.metric == metric,
-                            WorkGrowthDaily.day >= today - timedelta(days=days - 1),
-                            WorkGrowthDaily.day <= today,
-                        )
-                        .group_by(WorkGrowthDaily.work_id)
-                        .having(func.sum(WorkGrowthDaily.delta) > 0)
-                        .subquery()
-                    )
+                    scores = growth_scores(metric, today, days, positive_only=True)
                     ranking = scores.c.score
                 rows, _ = await WorkRepository(session).page(
                     principal, offset, limit,

@@ -1,3 +1,4 @@
+from core.booklist_repository import visible_booklist_conditions
 from models.tag_alias import TagAlias
 import re
 from typing import List, Optional
@@ -94,7 +95,7 @@ class SuggestionService:
         thread_stmt = thread_stmt.order_by(Thread.last_active_at.desc()).limit(limit)  # type: ignore[attr-defined]
 
         # --- 书单查询 ---
-        booklist_stmt = select(Booklist)
+        booklist_stmt = select(Booklist).where(*visible_booklist_conditions())
         visibility_cond = Booklist.is_public  # type: ignore[attr-defined]
         if current_user_id:
             visibility_cond = or_(

@@ -1,8 +1,19 @@
 """跨平台作品的统一内容投影。"""
 
 from datetime import datetime
-from sqlalchemy import BigInteger, Column, JSON, Index, event, inspect, func, text
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    Column,
+    JSON,
+    Text,
+    Index,
+    event,
+    inspect,
+    func,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from shared.text_utils import build_search_vector_text
 from sqlmodel import SQLModel, Field
 from shared.time_utils import utc_now
@@ -12,6 +23,12 @@ class Work(SQLModel, table=True):
     """保存作品内容与主来源，不独立存储封面。"""
 
     __table_args__ = (
+        CheckConstraint(
+            "(rules_version = 0 AND rules_body = '' AND rules_updated_at IS NULL) OR "
+            "(rules_version > 0 AND rules_updated_at IS NOT NULL)",
+            name="ck_work_rules_state",
+        ),
+        CheckConstraint("rating IN ('general','r18','r18g')", name="ck_work_rating"),
         Index("ix_work_search_vector", "search_vector", postgresql_using="gin"),
         Index(
             "ix_work_visible_created_id",
@@ -45,6 +62,40 @@ class Work(SQLModel, table=True):
 
     description: str | None = None
     """作品简介。"""
+
+    summary: str | None = Field(default=None, max_length=200)
+    """作者单独填写的列表摘要，未填写时列表截取作品正文。"""
+
+    rating: str | None = None
+    """作品的显式内容分级；旧作品可为空，继续使用来源分区及标签限制。"""
+
+    layout: dict | None = Field(
+        default=None, sa_column=Column(JSONB(none_as_null=True))
+    )
+    """作者指定的作品页布局，空值使用默认布局。"""
+
+    declarations: dict | None = Field(
+        default=None, sa_column=Column(JSONB(none_as_null=True))
+    )
+    """首次发布时的答题者、条款版本、确认时间及答案快照；旧来源作品为空。"""
+
+    published_at: datetime | None = None
+    """原生作品首次成功发布的时间，发布前为空。"""
+
+    updated_at: datetime | None = None
+    """作品资料最近一次编辑时间，独立于讨论活跃时间。"""
+
+    chat_title: str | None = Field(default=None, max_length=60)
+    """作品交流区的自定义标题，空值表示跟随作品标题。"""
+
+    rules_body: str = Field(default="", sa_column=Column(Text, nullable=False, server_default=""))
+    """作者或管理者维护的当前作品规则正文。"""
+
+    rules_version: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default="0"))
+    """规则保存次数，零表示从未设置规则。"""
+
+    rules_updated_at: datetime | None = None
+    """作品规则最后一次成功保存的 UTC 时间。"""
 
     classification_revision: int = Field(
         default=0, sa_column=Column(BigInteger, nullable=False)
@@ -94,6 +145,9 @@ class Work(SQLModel, table=True):
     deleted_at: datetime | None = Field(default=None, index=True)
     """软删除时间。"""
 
+    deleted_user_id: str | None = None
+    """执行本次作品软删除的操作者平台用户 ID，来源未提供时为空。"""
+
     deletion_reason: str | None = None
     """原生主帖删除不可恢复，其余为可管理恢复的隐藏。"""
 
@@ -101,12 +155,16 @@ class Work(SQLModel, table=True):
 @event.listens_for(Work, "before_insert")
 @event.listens_for(Work, "before_update")
 def update_work_search_vector(mapper, connection, target):
-    """作品标题或简介变化时使用与 Thread 相同的分词规则。"""
+    """标题、正文或手写摘要变化时按 Forum 的分词规则更新作品索引。"""
     state = inspect(target)
     if state.persistent and not (
         state.attrs.title.history.has_changes()
         or state.attrs.description.history.has_changes()
+        or state.attrs.summary.history.has_changes()
     ):
         return
-    tokens = build_search_vector_text(target.title, target.description)
+    searchable_text = " ".join(
+        part for part in (target.description, target.summary) if part
+    )
+    tokens = build_search_vector_text(target.title, searchable_text)
     target.search_vector = func.to_tsvector("simple", tokens) if tokens else None

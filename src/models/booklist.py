@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, Index, event, func, inspect, text
+from sqlalchemy import BigInteger, CheckConstraint, Index, event, func, inspect, text
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlmodel import Column, Field, SQLModel
 
@@ -15,6 +15,9 @@ class Booklist(SQLModel, table=True):
     __tablename__ = "booklist"  # type: ignore
 
     __table_args__ = (
+        CheckConstraint(
+            "rating IN ('general','r18','r18g')", name="ck_booklist_rating"
+        ),
         Index(
             "ix_booklist_search_vector",
             "search_vector",
@@ -50,6 +53,20 @@ class Booklist(SQLModel, table=True):
     # 状态字段
     is_public: bool = Field(default=True, index=True, description="是否公开")
     """是否公开"""
+
+    rating: str = Field(
+        default="general", sa_column_kwargs={"server_default": "general"}
+    )
+    """书单自身的内容分级；条目内每部作品仍独立检查可见性。"""
+
+    deleted_at: datetime | None = None
+    """书单进入回收站的时间，空值表示尚未删除。"""
+
+    deleted_user_id: str | None = None
+    """执行本次书单软删除的操作者平台用户 ID。"""
+
+    deletion_reason: str | None = None
+    """书单进入回收站的原因。"""
 
     is_anonymous: bool = Field(default=False, index=True, description="是否匿名")
     """是否匿名"""

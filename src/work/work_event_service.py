@@ -266,6 +266,7 @@ class WorkEventService:
             if thread.role == "main":
                 work = await self.session.get(Work, thread.work_id)
                 work.deleted_at = utc_now()
+                work.deleted_user_id = None
                 work.deletion_reason = "source_deleted"
         else:
             for source, target in (

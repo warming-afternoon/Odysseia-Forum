@@ -2,6 +2,7 @@
 
 from dto.work.work_command_qo import WorkCommandQo
 from sqlalchemy import select
+from core.booklist_repository import visible_booklist_conditions
 from models.booklist import Booklist
 from models.booklist_item import BooklistItem
 from work.work_repository import WorkRepository
@@ -37,6 +38,7 @@ class WorkCollectionService:
                 .where(
                     Booklist.fluxer_owner_id == principal["id"],
                     Booklist.is_default.is_(True),
+                    *visible_booklist_conditions(principal.get("show_nsfw", False)),
                 )
             )
             rows, total = await WorkRepository(session).page(

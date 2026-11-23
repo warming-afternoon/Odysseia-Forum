@@ -58,3 +58,6 @@ class ThreadFollow(SQLModel, table=True):
         description="关注此帖子的用户 Fluxer ID",
     )
     """发起此帖子关注关系的用户 Fluxer ID，用于记录其关注和最后查看状态。"""
+
+    manual_unfollowed_at: datetime | None = None
+    """最近一次主动取关的时间，后台自动关注据此尊重用户的选择。"""

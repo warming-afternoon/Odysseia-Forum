@@ -135,7 +135,14 @@ class CustomTagService:
             else Booklist.id
         )
         target = await self.repo(model).one(key == target_id)
-        if target is None or (kind == "booklist" and target.merged_into_id is not None):
+        if target is None or (
+            kind == "booklist"
+            and (
+                target.merged_into_id is not None
+                or target.deleted_at is not None
+                or target.rating != "general"
+            )
+        ):
             raise TagError("not_found", "目标不存在", 404)
         # 保存标量快照，避免 populate_existing 原地刷新后丢失授权依据。
         access_fields = (
@@ -150,7 +157,15 @@ class CustomTagService:
                 "not_found_count",
             )
             if kind == "thread"
-            else ("id", "owner_id", "fluxer_owner_id", "is_public", "merged_into_id")
+            else (
+                "id",
+                "owner_id",
+                "fluxer_owner_id",
+                "is_public",
+                "merged_into_id",
+                "deleted_at",
+                "rating",
+            )
         )
         access_state = tuple(getattr(target, field) for field in access_fields)
         if uses_canonical_storage():

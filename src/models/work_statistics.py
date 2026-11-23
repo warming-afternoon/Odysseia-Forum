@@ -9,6 +9,7 @@ class WorkStatistics(SQLModel, table=True):
 
     __tablename__ = "work_statistics"
     __table_args__ = (
+        CheckConstraint("platform_like_count >= 0", name="ck_work_statistics_platform_likes"),
         CheckConstraint(
             "view_count >= 0 AND collection_count >= 0 AND reaction_count >= 0 AND reply_count >= 0",
             name="ck_work_statistics_nonnegative",
@@ -31,6 +32,9 @@ class WorkStatistics(SQLModel, table=True):
 
     reaction_count: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
     """平台反应汇总。"""
+
+    platform_like_count: int = Field(default=0, sa_column=Column(BigInteger, nullable=False, server_default="0"))
+    """当前平台用户点赞人数，独立于 Discord 原帖反应统计。"""
 
     reply_count: int = Field(default=0, sa_column=Column(BigInteger, nullable=False))
     """平台回复汇总。"""

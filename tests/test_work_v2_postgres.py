@@ -207,6 +207,35 @@ async def test_collection_reuses_legacy_default_and_counts_once(client, factory)
 
 
 @pytest.mark.asyncio
+async def test_v2_manual_unfollow_persists_when_refollowed(client, factory, principal):
+    """V2 取关从未关注的作品也留下标记，手动重新关注后仍保留。"""
+    work_id, _ = await seed_thread(factory)
+    principal.update(id="u2", discord_user_id="102")
+    url = f"/v2/works/{work_id}/follow"
+    response = await client.delete(url)
+    assert response.json() == {"followed": False}, response.text
+    async with factory() as session:
+        row = await session.scalar(
+            select(ThreadFollow).where(
+                ThreadFollow.work_id == work_id, ThreadFollow.fluxer_user_id == "u2"
+            )
+        )
+        assert row.active_flag is False
+        unfollowed_at = row.manual_unfollowed_at
+        assert unfollowed_at is not None
+    response = await client.put(url)
+    assert response.json() == {"followed": True}, response.text
+    async with factory() as session:
+        row = await session.scalar(
+            select(ThreadFollow).where(
+                ThreadFollow.work_id == work_id, ThreadFollow.fluxer_user_id == "u2"
+            )
+        )
+        assert row.active_flag is True
+        assert row.manual_unfollowed_at == unfollowed_at
+
+
+@pytest.mark.asyncio
 async def test_view_redis_nx_and_pg_count(factory, principal):
     """同用户二十四小时仅一次浏览，不创建 PG 去重表。"""
     work_id, _ = await seed_thread(factory)
@@ -350,6 +379,9 @@ async def test_managed_merge_keeps_publishers_and_conflict_notes(factory):
     from models.work_announcement import WorkAnnouncement
     from models.operation_log import OperationLog
     from core.booklist_repository import BooklistRepository
+    from models.work_like import WorkLike
+    from models.work_ack import WorkAck
+    from models.work_statistics import WorkStatistics
 
     work_id, _ = await seed_thread(factory)
     async with factory() as session:
@@ -362,8 +394,14 @@ async def test_managed_merge_keeps_publishers_and_conflict_notes(factory):
         session.add_all([old, current])
         await session.flush()
         old_id, target_id = old.id, current.id
+        stats = await session.get(WorkStatistics, work_id)
+        stats.platform_like_count = 2
         session.add_all(
             [
+                WorkLike(work_id=work_id, user_id="u1"),
+                WorkLike(work_id=work_id, user_id="u2"),
+                WorkAck(work_id=work_id, user_id="u1", kind="rules", confirmed_version=3),
+                WorkAck(work_id=work_id, user_id="u2", kind="rules", confirmed_version=1),
                 BooklistItem(
                     booklist_id=old.id,
                     work_id=work_id,
@@ -400,6 +438,9 @@ async def test_managed_merge_keeps_publishers_and_conflict_notes(factory):
         )
         await session.commit()
         assert (await session.get(Work, work_id)).author_id == "u2"
+        assert (await session.get(WorkStatistics, work_id, populate_existing=True)).platform_like_count == 1
+        assert await session.get(WorkLike, (work_id, "u1"), populate_existing=True) is None
+        assert (await session.get(WorkAck, (work_id, "u2", "rules"), populate_existing=True)).confirmed_version == 3
         announcement = (
             (
                 await session.execute(

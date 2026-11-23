@@ -75,6 +75,33 @@ class TagBindingRepository:
                 changed = True
         return changed
 
+    async def replace_booklist_tags(self, booklist_id, desired, actor_id):
+        """在调用方持有书单锁的事务内替换标签集合并保留绑定历史。"""
+        statement = select(TagBinding).where(
+            TagBinding.target_type == "booklist",
+            TagBinding.target_id == booklist_id,
+            TagBinding.ended_at.is_(None),
+        )
+        current = {
+            binding.tag_id: binding
+            for binding in (await self.session.execute(statement)).scalars()
+        }
+        # 保留未变化的当前轮次与票数，重新挂标时建立新轮次。
+        ended_at = utc_now()
+        for tag_id in current.keys() - desired:
+            binding = current[tag_id]
+            binding.ended_at = ended_at
+            binding.end_reason = "manual"
+        self.session.add_all(
+            TagBinding(
+                target_type="booklist",
+                target_id=booklist_id,
+                tag_id=tag_id,
+                fluxer_actor_id=actor_id,
+            )
+            for tag_id in sorted(desired - current.keys())
+        )
+
     async def delete_targets(self, kind, ids):
         """删除目标的依赖数据，保留独立审计及废弃备份表。"""
         if not ids:

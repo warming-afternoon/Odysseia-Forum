@@ -1,7 +1,7 @@
 """作品作者公告。"""
 
 from datetime import datetime
-from sqlalchemy import BigInteger, Column, JSON, Index, text
+from sqlalchemy import BigInteger, CheckConstraint, Column, FetchedValue, JSON, Index, UniqueConstraint, text
 from sqlmodel import SQLModel, Field
 from shared.time_utils import utc_now
 
@@ -11,6 +11,8 @@ class WorkAnnouncement(SQLModel, table=True):
 
     __tablename__ = "work_announcement"
     __table_args__ = (
+        UniqueConstraint("work_id", "version", name="uq_work_announcement_version"),
+        CheckConstraint("version > 0", name="ck_work_announcement_version"),
         Index(
             "ix_work_announcement_work_created_id",
             "work_id",
@@ -27,6 +29,9 @@ class WorkAnnouncement(SQLModel, table=True):
         default=None, sa_column=Column(BigInteger, unique=True)
     )
     """历史 ThreadUpdate 的来源编号，迁移不补发通知。"""
+
+    version: int | None = Field(default=None, sa_column=Column(BigInteger, nullable=False, server_default=FetchedValue()))
+    """发布公告时数据库分配的作品内序号；编辑原公告时保留。"""
 
     work_id: int = Field(sa_column=Column(BigInteger, nullable=False, index=True))
     """作品编号。"""

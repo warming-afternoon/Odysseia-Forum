@@ -7,11 +7,12 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import Column, Integer, Table, event, func, select
+from sqlalchemy import Column, DateTime, Integer, String, Table, event, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.orm import registry
@@ -33,7 +34,7 @@ async def batch_repository():
     if existing_model_module is None:
         spec.loader.exec_module(module)
     item_model = (existing_model_module or module).BooklistItem
-    # 书单只用到这三个字段；项目表和提交过期行为使用真实实现。
+    # 最小书单模型保留集合计数与可见性字段。
     mapper_registry = registry()
     booklist_model = type("BatchReloadBooklist", (), {})
     booklist_table = Table(
@@ -43,10 +44,18 @@ async def batch_repository():
         Column("owner_id", Integer),
         Column("item_count", Integer),
         Column("merged_into_id", Integer),
+        Column("deleted_at", DateTime),
+        Column("rating", String, server_default="general"),
     )
     mapper_registry.map_imperatively(booklist_model, booklist_table)
     source_path = root / "src/core/booklist_repository.py"
     tree = ast.parse(source_path.read_text(encoding="utf-8"))
+    visibility = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "visible_booklist_conditions"
+    )
     definition = next(node for node in tree.body if isinstance(node, ast.ClassDef))
     definition.body = [
         node
@@ -66,6 +75,7 @@ async def batch_repository():
             ast.ImportFrom(
                 module="__future__", names=[ast.alias(name="annotations")], level=0
             ),
+            visibility,
             definition,
         ],
         type_ignores=[],
@@ -83,7 +93,10 @@ async def batch_repository():
         async with factory() as session:
             session.add(booklist_model(id=1, owner_id=42, item_count=0))
             await session.commit()
-            yield namespace["BooklistRepository"](session), engine, item_model
+            repository = namespace["BooklistRepository"](session)
+            # SQLite 只验证批量回读，PostgreSQL 的事务锁由集成测试验证。
+            repository._lock_collection_batch = AsyncMock()
+            yield repository, engine, item_model
     finally:
         await engine.dispose()
         mapper_registry.dispose()

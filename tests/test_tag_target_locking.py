@@ -17,13 +17,19 @@ async def test_target_reads_authorize_before_locks_and_never_lock_row(action, ki
     target = SimpleNamespace(
         id=1,
         thread_id=10,
+        work_id=None,
         guild_id=20,
         channel_id=30,
         author_id=40,
+        fluxer_author_id=None,
         show_flag=True,
         not_found_count=0,
         owner_id=40,
+        fluxer_owner_id=None,
         is_public=True,
+        merged_into_id=None,
+        deleted_at=None,
+        rating="general",
     )
     model = Thread if kind == "thread" else Booklist
     statements = []
@@ -76,9 +82,11 @@ async def test_target_write_refreshes_locked_state_after_authorization(changed_f
     target = SimpleNamespace(
         id=1,
         thread_id=10,
+        work_id=None,
         guild_id=20,
         channel_id=30,
         author_id=40,
+        fluxer_author_id=None,
         show_flag=True,
         not_found_count=0,
     )
@@ -125,9 +133,11 @@ async def test_denied_target_does_not_acquire_locks():
     target = SimpleNamespace(
         id=1,
         thread_id=10,
+        work_id=None,
         guild_id=20,
         channel_id=30,
         author_id=40,
+        fluxer_author_id=None,
         show_flag=True,
         not_found_count=0,
     )
@@ -147,11 +157,21 @@ async def test_denied_target_does_not_acquire_locks():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("change", ["owner_id", "is_public", "deleted"])
+@pytest.mark.parametrize(
+    "change", ["owner_id", "is_public", "deleted", "deleted_at", "rating"]
+)
 @pytest.mark.parametrize("lock", [True, False])
 async def test_booklist_target_rejects_changed_access_after_authorization(change, lock):
     """书单授权后改为私有、转移归属或删除时，中止读取及写入。"""
-    target = SimpleNamespace(id=1, owner_id=40, is_public=True)
+    target = SimpleNamespace(
+        id=1,
+        owner_id=40,
+        fluxer_owner_id=None,
+        is_public=True,
+        merged_into_id=None,
+        deleted_at=None,
+        rating="general",
+    )
     statements = []
     session = MagicMock()
 
@@ -165,7 +185,13 @@ async def test_booklist_target_rejects_changed_access_after_authorization(change
             if change == "deleted":
                 rows = []
             else:
-                setattr(target, change, 99 if change == "owner_id" else False)
+                changes = {
+                    "owner_id": 99,
+                    "is_public": False,
+                    "deleted_at": object(),
+                    "rating": "r18",
+                }
+                setattr(target, change, changes[change])
         result.scalars.return_value.all.return_value = rows
         return result
 

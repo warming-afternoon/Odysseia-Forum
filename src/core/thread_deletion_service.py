@@ -88,7 +88,11 @@ class ThreadDeletionService:
                     Work.id.in_(work_ids),
                     Work.deletion_reason.is_distinct_from("source_deleted"),
                 )
-                .values(deleted_at=now, deletion_reason="index_removed")
+                .values(
+                    deleted_at=now,
+                    deletion_reason="index_removed",
+                    deleted_user_id=None,
+                )
             )
         await self.session.flush()
         return changed
@@ -198,7 +202,11 @@ class ThreadDeletionService:
             await self.session.execute(
                 update(Work)
                 .where(Work.id.in_(main_work_ids))
-                .values(deleted_at=now, deletion_reason="source_deleted")
+                .values(
+                    deleted_at=now,
+                    deletion_reason="source_deleted",
+                    deleted_user_id=None,
+                )
             )
         await self.session.flush()
         return len(rows)

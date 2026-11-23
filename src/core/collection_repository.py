@@ -15,7 +15,7 @@ from sqlmodel import and_, delete, desc, func, select
 
 from dto.collection.batch_add_result import BatchAddResult
 from dto.collection.batch_remove_result import BatchRemoveResult
-from core.booklist_repository import BooklistRepository
+from core.booklist_repository import BooklistRepository, visible_booklist_conditions
 from core.redis_trend_service import RedisTrendService
 from models import Booklist, BooklistItem, Thread, ThreadFollow, UserCollection
 from shared.enum import CollectionType, ConstantEnum
@@ -148,17 +148,32 @@ class CollectionRepository:
         if target_type == CollectionType.THREAD.value:
             # 类型为帖子，路由到默认书单
             # 查找该帖子存在于用户的哪些书单中
-            stmt = select(BooklistItem.booklist_id).where(
-                (
-                    BooklistItem.fluxer_owner_id
-                    if uses_canonical_storage()
-                    else BooklistItem.owner_id
+            stmt = (
+                select(BooklistItem.booklist_id)
+                .join(Booklist, Booklist.id == BooklistItem.booklist_id)
+                .where(
+                    *visible_booklist_conditions(),
+                    (
+                        BooklistItem.fluxer_owner_id
+                        if uses_canonical_storage()
+                        else BooklistItem.owner_id
+                    )
+                    == user_id,
+                    BooklistItem.thread_id == target_id,
                 )
-                == user_id,
-                BooklistItem.thread_id == target_id,
             )
             affected_booklists = (await self.session.execute(stmt)).scalars().all()
 
+            if not affected_booklists:
+                return False
+            await BooklistRepository(self.session)._lock_collection_batch(
+                affected_booklists, [target_id]
+            )
+            affected_booklists = (
+                await self.session.scalars(
+                    stmt.where(Booklist.id.in_(affected_booklists))
+                )
+            ).all()
             if not affected_booklists:
                 return False
 
@@ -171,6 +186,7 @@ class CollectionRepository:
                 )
                 == user_id,  # type: ignore
                 BooklistItem.thread_id == target_id,  # type: ignore
+                BooklistItem.booklist_id.in_(affected_booklists),
             )
             await self.session.execute(del_stmt)
 
@@ -351,18 +367,31 @@ class CollectionRepository:
         if target_type == CollectionType.THREAD.value:
             # 帖子类型，路由到默认书单
             # 查询要删除的所有书单项 (书单ID，帖子ID)
-            select_stmt = select(
-                BooklistItem.booklist_id, BooklistItem.thread_id
-            ).where(
-                (
-                    BooklistItem.fluxer_owner_id
-                    if uses_canonical_storage()
-                    else BooklistItem.owner_id
+            select_stmt = (
+                select(BooklistItem.booklist_id, BooklistItem.thread_id)
+                .join(Booklist, Booklist.id == BooklistItem.booklist_id)
+                .where(
+                    *visible_booklist_conditions(),
+                    (
+                        BooklistItem.fluxer_owner_id
+                        if uses_canonical_storage()
+                        else BooklistItem.owner_id
+                    )
+                    == user_id,
+                    BooklistItem.thread_id.in_(target_ids),
                 )
-                == user_id,
-                BooklistItem.thread_id.in_(target_ids),  # type: ignore
             )
             items_to_remove = (await self.session.execute(select_stmt)).all()
+            if items_to_remove:
+                booklist_ids = {row.booklist_id for row in items_to_remove}
+                await BooklistRepository(self.session)._lock_collection_batch(
+                    booklist_ids, target_ids
+                )
+                items_to_remove = (
+                    await self.session.execute(
+                        select_stmt.where(Booklist.id.in_(booklist_ids))
+                    )
+                ).all()
 
             if not items_to_remove:
                 return BatchRemoveResult(
@@ -384,6 +413,7 @@ class CollectionRepository:
                     )
                     == user_id,  # type: ignore
                     BooklistItem.thread_id.in_(removed_thread_ids),  # type: ignore
+                    BooklistItem.booklist_id.in_(booklist_decrements),
                 )
             )
 
@@ -460,13 +490,19 @@ class CollectionRepository:
         offset = (page - 1) * per_page
 
         # 子查询：获取用户已收藏的帖子ID（通过 owner_id 查询用户的所有书单项）
-        collected_subquery = select(BooklistItem.thread_id).where(
-            (
-                BooklistItem.fluxer_owner_id
-                if uses_canonical_storage()
-                else BooklistItem.owner_id
+        collected_subquery = (
+            select(BooklistItem.thread_id)
+            .join(Booklist, Booklist.id == BooklistItem.booklist_id)
+            .where(
+                *visible_booklist_conditions(),
+                BooklistItem.thread_id.is_not(None),
+                (
+                    BooklistItem.fluxer_owner_id
+                    if uses_canonical_storage()
+                    else BooklistItem.owner_id
+                )
+                == user_id,
             )
-            == user_id
         )
 
         # 主查询（仅活跃关注）
@@ -533,7 +569,9 @@ class CollectionRepository:
             base_query = (
                 select(Thread)
                 .join(BooklistItem, Thread.thread_id == BooklistItem.thread_id)  # type: ignore
+                .join(Booklist, Booklist.id == BooklistItem.booklist_id)
                 .where(
+                    *visible_booklist_conditions(),
                     (
                         BooklistItem.fluxer_owner_id
                         if uses_canonical_storage()
@@ -551,7 +589,10 @@ class CollectionRepository:
             if model_class is Thread:
                 join_on_condition = Thread.thread_id == UserCollection.target_id
             elif model_class is Booklist:
-                join_on_condition = Booklist.id == UserCollection.target_id
+                join_on_condition = and_(
+                    Booklist.id == UserCollection.target_id,
+                    *visible_booklist_conditions(),
+                )
             else:
                 raise AttributeError(
                     f"Model {model_class.__name__} does not have a recognized primary key for joining."
@@ -612,8 +653,11 @@ class CollectionRepository:
 
         if target_type == CollectionType.THREAD:
             # 帖子类型，通过 owner_id 查询用户的所有书单项
-            statement = select(BooklistItem.thread_id).where(
-                and_(
+            statement = (
+                select(BooklistItem.thread_id)
+                .join(Booklist, Booklist.id == BooklistItem.booklist_id)
+                .where(
+                    *visible_booklist_conditions(),
                     (
                         BooklistItem.fluxer_owner_id
                         if uses_canonical_storage()
@@ -639,5 +683,9 @@ class CollectionRepository:
                     UserCollection.target_id.in_(target_ids),  # type: ignore
                 )
             )
+            if target_type == CollectionType.BOOKLIST:
+                statement = statement.join(
+                    Booklist, Booklist.id == UserCollection.target_id
+                ).where(*visible_booklist_conditions())
             result = await self.session.execute(statement)
             return set(result.scalars().all())

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
 
 from api.v1.schemas.booklist.booklist_item_add_data import BooklistItemAddData
-from core.booklist_repository import BooklistRepository
+from core.booklist_repository import BooklistRepository, visible_booklist_conditions
 from core.redis_trend_service import RedisTrendService
 from core.thread_repository import ThreadRepository
 from dto.booklist_item_dto import BooklistItemDTO
@@ -229,7 +229,10 @@ class BooklistService:
                 Booklist.fluxer_owner_id
                 if uses_canonical_storage()
                 else Booklist.owner_id,
-            ).where(Booklist.id.in_(list(scope_set)))  # type: ignore
+            ).where(
+                Booklist.id.in_(list(scope_set)),  # type: ignore
+                *visible_booklist_conditions(),
+            )
         )
         booklist_rows = (await self.session.execute(stmt)).all()
         found_ids = {row[0] for row in booklist_rows}

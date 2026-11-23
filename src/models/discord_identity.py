@@ -5,7 +5,7 @@ from sqlmodel import SQLModel, Field
 
 
 class DiscordIdentity(SQLModel, table=True):
-    """只从 Fluxer 导入 Discord 绑定，不分配账户 ID。"""
+    """记录账号服务确认的 Discord 当前与历史绑定，用于来源资料归属。"""
 
     __tablename__ = "discord_identity"
 
@@ -19,13 +19,13 @@ class DiscordIdentity(SQLModel, table=True):
     )
 
     is_current: bool = Field(default=True, index=True)
-    """历史归属永久保留，只有当前绑定可用于登录和权限。"""
+    """标记当前绑定；历史绑定仍可用于认领来源作品和书单。"""
 
     discord_user_id: str = Field(primary_key=True)
     """权威绑定中的 Discord 用户 ID，保留字符串形式。"""
 
     user_id: str = Field(index=True)
-    """该 Discord 账户绑定的 Fluxer 权威用户 ID。"""
+    """该 Discord 来源账号归属的平台用户 ID，逻辑关联 user.id。"""
 
     version: int = 1
-    """Fluxer 权威绑定版本，用于拒绝旧事件覆盖。"""
+    """该用户最近应用的权威绑定版本，用于审计乱序和重复投递。"""

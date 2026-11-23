@@ -38,6 +38,8 @@ from models.operation_log import OperationLog
 from models.tag_notification_task import TagNotificationTask
 from identity.metadata import apply_identity_constraints
 from models.work import Work
+from models.work_like import WorkLike
+from models.work_ack import WorkAck
 from models.work_statistics import WorkStatistics
 from models.work_reaction import WorkReaction
 from models.work_task import WorkTask
@@ -84,6 +86,8 @@ __all__ = [
     "UserSearchPreferences",
     "UserUpdatePreference",
     "Work",
+    "WorkAck",
+    "WorkLike",
     "WorkAnnouncement",
     "WorkEvent",
     "WorkNativeTagBinding",

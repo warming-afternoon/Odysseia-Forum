@@ -1,0 +1,56 @@
+# 在测试网关与 JetStream 使用的内部网络启动独立 Forum。
+name: forum-platform-test
+
+x-forum: &forum
+  image: odysseia-forum-platform-test
+  build:
+    context: .
+    target: base
+
+services:
+  migrate:
+    <<: *forum
+    environment:
+      DATABASE_URL: ${FORUM_TEST_DATABASE_URL:?设置独立 Forum 测试库 URL}
+    command: [".venv/bin/alembic", "upgrade", "head"]
+
+  forum:
+    <<: *forum
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: ${FORUM_TEST_DATABASE_URL}
+      FORUM_PLATFORM_ENABLED: "true"
+      FORUM_CORE_URL: ${FORUM_CORE_URL:?设置 Core 内网地址}
+      FORUM_PRINCIPAL_SECRET: ${FORUM_PRINCIPAL_SECRET:?设置 Forum 身份签名密钥}
+      FORUM_CORE_PROFILE_TOKEN: ${FORUM_CORE_PROFILE_TOKEN:?设置账号资料调用令牌}
+      FORUM_INBOUND_INTERNAL_TOKEN: ${FORUM_INBOUND_INTERNAL_TOKEN:?设置 Forum 内部接口入站令牌}
+    command: [".venv/bin/uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  forum-worker:
+    <<: *forum
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: ${FORUM_TEST_DATABASE_URL}
+      FORUM_CORE_URL: ${FORUM_CORE_URL}
+      FORUM_CORE_PROFILE_TOKEN: ${FORUM_CORE_PROFILE_TOKEN:?设置账号资料与关注偏好调用令牌}
+      FORUM_INTERNAL_TOKEN: ${FORUM_INTERNAL_TOKEN:?设置绑定查询令牌}
+      FORUM_DC_LOOKUP_TOKEN: ${FORUM_DC_LOOKUP_TOKEN:?设置 Discord 反查令牌}
+      FORUM_CORE_CHAT_SYNC_TOKEN: ${FORUM_CORE_CHAT_SYNC_TOKEN:?设置交流区同步令牌}
+      FORUM_NATS_URL: ${FORUM_NATS_URL:?设置测试 JetStream 地址}
+      FORUM_NATS_WORKS_PASSWORD: ${NATS_WORKS_PASSWORD:?设置 works 密码}
+      FORUM_NATS_SEARCH_PASSWORD: ${NATS_SEARCH_PASSWORD:?设置 search 密码}
+      FORUM_NATS_COLLECTIONS_PASSWORD: ${NATS_COLLECTIONS_PASSWORD:?设置 collections 密码}
+      FORUM_NATS_FORUM_PASSWORD: ${NATS_FORUM_PASSWORD:?设置 forum 密码}
+    command: [".venv/bin/python", "-m", "platform_bus.worker"]
+
+networks:
+  default:
+    external: true
+    name: ${FORUM_TEST_NETWORK:?设置已有测试网关网络名称}
+

@@ -9,6 +9,7 @@ from models.work_statistics import WorkStatistics
 from models.thread import Thread
 from models.user import User
 from models.booklist_publish import BooklistPublish
+from core.booklist_repository import BooklistRepository, visible_booklist_conditions
 from core.tag_query import load_custom_tags, require_current_tag_ids, tag_filters
 from models.user_collection import UserCollection
 from shared.time_utils import utc_now
@@ -37,6 +38,7 @@ class WorkBooklistService:
                         .where(
                             Booklist.fluxer_owner_id == principal["id"],
                             Booklist.merged_into_id.is_(None),
+                            *visible_booklist_conditions(principal.get("show_nsfw", False)),
                             Booklist.is_tournament.is_(False),
                         )
                         .order_by(Booklist.id)
@@ -89,9 +91,9 @@ class WorkBooklistService:
         """公开书单仍按访问者偏好过滤作品。"""
         principal = command.actor
         async with self.sessions() as session:
-            from core.booklist_repository import BooklistRepository
-
-            row = await BooklistRepository(session).get_booklist(booklist_id)
+            row = await BooklistRepository(session).get_booklist(
+                booklist_id, show_nsfw=principal.get("show_nsfw", False)
+            )
             if row is None or (
                 not row.is_public and row.fluxer_owner_id != principal["id"]
             ):
@@ -303,14 +305,15 @@ class WorkBooklistService:
     async def access(session, booklist_id, principal, manage=False):
         """读取书单并按管理需要加锁，统一校验所有权和公开范围。"""
         # 管理操作重新读取并锁定书单，防止权限检查与写入之间发生变化。
-        from core.booklist_repository import BooklistRepository
-
-        row = await BooklistRepository(session).get_booklist(booklist_id)
+        show_nsfw = principal.get("show_nsfw", False)
+        row = await BooklistRepository(session).get_booklist(
+            booklist_id, show_nsfw=show_nsfw
+        )
         if row is not None and manage:
             row = (
                 await session.execute(
                     select(Booklist)
-                    .where(Booklist.id == row.id)
+                    .where(Booklist.id == row.id, *visible_booklist_conditions(show_nsfw))
                     .with_for_update()
                     .execution_options(populate_existing=True)
                 )
@@ -481,6 +484,7 @@ class WorkBooklistService:
         async with self.sessions() as session:
             filters = [
                 Booklist.merged_into_id.is_(None),
+                *visible_booklist_conditions(principal.get("show_nsfw", False)),
                 Booklist.is_tournament == is_tournament,
             ]
             filters.append(
@@ -676,8 +680,6 @@ class WorkBooklistService:
             row = await self.access(session, booklist_id, command.actor, manage=True)
             if row.is_default:
                 raise HTTPException(409, "不能删除默认书单")
-            from core.booklist_repository import BooklistRepository
-
             await session.execute(
                 delete(UserCollection).where(
                     UserCollection.target_type == 2, UserCollection.target_id == row.id
@@ -693,7 +695,11 @@ class WorkBooklistService:
                 f"https://discord.com/channels/{publication.guild_id}/{publication.thread_id}"
                 if publication else None
             )
-            await BooklistRepository(session).delete_booklist(identifier)
+            deleted = await BooklistRepository(session).delete_booklist(
+                identifier, show_nsfw=command.actor.get("show_nsfw", False)
+            )
+            if not deleted:
+                raise HTTPException(404, "书单不存在")
             if target:
                 from booklist.booklist_publish_service import BooklistPublishService
 
@@ -859,11 +865,11 @@ class WorkBooklistService:
         async with self.sessions() as session:
             await self.collection_lock(session, command.actor)
             # 先解析作品别名，再按规范编号顺序获取行锁。
-            from core.booklist_repository import BooklistRepository
-
             resolved = {}
             for bid in sorted(scope):
-                row = await BooklistRepository(session).get_booklist(bid)
+                row = await BooklistRepository(session).get_booklist(
+                    bid, show_nsfw=command.actor.get("show_nsfw", False)
+                )
                 if row is None:
                     raise HTTPException(404, "书单不存在")
                 resolved[bid] = row.id
@@ -947,7 +953,10 @@ class WorkBooklistService:
             row = (
                 await session.execute(
                     select(Booklist)
-                    .where(Booklist.id == row.id)
+                    .where(
+                        Booklist.id == row.id,
+                        *visible_booklist_conditions(principal.get("show_nsfw", False)),
+                    )
                     .with_for_update()
                     .execution_options(populate_existing=True)
                 )

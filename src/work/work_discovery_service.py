@@ -5,6 +5,7 @@ from sqlalchemy import String, cast, func, or_, select, union
 from api.v2.schemas.work_search_request import WorkSearchRequest
 from core.preferences_repository import PreferencesRepository
 from identity.canonical_user_id import CanonicalUserId
+from core.booklist_repository import visible_booklist_conditions
 from models.booklist_item import BooklistItem
 from models.booklist import Booklist
 from models.tag import Tag
@@ -167,6 +168,7 @@ class WorkDiscoveryService:
                 tags = tags.where(Tag.is_abyss.is_(False))
             booklists = select(Booklist).where(
                 Booklist.merged_into_id.is_(None),
+                *visible_booklist_conditions(principal.get("show_nsfw", False)),
                 or_(
                     Booklist.is_public.is_(True),
                     Booklist.fluxer_owner_id == principal["id"],

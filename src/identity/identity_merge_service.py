@@ -96,6 +96,7 @@ class IdentityMergeService:
         if (await self.session.execute(event)).scalar_one_or_none() is None:
             return False
         await self.merge_default_booklists(source_id, target_id, operation_id, actor_id)
+        await self.merge_work_interactions(source_id, target_id)
         # 合并后的自关注没有意义，提前删除以满足两套身份检查。
         await self.session.execute(
             text(
@@ -271,7 +272,11 @@ class IdentityMergeService:
             if table.name == "thread_follow":
                 await self.session.execute(
                     text(
-                        f"UPDATE thread_follow current SET active_flag=current.active_flag OR old.active_flag,last_viewed_at=greatest(current.last_viewed_at,old.last_viewed_at) FROM thread_follow old WHERE {predicate}"
+                        f"""UPDATE thread_follow current SET
+                        active_flag=current.active_flag OR old.active_flag,
+                        manual_unfollowed_at=greatest(current.manual_unfollowed_at,old.manual_unfollowed_at),
+                        last_viewed_at=greatest(current.last_viewed_at,old.last_viewed_at)
+                        FROM thread_follow old WHERE {predicate}"""
                     ),
                     parameters,
                 )
@@ -288,6 +293,39 @@ class IdentityMergeService:
                 ),
                 parameters,
             )
+
+    async def merge_work_interactions(self, source_id, target_id):
+        """保留两账号最远确认进度，同时扣除重复点赞造成的统计差额。"""
+        params = {"source": source_id, "target": target_id}
+        await self.session.execute(
+            text("""WITH moved AS (
+                DELETE FROM work_ack WHERE user_id=:source RETURNING work_id,kind,confirmed_version
+            ) INSERT INTO work_ack(work_id,user_id,kind,confirmed_version)
+              SELECT work_id,:target,kind,confirmed_version FROM moved
+              ON CONFLICT(work_id,user_id,kind) DO UPDATE SET confirmed_version =
+                  greatest(work_ack.confirmed_version,excluded.confirmed_version)"""), params,
+        )
+        # 沿用互动接口的作品行锁，再按实际被合并的点赞明细校准统计。
+        await self.session.execute(
+            text("""SELECT id FROM work WHERE id IN (
+                SELECT work_id FROM work_like WHERE user_id=:source
+            ) ORDER BY id FOR UPDATE"""), params,
+        )
+        await self.session.execute(
+            text("""WITH moved AS (
+                DELETE FROM work_like WHERE user_id=:source RETURNING work_id,created_at
+            ), kept AS (
+                INSERT INTO work_like(work_id,user_id,created_at)
+                SELECT work_id,:target,created_at FROM moved
+                ON CONFLICT DO NOTHING RETURNING work_id
+            ), duplicates AS (
+                UPDATE work_statistics SET platform_like_count=platform_like_count-1
+                WHERE work_id IN (SELECT work_id FROM moved EXCEPT SELECT work_id FROM kept)
+                RETURNING work_id
+            ) INSERT INTO work_growth_daily(work_id,day,metric,delta)
+              SELECT work_id,(now() AT TIME ZONE 'UTC')::date,'reaction',-1 FROM duplicates
+              ON CONFLICT(work_id,day,metric) DO UPDATE SET delta=work_growth_daily.delta-1"""), params,
+        )
 
     async def merge_default_booklists(
         self, source_id, target_id, operation_id, actor_id
